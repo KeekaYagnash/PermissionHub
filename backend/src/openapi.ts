@@ -1,0 +1,32 @@
+export const openapi={
+ openapi:'3.0.3',
+ info:{title:'PermissionHub AWS Permission Request API',version:'2.0.0',description:'Focused AWS IAM permission request, approval, simulation, provisioning, revocation, and audit API.'},
+ servers:[{url:'/api',description:'Current API'},{url:'/api/v1',description:'Compatibility API'}],
+ components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer',bearerFormat:'JWT'}},schemas:{Error:{type:'object',properties:{error:{type:'object',properties:{code:{type:'string'},message:{type:'string'},correlationId:{type:'string'}}}}}}},
+ security:[{bearerAuth:[]}],
+ paths:{
+  '/aws/connection':{get:{summary:'Return AWS connection status without exposing credentials',responses:{'200':{description:'Connection status'}}}},
+  '/aws/connection/test':{post:{summary:'Verify active backend AWS credentials with STS GetCallerIdentity',responses:{'200':{description:'Connection test result'}}}},
+  '/aws/identities/users':{get:{summary:'List IAM users with attached and inline policies',responses:{'200':{description:'IAM users'}}}},
+  '/aws/identities/users/{userName}':{get:{summary:'Get one IAM user',parameters:[{in:'path',name:'userName',required:true,schema:{type:'string'}}],responses:{'200':{description:'IAM user'}}}},
+  '/aws/identities/roles':{get:{summary:'List IAM roles with attached and inline policies',responses:{'200':{description:'IAM roles'}}}},
+  '/aws/identities/roles/{roleName}':{get:{summary:'Get one IAM role',parameters:[{in:'path',name:'roleName',required:true,schema:{type:'string'}}],responses:{'200':{description:'IAM role'}}}},
+  '/aws/policies':{get:{summary:'List AWS-managed and customer-managed IAM policies',parameters:[{in:'query',name:'scope',schema:{type:'string',enum:['AWS_MANAGED','CUSTOMER_MANAGED']}},{in:'query',name:'search',schema:{type:'string'}},{in:'query',name:'service',schema:{type:'string'}},{in:'query',name:'accessLevel',schema:{type:'string'}},{in:'query',name:'attached',schema:{type:'string'}}],responses:{'200':{description:'IAM policies'}}}},
+  '/aws/policies/{encodedArn}':{get:{summary:'Get IAM policy document, parsed statements, attachments, and risk analysis',parameters:[{in:'path',name:'encodedArn',required:true,schema:{type:'string'}}],responses:{'200':{description:'IAM policy detail'}}}},
+  '/aws/policies/validate':{post:{summary:'Validate an IAM policy through Access Analyzer when available, with local fallback analysis',responses:{'200':{description:'Policy validation findings'}}}},
+  '/aws/resources':{get:{summary:'List supported AWS resources for request scoping',responses:{'200':{description:'S3, RDS, and Lambda resources'}}}},
+  '/aws/resources/s3':{get:{summary:'List S3 buckets',responses:{'200':{description:'S3 buckets'}}}},
+  '/aws/resources/rds':{get:{summary:'List RDS instances and clusters',responses:{'200':{description:'RDS resources'}}}},
+  '/aws/resources/lambda':{get:{summary:'List Lambda functions',responses:{'200':{description:'Lambda functions'}}}},
+  '/requests':{get:{summary:'List permission requests',responses:{'200':{description:'Requests'}}},post:{summary:'Create a draft permission request',responses:{'201':{description:'Request created'},'422':{description:'Validation error'}}}},
+  '/requests/{id}':{get:{summary:'Get request detail with permission change preview',parameters:[{in:'path',name:'id',required:true,schema:{type:'string'}}],responses:{'200':{description:'Request detail'}}}},
+  '/requests/{id}/submit':{post:{summary:'Submit a draft request',parameters:[{in:'path',name:'id',required:true,schema:{type:'string'}}],responses:{'200':{description:'Submitted'}}}},
+  '/requests/{id}/request-information':{post:{summary:'Request more information with an approval comment',parameters:[{in:'path',name:'id',required:true,schema:{type:'string'}}],responses:{'200':{description:'Information requested'}}}},
+  '/requests/{id}/approve':{post:{summary:'Approve a request with an approval comment',parameters:[{in:'path',name:'id',required:true,schema:{type:'string'}}],responses:{'200':{description:'Approved'}}}},
+  '/requests/{id}/reject':{post:{summary:'Reject a request with an approval comment',parameters:[{in:'path',name:'id',required:true,schema:{type:'string'}}],responses:{'200':{description:'Rejected'}}}},
+  '/requests/{id}/simulate':{post:{summary:'Run IAM simulation where supported',parameters:[{in:'path',name:'id',required:true,schema:{type:'string'}}],responses:{'200':{description:'Simulation result'}}}},
+  '/requests/{id}/provision':{post:{summary:'Provision an approved policy attachment through the backend allow-list',parameters:[{in:'path',name:'id',required:true,schema:{type:'string'}}],responses:{'200':{description:'Provisioned'}}}},
+  '/requests/{id}/revoke':{post:{summary:'Revoke only grants created by the approved request',parameters:[{in:'path',name:'id',required:true,schema:{type:'string'}}],responses:{'200':{description:'Revoked'}}}},
+  '/activity':{get:{summary:'List audit events',responses:{'200':{description:'Audit events'}}}}
+ }
+};

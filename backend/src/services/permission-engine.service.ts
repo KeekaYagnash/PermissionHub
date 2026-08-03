@@ -1,0 +1,11 @@
+import { z } from 'zod';
+const permissionMap:Record<string,Record<string,string[]>>={
+ S3:{'Read only':['s3:ListBucket','s3:GetObject','s3:GetBucketLocation'],Write:['s3:PutObject','s3:DeleteObject'],Operator:['s3:ListBucket','s3:GetObject','s3:PutObject']},
+ RDS:{'Read only':['rds:Describe*','rds:ListTagsForResource'],Describe:['rds:Describe*'],Operator:['rds:Describe*','rds:RebootDBInstance']},
+ Lambda:{Invoke:['lambda:InvokeFunction'],'Read only':['lambda:GetFunction','lambda:ListVersionsByFunction'],Operator:['lambda:InvokeFunction','lambda:UpdateFunctionConfiguration']},
+ EC2:{'Read only':['ec2:Describe*'],Operator:['ec2:Describe*','ec2:StartInstances','ec2:StopInstances']},
+ IAM:{AssumeRole:['sts:AssumeRole'],'Read only':['iam:Get*','iam:List*']},EKS:{'Read only':['eks:DescribeCluster','eks:List*'],Operator:['eks:DescribeCluster','eks:UpdateClusterConfig']},
+ 'Secrets Manager':{'Read only':['secretsmanager:DescribeSecret','secretsmanager:GetSecretValue'],Rotate:['secretsmanager:RotateSecret']},KMS:{'Read only':['kms:DescribeKey','kms:List*'],Decrypt:['kms:Decrypt']},CloudWatch:{'Read only':['logs:Describe*','logs:Get*','logs:FilterLogEvents','cloudwatch:Get*','cloudwatch:List*']}
+};
+export const policyInput=z.object({requestId:z.string(),organizationId:z.string(),service:z.string(),permission:z.string(),resourceArns:z.array(z.string()).min(1),durationMinutes:z.number().positive()});
+export class PermissionEngine{generate(raw:z.input<typeof policyInput>){const input=policyInput.parse(raw);const actions=permissionMap[input.service]?.[input.permission];if(!actions)throw new Error(`No approved permission bundle for ${input.service}/${input.permission}`);const document={Version:'2012-10-17',Statement:[{Sid:`PermissionHub${input.service.replace(/\W/g,'')}Access`,Effect:'Allow',Action:actions,Resource:input.resourceArns}]};return{name:`PH-${input.service.replace(/\W/g,'')}-${input.requestId}-${Date.now()}`,description:`Generated least-privilege policy for ${input.requestId}; expires after ${input.durationMinutes} minutes`,document,metadata:{generatedBy:'PermissionHub',requestId:input.requestId,organizationId:input.organizationId,expiresInMinutes:input.durationMinutes,containsWildcard:actions.some(a=>a.includes('*'))}}}}

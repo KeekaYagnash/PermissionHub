@@ -1,0 +1,3 @@
+export const cn=(...v:(string|false|null|undefined)[])=>v.filter(Boolean).join(' ');
+export const serviceColor:Record<string,string>={S3:'#4ade80',EC2:'#fb923c',RDS:'#60a5fa',Lambda:'#fbbf24',IAM:'#c084fc',CloudWatch:'#f472b6',WAF:'#22d3ee',VPC:'#818cf8',CloudFront:'#38bdf8',Route53:'#a78bfa',EKS:'#3b82f6',ECS:'#06b6d4','Secrets Manager':'#f87171',KMS:'#e879f9',SNS:'#fb7185',SQS:'#34d399','API Gateway':'#a3e635'};
+export const statusTone=(status:string)=> status==='Approved'||status==='Active'||status==='Success'||status==='Available'||status==='Running'||status==='Provisioned'?'success':status==='Rejected'||status==='Suspended'||status==='Stopped'?'danger':status==='Pending'||status==='Invited'||status==='More info'||status==='Warning'?'warning':'neutral';

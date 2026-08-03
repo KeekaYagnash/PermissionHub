@@ -1,0 +1,12 @@
+{
+  "name": "permissionhub",
+  "private": true,
+  "workspaces": ["frontend", "backend"],
+  "scripts": {
+    "dev": "concurrently -n API,WEB -c blue,cyan \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
+    "seed": "npm run seed -w backend"
+  },
+  "devDependencies": { "concurrently": "^9.2.0" }
+}

@@ -1,0 +1,27 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import rateLimit from 'express-rate-limit';
+import { pinoHttp } from 'pino-http';
+import { randomUUID } from 'node:crypto';
+import swaggerUi from 'swagger-ui-express';
+import { env } from './config/env.js';
+import { logger } from './config/logger.js';
+import { authenticate,tenantScope } from './middleware/auth.js';
+import { errorHandler } from './utils/http.js';
+import authRoutes from './routes/auth.routes.js';
+import apiRoutes from './routes/api.routes.js';
+import { openapi } from './openapi.js';
+
+export const app=express();
+app.set('trust proxy',1);app.disable('x-powered-by');
+app.use((req,res,next)=>{const id=req.headers['x-correlation-id']?.toString()||randomUUID();(req as any).correlationId=id;res.setHeader('X-Correlation-Id',id);next()});
+app.use(pinoHttp({logger,customProps:(req:express.Request)=>({correlationId:(req as any).correlationId})}));
+app.use(helmet({contentSecurityPolicy:env.NODE_ENV==='production'?undefined:false}));app.use(cors({origin:env.FRONTEND_URL,credentials:true}));app.use(compression());app.use(express.json({limit:'2mb'}));app.use(rateLimit({windowMs:60_000,limit:300,standardHeaders:'draft-8',legacyHeaders:false}));
+app.get('/api/v1/health',(_req,res)=>res.json({status:'ok',version:'2.0.0',timestamp:new Date().toISOString(),provisioningMode:env.PROVISIONING_MODE,liveProvisioningEnabled:env.ENABLE_LIVE_PROVISIONING}));
+app.get('/api/health',(_req,res)=>res.json({status:'ok',version:'2.0.0',timestamp:new Date().toISOString(),provisioningMode:env.PROVISIONING_MODE,liveProvisioningEnabled:env.ENABLE_LIVE_PROVISIONING}));
+app.use('/api/docs',swaggerUi.serve,swaggerUi.setup(openapi,{customSiteTitle:'PermissionHub API',customCss:'.swagger-ui .topbar{background:#07111f}'}));
+app.get('/api/openapi.json',(_req,res)=>res.json(openapi));
+app.use('/api/v1/auth',authRoutes);app.use('/api/v1',authenticate,tenantScope,apiRoutes);app.use('/api',authenticate,tenantScope,apiRoutes);
+app.use((_req,res)=>res.status(404).json({error:{code:'NOT_FOUND',message:'Route not found'}}));app.use(errorHandler);

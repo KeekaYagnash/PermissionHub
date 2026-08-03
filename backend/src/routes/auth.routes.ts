@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt, { type SignOptions } from 'jsonwebtoken';
+import { z } from 'zod';
+import { env } from '../config/env.js';
+import { asyncHandler,ApiError } from '../utils/http.js';
+import { appUsers } from '../services/mock.service.js';
+const router=Router();
+const login=z.object({email:z.string().email(),password:z.string().min(6),organizationId:z.string().default('org_acme'),role:z.enum(['ADMINISTRATOR','MANAGER','ENGINEER','AUDITOR','VIEWER']).optional()});
+router.post('/login',asyncHandler(async(req,res)=>{const input=login.parse(req.body);let user=appUsers.find(x=>x.email===input.email);if(!user&&env.NODE_ENV==='development')user={...appUsers[0]!,email:input.email,role:input.role??'ADMINISTRATOR'};if(!user)throw new ApiError(401,'Invalid credentials','INVALID_CREDENTIALS');const passwordOk=env.NODE_ENV==='development'||await bcrypt.compare(input.password,'$2b$12$invalid');if(!passwordOk)throw new ApiError(401,'Invalid credentials','INVALID_CREDENTIALS');const claims={sub:user.id,organizationId:input.organizationId,role:input.role??user.role,email:user.email,name:user.name};const token=jwt.sign(claims,env.JWT_SECRET,{expiresIn:env.JWT_EXPIRES_IN as SignOptions['expiresIn'],issuer:'permissionhub',audience:'permissionhub-web'});res.json({data:{token,user:claims,expiresIn:env.JWT_EXPIRES_IN,organizations:[{id:'org_acme',name:'Sandbox AWS Account'}]}})}));
+export default router;

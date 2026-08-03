@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMINISTRATOR
+  MANAGER
+  ENGINEER
+  AUDITOR
+  VIEWER
+}
+
+enum TargetType {
+  USER
+  ROLE
+}
+
+enum RequestStatus {
+  DRAFT
+  PENDING_APPROVAL
+  MORE_INFORMATION_REQUIRED
+  APPROVED
+  REJECTED
+  PROVISIONING
+  PROVISIONED
+  PROVISIONING_FAILED
+  EXPIRED
+  REVOKED
+}
+
+enum RequestMode {
+  MANAGED_POLICY
+  SPECIFIC_ACTIONS
+}
+
+enum ProvisioningMode {
+  MOCK
+  SIMULATE
+  LIVE
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  role      UserRole
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Request {
+  id            String        @id
+  title         String
+  requester     String
+  approver      String
+  targetType    TargetType
+  targetName    String
+  targetArn     String
+  scope         Json
+  duration      String
+  startDate     DateTime
+  expiryDate    DateTime?
+  priority      String
+  justification String
+  notes         String?
+  status        RequestStatus @default(DRAFT)
+  submittedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  items         RequestItem[]
+  approvals     Approval[]
+  grants        PermissionGrant[]
+  jobs          ProvisioningJob[]
+  auditEvents   AuditEvent[]
+}
+
+model RequestItem {
+  id                      String      @id @default(cuid())
+  requestId               String
+  request                 Request     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  mode                    RequestMode
+  policyArn               String?
+  policyName              String?
+  actions                 String[]
+  generatedPolicyDocument Json?
+}
+
+model Approval {
+  id        String   @id @default(cuid())
+  requestId String
+  request   Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  approver  String
+  decision  String
+  comment   String
+  createdAt DateTime @default(now())
+}
+
+model PermissionGrant {
+  id                   String    @id @default(cuid())
+  requestId            String
+  request              Request   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  targetType           TargetType
+  targetName           String
+  targetArn            String
+  policyArn            String
+  attachedAt           DateTime
+  expiresAt            DateTime?
+  provisioningResponse Json
+  revocationResponse   Json?
+  revokedAt            DateTime?
+  @@index([requestId])
+  @@index([targetArn, policyArn])
+}
+
+model ProvisioningJob {
+  id          String           @id @default(cuid())
+  requestId   String
+  request     Request          @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  mode        ProvisioningMode
+  operation   String
+  status      String
+  response    Json?
+  error       String?
+  createdAt   DateTime         @default(now())
+  completedAt DateTime?
+}
+
+model AuditEvent {
+  id            String   @id @default(cuid())
+  timestamp     DateTime @default(now())
+  actor         String
+  requestId     String?
+  request       Request? @relation(fields: [requestId], references: [id])
+  awsAccountId  String?
+  targetArn     String?
+  policyArn     String?
+  action        String
+  previousState Json?
+  newState      Json?
+  result        String
+  errorCode     String?
+  awsRequestId  String?
+  @@index([timestamp])
+  @@index([requestId])
+}
+
+model ApplicationSettings {
+  id                       String   @id @default("permissionhub")
+  provisioningMode         String   @default("MOCK")
+  enableLiveProvisioning   Boolean  @default(false)
+  liveConfirmationProvided Boolean  @default(false)
+  updatedAt                DateTime @updatedAt
+}
