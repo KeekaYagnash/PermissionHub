@@ -11,7 +11,9 @@
     "build": "npm run build -w backend && npm run build -w frontend",
     "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
     "lint": "eslint backend/src backend/prisma frontend/src",
-    "seed": "npm run seed -w backend"
+    "seed": "npm run seed -w backend",
+    "aws:whoami": "npm run aws:whoami -w backend",
+    "aws:validate-account": "npm run aws:validate-account -w backend --"
   },
   "devDependencies": {
     "concurrently": "^9.2.0",

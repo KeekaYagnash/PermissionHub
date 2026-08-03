@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AppContext,AuditEvent,AuthSession,AwsResource,ConnectionStatus,IamIdentity,IamPolicyDetail,IamPolicySummary,Page,PermissionRequest } from '../types';
+import type { AppContext,AuditEvent,AuthSession,AwsAccountContext,AwsResource,ConnectionStatus,IamIdentity,IamPolicyDetail,IamPolicySummary,Page,PermissionRequest } from '../types';
 
 export const http=axios.create({baseURL:'/api',withCredentials:true});
 let csrfToken='';
@@ -20,6 +20,12 @@ export const api={
  context:()=>http.get('/auth/context').then(unwrap<AppContext>),
  connection:()=>http.get('/aws/connection').then(unwrap<ConnectionStatus>),
  testConnection:()=>http.post('/aws/connection/test').then(unwrap<ConnectionStatus>),
+ connections:()=>http.get('/aws/connections').then(unwrap<AwsAccountContext[]>),
+ validateReadConnection:()=>http.post('/aws/connection/validate-read').then(unwrap<any>),
+ testCapabilities:()=>http.post('/aws/connection/capabilities').then(unwrap<any>),
+ validateProvisionConnection:()=>http.post('/aws/connection/validate-provision').then(unwrap<any>),
+ setConnectionStatus:(status:'DISABLED'|'PENDING')=>http.post('/aws/connection/status',{status}).then(unwrap<AwsAccountContext>),
+ syncOrganisation:(organisationId:string)=>http.post(`/aws/organisations/${encodeURIComponent(organisationId)}/sync`).then(unwrap<any>),
  users:(search='')=>http.get('/aws/identities/users',{params:{search,pageSize:100}}).then(unwrapPage<IamIdentity>),
  roles:(search='',includeServiceLinked=false)=>http.get('/aws/identities/roles',{params:{search,includeServiceLinked,pageSize:100}}).then(unwrapPage<IamIdentity>),
  policies:(params:Record<string,string|number|undefined>,signal?:AbortSignal)=>http.get('/aws/policies',{params:{pageSize:25,...params},signal}).then(unwrapPage<IamPolicySummary>),
@@ -40,5 +46,6 @@ export const api={
  approvers:()=>http.get('/approvers').then(unwrap<any[]>),
  adminDirectory:()=>http.get('/admin/directory').then(unwrap<any>),
  approvalPolicies:()=>http.get('/admin/approval-policies').then(unwrap<any[]>),
- saveScope:(scope:unknown)=>http.post('/admin/scopes',scope).then(unwrap<any>)
+ saveScope:(scope:unknown)=>http.post('/admin/scopes',scope).then(unwrap<any>),
+ onboardAccount:(input:unknown)=>http.post('/admin/accounts/onboarding',input).then(unwrap<any>)
 };

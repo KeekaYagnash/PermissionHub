@@ -139,6 +139,7 @@ model Tenant {
   approvalPolicies ApprovalPolicy[]
   requests         Request[]
   connectionEvents ConnectionAuditEvent[]
+  accountConnections AwsAccountConnection[]
 }
 
 model TenantMembership {
@@ -219,9 +220,38 @@ model AwsAccount {
   requests                  Request[]
   connectionEvents          ConnectionAuditEvent[]
   grants                    PermissionGrant[]
+  connection                AwsAccountConnection?
 
   @@unique([tenantId, accountId])
   @@index([awsOrganisationId, ouId])
+}
+
+model AwsAccountConnection {
+  id                            String      @id @default(uuid())
+  tenantId                      String
+  tenant                        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  awsAccountId                  String      @unique
+  awsAccount                    AwsAccount  @relation(fields: [awsAccountId], references: [id], onDelete: Cascade)
+  connectionType                String
+  readRoleArn                   String
+  provisionRoleArn              String?
+  externalIdSecretReference     String?
+  organisationDiscoveryRoleArn  String?
+  defaultRegion                 String
+  organisationsRegion           String      @default("us-east-1")
+  connectionStatus              String      @default("PENDING")
+  provisioningStatus            String      @default("DISABLED")
+  provisioningEnabled           Boolean     @default(false)
+  lastValidatedAt               DateTime?
+  lastSuccessfulReadAt          DateTime?
+  lastSuccessfulProvisionAt     DateTime?
+  lastErrorCode                 String?
+  lastErrorMessage              String?
+  createdAt                     DateTime    @default(now())
+  updatedAt                     DateTime    @updatedAt
+
+  @@unique([tenantId, awsAccountId])
+  @@index([tenantId, connectionStatus])
 }
 
 model AdminScope {

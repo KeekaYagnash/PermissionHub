@@ -12,7 +12,10 @@ async function main(){
   ['account_sandbox_dev','111122223335','Development Sandbox','ou_development_dev','DEVELOPMENT','LOW'],
   ['account_security_dev','111122223336','Security Tooling','ou_security_dev','SECURITY','CRITICAL']
  ] as const;
- for(const [id,accountId,accountName,ouId,accountType,riskTier] of accountDefs)await prisma.awsAccount.upsert({where:{tenantId_accountId:{tenantId:tenant.id,accountId}},update:{},create:{id,tenantId:tenant.id,awsOrganisationId:organisation.id,ouId,accountId,accountName,accountType,environment:accountType.toLowerCase(),riskTier,region:'af-south-1',connectionType:id==='account_sandbox_dev'?'DEFAULT_CHAIN':'ASSUME_ROLE',connectionStatus:id==='account_sandbox_dev'?'CONNECTED':'DISCONNECTED',readRoleArn:`arn:aws:iam::${accountId}:role/PermissionHubReadRole`,provisionRoleArn:`arn:aws:iam::${accountId}:role/PermissionHubProvisionRole`}});
+ for(const [id,accountId,accountName,ouId,accountType,riskTier] of accountDefs){
+  const account=await prisma.awsAccount.upsert({where:{tenantId_accountId:{tenantId:tenant.id,accountId}},update:{},create:{id,tenantId:tenant.id,awsOrganisationId:organisation.id,ouId,accountId,accountName,accountType,environment:accountType.toLowerCase(),riskTier,region:'af-south-1',connectionType:id==='account_sandbox_dev'?'DEFAULT_CHAIN':'ASSUME_ROLE',connectionStatus:id==='account_sandbox_dev'?'CONNECTED':'DISCONNECTED',readRoleArn:`arn:aws:iam::${accountId}:role/PermissionHubReadRole`,provisionRoleArn:`arn:aws:iam::${accountId}:role/PermissionHubProvisionRole`}});
+  await prisma.awsAccountConnection.upsert({where:{awsAccountId:account.id},update:{},create:{tenantId:tenant.id,awsAccountId:account.id,connectionType:id==='account_sandbox_dev'?'LOCAL_DEVELOPMENT':'ORGANISATION_MEMBER',readRoleArn:`arn:aws:iam::${accountId}:role/PermissionHubReadRole`,provisionRoleArn:`arn:aws:iam::${accountId}:role/PermissionHubProvisionRole`,defaultRegion:'af-south-1',organisationsRegion:'us-east-1',connectionStatus:id==='account_sandbox_dev'?'CONNECTED':'PENDING',provisioningStatus:'DISABLED',provisioningEnabled:false}});
+ }
  const users=[
   ['user_org_admin_dev','org.admin@disraptor.example','Organisation Admin','ORGANISATION_ADMIN'],
   ['user_ou_admin_dev','ou.admin@disraptor.example','Production OU Admin','OU_ADMIN'],

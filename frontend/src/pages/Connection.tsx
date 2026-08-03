@@ -1,33 +1,32 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation,useQuery,useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle,CheckCircle2,CloudCog,RefreshCw,ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api';
+import { useAuthStore } from '../store/auth';
 
 export default function Connection(){
- const qc=useQueryClient();
- const {data}=useQuery({queryKey:['connection'],queryFn:api.connection});
- const test=useMutation({mutationFn:api.testConnection,onSuccess:()=>qc.invalidateQueries({queryKey:['connection']})});
+ const qc=useQueryClient(),session=useAuthStore(state=>state.session),activeId=session?.user?.activeAccountId;
+ const status=useQuery({queryKey:['connection',activeId],queryFn:api.connection});
+ const connections=useQuery({queryKey:['connections'],queryFn:api.connections});
+ const [result,setResult]=useState<any>();
+ const action=useMutation({mutationFn:async(kind:'read'|'capabilities'|'provision'|'sync'|'disable'|'enable')=>{if(kind==='read')return api.validateReadConnection();if(kind==='capabilities')return api.testCapabilities();if(kind==='provision')return api.validateProvisionConnection();if(kind==='disable'||kind==='enable')return api.setConnectionStatus(kind==='disable'?'DISABLED':'PENDING');const account=connections.data?.find(item=>item.id===activeId);if(!account?.organisationId)throw new Error('The selected account is not linked to an AWS Organisation.');return api.syncOrganisation(account.organisationId)},onSuccess:value=>{setResult(value);void qc.invalidateQueries({queryKey:['connection']});void qc.invalidateQueries({queryKey:['connections']})}});
+ const active=connections.data?.find(item=>item.id===activeId);
  return <div className="page">
-  <div className="page-header"><div><p className="eyebrow">Connection</p><h1>Backend AWS connection</h1><p>The frontend never asks for access keys. The backend uses the AWS SDK default credential provider chain and verifies the account with STS GetCallerIdentity.</p></div><button className="primary-action" onClick={()=>test.mutate()}>{test.isPending?'Testing':'Test AWS connection'}</button></div>
+  <div className="page-header"><div><p className="eyebrow">Connection</p><h1>AWS account connections</h1><p>PermissionHub assumes account-specific backend roles. Credentials and external IDs are never exposed to this page.</p></div><button className="primary-action" disabled={action.isPending} onClick={()=>action.mutate('read')}>{action.isPending?'Validating…':'Validate read connection'}</button></div>
+  {action.error&&<div className="error-box" role="alert"><AlertTriangle size={17}/>{friendlyError(action.error)}</div>}
+  <section className="panel"><div className="panel-title">Authorised accounts</div><div className="connection-account-list">{connections.isLoading?<p>Loading authorised connections…</p>:connections.data?.map(account=><article className={account.id===activeId?'connection-account selected':'connection-account'} key={account.id}><span><strong>{account.accountName}</strong><small>{account.accountId} · {account.accountType.replaceAll('_',' ')} · {account.region}</small></span><em>{account.connectionType.replaceAll('_',' ')}</em><i className={account.connectionStatus.toLowerCase()}>{account.connectionStatus}</i></article>)}</div></section>
   <section className="overview-grid">
-   <div className="panel wide">
-    <div className="panel-title">Current status</div>
-    <dl>
-     <div><dt>Mode</dt><dd>{data?.mode}</dd></div><div><dt>Connected</dt><dd>{data?.connected?'Yes':'No'}</dd></div><div><dt>Account ID</dt><dd>{data?.accountId}</dd></div><div><dt>Principal ARN</dt><dd className="mono">{data?.principalArn}</dd></div><div><dt>Region</dt><dd>{data?.region}</dd></div><div><dt>Credential source</dt><dd>{data?.credentialSource}</dd></div><div><dt>Last checked</dt><dd>{data?.lastChecked?fmt(data.lastChecked):'Never'}</dd></div>
-    </dl>
-    {data?.message&&<p className="warning">{data.message}</p>}
-   </div>
-   <div className="panel">
-    <div className="panel-title">Local setup</div>
-    <pre>{`AWS_PROFILE=permissionhub-dev
-AWS_REGION=af-south-1
-PROVISIONING_MODE=MOCK`}</pre>
-    <p className="muted">Credentials must stay outside this repository in your AWS CLI profile, environment, or temporary credential source.</p>
-   </div>
-   <div className="panel">
-    <div className="panel-title">Live provisioning guard</div>
-    <p>LIVE mode requires server-side `ENABLE_LIVE_PROVISIONING=true` and `PROVISIONING_CONFIRMATION=I_UNDERSTAND_THIS_CHANGES_AWS`.</p>
-    <p className="warning">Use a dedicated sandbox account. Do not test against production.</p>
-   </div>
+   <div className="panel wide"><div className="panel-title"><CloudCog size={17}/> Selected account</div>{active?<dl><Row label="Account" value={`${active.accountName} (${active.accountId})`}/><Row label="Organisation / OU" value={active.ouPath??active.organisationId??'Standalone account'}/><Row label="Read role" value={active.readRoleArn??'Backend default credential chain'} mono/><Row label="Provision role" value={active.provisionRoleConfigured?'Configured':'Not configured'}/><Row label="Read status" value={active.connectionStatus}/><Row label="Provisioning status" value={active.provisioningStatus??'DISABLED'}/><Row label="Last validated" value={active.lastValidatedAt?fmt(active.lastValidatedAt):'Never'}/><Row label="Last successful discovery" value={active.lastSuccessfulReadAt?fmt(active.lastSuccessfulReadAt):'Never'}/><Row label="Last error" value={active.lastErrorMessage??'None'}/></dl>:<p>Select an authorised AWS account from the header.</p>}</div>
+   <div className="panel"><div className="panel-title"><ShieldCheck size={17}/> Capability checks</div><p>Tests are read-only and use small IAM pages. Provision-role validation calls STS only; it never changes IAM.</p><div className="button-stack"><button className="btn secondary" onClick={()=>action.mutate('capabilities')} disabled={action.isPending}>Test discovery</button><button className="btn secondary" onClick={()=>action.mutate('provision')} disabled={action.isPending||!active?.provisionRoleConfigured}>Validate provision role</button>{active?.organisationId&&<button className="btn secondary" onClick={()=>action.mutate('sync')} disabled={action.isPending}><RefreshCw size={15}/> Synchronise Organisation</button>}</div></div>
+   <div className="panel"><div className="panel-title">Connection controls</div><p>Disabling a connection clears cached account credentials and blocks new AWS operations.</p><button className="btn secondary" onClick={()=>action.mutate(active?.connectionStatus==='DISABLED'?'enable':'disable')} disabled={action.isPending}>{active?.connectionStatus==='DISABLED'?'Re-enable connection':'Disable connection'}</button></div>
   </section>
+  {result&&<section className="panel success-box" aria-live="polite"><div className="panel-title"><CheckCircle2 size={17}/> Operation result</div><pre>{JSON.stringify(result,null,2)}</pre></section>}
+  <Onboarding/>
+  <section className="panel"><div className="panel-title">Local backend credential source</div><pre>{`AWS_PROFILE=permissionhub-dev\nAWS_REGION=af-south-1\nCROSS_ACCOUNT_PROVISIONING_ENABLED=false`}</pre><p className="muted">Configure the AWS CLI or workload identity outside this repository. PermissionHub does not accept access keys in the browser.</p><p>Current mode: <strong>{status.data?.mode??'Checking'}</strong></p></section>
  </div>;
 }
+
+function Onboarding(){const [open,setOpen]=useState(false),[form,setForm]=useState({accountId:'',accountName:'',connectionType:'STANDALONE',accountType:'SANDBOX',defaultRegion:'af-south-1',externalIdSecretReference:''}),mutation=useMutation({mutationFn:api.onboardAccount});const set=(key:string,value:string)=>setForm(current=>({...current,[key]:value}));return <section className="panel"><div className="panel-title">Standalone account onboarding</div><p>Deploy the generated CloudFormation template in the target account, then validate the read role. Never paste an AWS secret access key here.</p><button className="btn secondary" onClick={()=>setOpen(value=>!value)}>{open?'Close onboarding':'Add AWS account'}</button>{open&&<div className="form-grid onboarding-form"><label className="field"><span>Account ID</span><input value={form.accountId} onChange={event=>set('accountId',event.target.value)} inputMode="numeric" maxLength={12}/></label><label className="field"><span>Account name</span><input value={form.accountName} onChange={event=>set('accountName',event.target.value)}/></label><label className="field"><span>Connection type</span><select value={form.connectionType} onChange={event=>set('connectionType',event.target.value)}><option>ORGANISATION_MEMBER</option><option>STANDALONE</option><option>EXTERNAL_CUSTOMER</option></select></label><label className="field"><span>Account type</span><select value={form.accountType} onChange={event=>set('accountType',event.target.value)}><option>SANDBOX</option><option>DEVELOPMENT</option><option>STAGING</option><option>PRODUCTION</option><option>SECURITY</option><option>EXTERNAL</option></select></label><label className="field"><span>Default region</span><input value={form.defaultRegion} onChange={event=>set('defaultRegion',event.target.value)}/></label><label className="field"><span>External ID secret reference (optional)</span><input value={form.externalIdSecretReference} onChange={event=>set('externalIdSecretReference',event.target.value)} placeholder="Secrets Manager ARN or env:VARIABLE_NAME"/><small>The secret value is resolved only by the backend.</small></label><button className="btn primary" disabled={mutation.isPending||form.accountId.length!==12||!form.accountName} onClick={()=>mutation.mutate({...form,externalIdSecretReference:form.externalIdSecretReference||undefined})}>{mutation.isPending?'Creating…':'Generate onboarding configuration'}</button></div>}{mutation.error&&<div className="error-box">{friendlyError(mutation.error)}</div>}{mutation.data&&<div className="success-box"><strong>Onboarding configuration created</strong><p>Deploy <code>{mutation.data.templatePath}</code>, then select the account and validate its read connection.</p></div>}</section>}
+function Row({label,value,mono=false}:{label:string;value:string;mono?:boolean}){return <div><dt>{label}</dt><dd className={mono?'mono':undefined}>{value}</dd></div>}
 function fmt(value:string){return new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(value))}
+function friendlyError(error:unknown){const candidate=error as {response?:{data?:{error?:{message?:string}}};message?:string};return candidate.response?.data?.error?.message??candidate.message??'The AWS operation failed.'}

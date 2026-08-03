@@ -30,7 +30,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { env,liveProvisioningEnabled } from '../../config/env.js';
-import type { AwsAccountContext,DiscoveredResource,IamIdentity,IamPolicyDetail,IamPolicySummary,PolicyType,RiskAnalysis,TargetType } from '../../types.js';
+import type { AwsAccountContext,DiscoveredResource,IamIdentity,IamPolicyDetail,IamPolicySummary,PolicyType,RiskAnalysis,SessionUser,TargetType } from '../../types.js';
 import { analyzePolicyDocument,extractActions,extractResources,mockAccount,mockIdentities,mockPolicies,mockResources } from '../mock.service.js';
 import { cache,cacheTtl } from '../cache.service.js';
 import { awsConnectionBroker } from './connection-broker.service.js';
@@ -40,12 +40,12 @@ const cfg={region};
 
 export class AwsConnectionService{
  private sts:STSClient;
- constructor(private context?:AwsAccountContext){this.sts=new STSClient({region:context?.region??region})}
+ constructor(private context?:AwsAccountContext,private actor?:SessionUser){this.sts=new STSClient({region:context?.region??region})}
  async status(){
   if(env.AWS_LIVE_MODE==='false')return this.mockConnection('AWS live mode is disabled.');
   if(env.AWS_LIVE_MODE==='auto'&&!hasCredentialHint())return this.mockConnection('No AWS credential source was detected for the backend default provider chain.');
   try{
-   if(this.context){const identity=await awsConnectionBroker.validate(this.context);return {mode:'LIVE',...identity,credentialSource:this.context.connectionType,lastChecked:new Date().toISOString()}}
+   if(this.context){const identity=await awsConnectionBroker.validate(this.context,this.actor);return {mode:'LIVE',...identity,credentialSource:this.context.connectionType,lastChecked:new Date().toISOString()}}
    const identity=await this.sts.send(new GetCallerIdentityCommand({}));
    return {mode:'LIVE',connected:true,accountId:identity.Account??'unknown',principalArn:identity.Arn??'unknown',region,credentialSource:this.credentialSource(),lastChecked:new Date().toISOString()};
   }catch(error:any){
@@ -68,11 +68,11 @@ function hasCredentialHint(){
  return Boolean(process.env.AWS_PROFILE||process.env.AWS_ACCESS_KEY_ID||process.env.AWS_WEB_IDENTITY_TOKEN_FILE||process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI||process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI||existsSync(join(homedir(),'.aws','credentials'))||existsSync(join(homedir(),'.aws','config')));
 }
 
-async function liveAvailable(context?:AwsAccountContext){return (await new AwsConnectionService(context).status()).connected}
+async function liveAvailable(context?:AwsAccountContext,actor?:SessionUser){return (await new AwsConnectionService(context,actor).status()).connected}
 
 export class IamIdentityService{
  private iam:IAMClient;
- constructor(private context?:AwsAccountContext){this.iam=context?awsConnectionBroker.getIamClient(context):new IAMClient(cfg)}
+ constructor(private context?:AwsAccountContext,private actor?:SessionUser){this.iam=context?awsConnectionBroker.getIamClient(context,'read',actor):new IAMClient(cfg)}
  async listUsers(search='',limit=100):Promise<IamIdentity[]>{if(!(await liveAvailable(this.context)))return filterIdentities(mockIdentities.filter(i=>i.type==='USER'),search);const users=await collectLimited(marker=>this.iam.send(new ListUsersCommand({Marker:marker,MaxItems:limit})),r=>r.Users??[],r=>r.Marker,limit);const detailed=await Promise.all(users.map(user=>this.toUser(user.UserName??'',user.Arn??'',user.Path??'/',user.CreateDate)));return filterIdentities(detailed,search)}
  async getUser(userName:string){if(!(await liveAvailable(this.context)))return mockIdentities.find(i=>i.type==='USER'&&i.name===userName);const user=await this.iam.send(new GetUserCommand({UserName:userName}));return this.toUser(userName,user.User?.Arn??'',user.User?.Path??'/',user.User?.CreateDate)}
  async listRoles(search='',includeServiceLinked=false,limit=100):Promise<IamIdentity[]>{if(!(await liveAvailable(this.context)))return filterIdentities(mockIdentities.filter(i=>i.type==='ROLE'&&(includeServiceLinked||!i.serviceLinked)),search);const roles=await collectLimited(marker=>this.iam.send(new ListRolesCommand({Marker:marker,MaxItems:limit})),r=>r.Roles??[],r=>r.Marker,limit);const visible=(includeServiceLinked?roles:roles.filter(role=>!(role.Path??'').startsWith('/aws-service-role/'))).slice(0,limit);const detailed=await Promise.all(visible.map(role=>this.toRole(role.RoleName??'',role.Arn??'',role.Path??'/',role.CreateDate,role.MaxSessionDuration,role.Description,role.AssumeRolePolicyDocument)));return filterIdentities(detailed,search)}
@@ -83,7 +83,7 @@ export class IamIdentityService{
 
 export class IamPolicyService{
  private iam:IAMClient;
- constructor(private context?:AwsAccountContext){this.iam=context?awsConnectionBroker.getIamClient(context):new IAMClient(cfg)}
+ constructor(private context?:AwsAccountContext,private actor?:SessionUser){this.iam=context?awsConnectionBroker.getIamClient(context,'read',actor):new IAMClient(cfg)}
  private inflightFull=new Set<string>();
  async list(query:{scope?:string;search?:string;service?:string;accessLevel?:string;attached?:string;sort?:string;cursor?:string;limit?:number}):Promise<{items:IamPolicySummary[];nextCursor?:string;isComplete:boolean;loadedCount:number;cacheStatus:'HIT'|'MISS'|'PARTIAL';timing:Record<string,unknown>}>{
   const started=performance.now(),scope=this.toAwsScope(query.scope),limit=Math.min(Math.max(query.limit??100,1),100),marker=decodeCursor(query.cursor);
@@ -116,7 +116,7 @@ export class IamPolicyService{
  async get(encodedArn:string):Promise<IamPolicyDetail|undefined>{
   const arn=decodeURIComponent(encodedArn);
   const started=performance.now();
-  const detailKey=`policy-detail:${this.context?.accountId??'default'}:${arn}`;
+  const detailKey=`policy-detail:${this.contextKey()}:${arn}`;
   const cached=cache.get<IamPolicyDetail>(detailKey);
   if(cached){devLog('iam.policy.detail.cacheHit',this.timing(started,{cacheStatus:'HIT',arn}));return cached}
   if(!(await liveAvailable(this.context)))return mockPolicies.find(p=>p.arn===arn);
@@ -133,13 +133,14 @@ export class IamPolicyService{
   devLog('iam.policy.detail.fetch',this.timing(started,{cacheStatus:'MISS',awsCalls:3,riskAnalysisMs:Math.round(performance.now()-riskStart),arn}));
   return detail;
  }
- invalidatePolicyCaches(policyArn?:string){cache.deletePrefix(`policy-catalogue:${this.context?.accountId??'default'}:Local`);if(policyArn)cache.delete(`policy-detail:${this.context?.accountId??'default'}:${policyArn}`)}
+ invalidatePolicyCaches(policyArn?:string){cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);if(policyArn)cache.delete(`policy-detail:${this.contextKey()}:${policyArn}`)}
  private baseSummary(policy:Policy,risk:RiskAnalysis):IamPolicySummary{return {policyName:policy.PolicyName??'',arn:policy.Arn??'',policyId:policy.PolicyId,path:policy.Path,description:policy.Description,type:(policy.Arn?.includes(':aws:policy/')?'AWS_MANAGED':'CUSTOMER_MANAGED') as PolicyType,currentVersion:policy.DefaultVersionId??'v1',createdAt:(policy.CreateDate??new Date()).toISOString(),updatedAt:(policy.UpdateDate??new Date()).toISOString(),attachmentCount:policy.AttachmentCount??0,permissionsBoundaryUsageCount:policy.PermissionsBoundaryUsageCount,isAttachable:policy.IsAttachable,services:risk.services,accessLevels:risk.accessLevels,risk,deprecated:false}}
  private preliminaryRisk(policy:Partial<IamPolicySummary>|Policy):RiskAnalysis{const raw=policy as any;const name=raw.policyName??raw.PolicyName??'',description=raw.description??raw.Description??'';const text=`${name} ${description}`.toLowerCase();const services=serviceHints(text);const accessLevels=text.includes('readonly')||text.includes('read only')?['Read']:text.includes('fullaccess')||text.includes('administrator')||text.includes('admin')?['Permissions management','Write']:['Unknown'];const critical=text.includes('administratoraccess')||text.includes('iamfullaccess');const high=text.includes('fullaccess')||text.includes('poweruser');return {level:critical?'Critical':high?'High':'Moderate',flags:['Preliminary metadata-only analysis. Open policy for document-level risk analysis.'],services,accessLevels}}
  private cachedOrPreliminaryRisk(policy:Policy){return cache.get<RiskAnalysis>(this.riskKey(policy))??this.preliminaryRisk(policy)}
- private riskKey(policy:Policy){return `policy-risk:${this.context?.accountId??'default'}:${policy.Arn}:${policy.DefaultVersionId}`}
+ private riskKey(policy:Policy){return `policy-risk:${this.contextKey()}:${policy.Arn}:${policy.DefaultVersionId}`}
  private toAwsScope(scope?:string){return scope==='CUSTOMER_MANAGED'?'Local':scope==='AWS_MANAGED'?'AWS':'All'}
- private catalogueKey(scope:string,attached?:string){return `policy-catalogue:${this.context?.accountId??'default'}:${scope}:attached=${attached??'all'}`}
+ private catalogueKey(scope:string,attached?:string){return `policy-catalogue:${this.contextKey()}:${scope}:attached=${attached??'all'}`}
+ private contextKey(){return this.context?`${this.context.tenantId}:${this.context.accountId}:${this.context.region}`:'default'}
  private completeCatalogueInBackground(scope:string,attached?:string){
   const key=this.catalogueKey(scope,attached);
   if(this.inflightFull.has(key))return;
@@ -164,7 +165,7 @@ export class IamPolicyService{
 
 export class AwsResourceService{
  private s3:S3Client;private rds:RDSClient;private lambda:LambdaClient;
- constructor(private context?:AwsAccountContext){this.s3=context?awsConnectionBroker.getS3Client(context):new S3Client(cfg);this.rds=context?awsConnectionBroker.getRdsClient(context):new RDSClient(cfg);this.lambda=context?awsConnectionBroker.getLambdaClient(context):new LambdaClient(cfg)}
+ constructor(private context?:AwsAccountContext,private actor?:SessionUser){this.s3=context?awsConnectionBroker.getS3Client(context,actor):new S3Client(cfg);this.rds=context?awsConnectionBroker.getRdsClient(context,actor):new RDSClient(cfg);this.lambda=context?awsConnectionBroker.getLambdaClient(context,actor):new LambdaClient(cfg)}
  async all(){if(!(await liveAvailable(this.context)))return mockResources;const [s3,rds,lambda]=await Promise.all([this.s3Resources(),this.rdsResources(),this.lambdaResources()]);return [...s3,...rds,...lambda]}
  async s3Resources():Promise<DiscoveredResource[]>{if(!(await liveAvailable(this.context)))return mockResources.filter(r=>r.service==='S3');const buckets=await this.s3.send(new ListBucketsCommand({}));return Promise.all((buckets.Buckets??[]).map(async bucket=>{let bucketRegion='us-east-1';try{const loc=await this.s3.send(new GetBucketLocationCommand({Bucket:bucket.Name}));bucketRegion=loc.LocationConstraint||'us-east-1'}catch{}return {id:`s3_${bucket.Name}`,name:bucket.Name??'unknown',service:'S3',type:'Bucket',region:bucketRegion,arn:`arn:aws:s3:::${bucket.Name}`,status:'Available',tags:{}}}))}
  async rdsResources():Promise<DiscoveredResource[]>{if(!(await liveAvailable(this.context)))return mockResources.filter(r=>r.service==='RDS');const [instances,clusters]=await Promise.all([collect(marker=>this.rds.send(new DescribeDBInstancesCommand({Marker:marker})),r=>r.DBInstances??[],r=>r.Marker),collect(marker=>this.rds.send(new DescribeDBClustersCommand({Marker:marker})),r=>r.DBClusters??[],r=>r.Marker)]);const activeRegion=this.context?.region??region;return [...instances.map(db=>({id:`rds_${db.DBInstanceIdentifier}`,name:db.DBInstanceIdentifier??'unknown',service:'RDS' as const,type:'DB instance',region:activeRegion,arn:db.DBInstanceArn??'',status:db.DBInstanceStatus??'unknown',tags:{}})),...clusters.map(cluster=>({id:`rds_${cluster.DBClusterIdentifier}`,name:cluster.DBClusterIdentifier??'unknown',service:'RDS' as const,type:'DB cluster',region:activeRegion,arn:cluster.DBClusterArn??'',status:cluster.Status??'unknown',tags:{}}))]}
@@ -172,7 +173,7 @@ export class AwsResourceService{
 }
 
 export class IamSimulationService{
- private iam:IAMClient;constructor(private context?:AwsAccountContext){this.iam=context?awsConnectionBroker.getIamClient(context):new IAMClient(cfg)}
+ private iam:IAMClient;constructor(private context?:AwsAccountContext,private actor?:SessionUser){this.iam=context?awsConnectionBroker.getIamClient(context,'read',actor):new IAMClient(cfg)}
  async simulate(input:{targetArn:string;actions?:string[];policyDocument?:Record<string,unknown>}){
   if(!(await liveAvailable(this.context)))return {mode:'MOCK',estimate:true,message:'Mock simulation estimates the requested actions would be allowed after approval.',results:(input.actions?.length?input.actions:['iam:AttachUserPolicy']).map(action=>({action,decision:'allowed-after-change'}))};
   if(input.policyDocument){const actions=extractActions(input.policyDocument);const response=await this.iam.send(new SimulateCustomPolicyCommand({PolicyInputList:[JSON.stringify(input.policyDocument)],ActionNames:actions.length?actions:['iam:AttachUserPolicy']}));return {mode:'SIMULATE',estimate:true,results:response.EvaluationResults??[]}}
@@ -182,7 +183,7 @@ export class IamSimulationService{
 }
 
 export class IamPolicyValidationService{
- private analyzer:AccessAnalyzerClient;constructor(private context?:AwsAccountContext){this.analyzer=context?awsConnectionBroker.getAccessAnalyzerClient(context):new AccessAnalyzerClient(cfg)}
+ private analyzer:AccessAnalyzerClient;constructor(private context?:AwsAccountContext,private actor?:SessionUser){this.analyzer=context?awsConnectionBroker.getAccessAnalyzerClient(context,actor):new AccessAnalyzerClient(cfg)}
  async validate(document:Record<string,unknown>){
   const local=analyzePolicyDocument(document);
   if(!(await liveAvailable(this.context)))return {mode:'MOCK',findings:local.flags.map(flag=>({findingType:local.level==='Critical'||local.level==='High'?'SECURITY_WARNING':'WARNING',issueCode:flag,message:flag})),message:'Access Analyzer validation requires a connected AWS account. Returning local application analysis.'};
@@ -196,14 +197,14 @@ export class IamPolicyValidationService{
 }
 
 export class IamProvisioningService{
- private iam:IAMClient;constructor(private context?:AwsAccountContext){this.iam=context?awsConnectionBroker.getIamClient(context,'provision'):new IAMClient(cfg)}
+ private iam:IAMClient;constructor(private context?:AwsAccountContext,private actor?:SessionUser,private requestId?:string){this.iam=context?awsConnectionBroker.getIamClient(context,'provision',actor,requestId):new IAMClient(cfg)}
  async attach(input:{targetType:TargetType;targetName:string;policyArn:string}){
   this.assertAllowed(input.policyArn,'attach');
   if(env.PROVISIONING_MODE==='MOCK')return {mode:'MOCK',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,awsRequestId:`mock-${Date.now()}`,message:'Mock provisioning completed without changing AWS.'};
   if(env.PROVISIONING_MODE==='SIMULATE')return {mode:'SIMULATE',changed:false,message:'Simulation mode does not attach policies.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
   const response=input.targetType==='USER'?await this.iam.send(new AttachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new AttachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn}));
-  cache.deletePrefix(`policy-catalogue:${this.context?.accountId??'default'}:Local`);cache.delete(`policy-detail:${this.context?.accountId??'default'}:${input.policyArn}`);
+  cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);cache.delete(`policy-detail:${this.contextKey()}:${input.policyArn}`);
   return {mode:'LIVE',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:true,awsRequestId:response.$metadata.requestId};
  }
  async detach(input:{targetType:TargetType;targetName:string;policyArn:string}){
@@ -212,20 +213,21 @@ export class IamProvisioningService{
   if(env.PROVISIONING_MODE==='SIMULATE')return {mode:'SIMULATE',changed:false,message:'Simulation mode does not detach policies.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
   const response=input.targetType==='USER'?await this.iam.send(new DetachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new DetachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn}));
-  cache.deletePrefix(`policy-catalogue:${this.context?.accountId??'default'}:Local`);cache.delete(`policy-detail:${this.context?.accountId??'default'}:${input.policyArn}`);
+  cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);cache.delete(`policy-detail:${this.contextKey()}:${input.policyArn}`);
   return {mode:'LIVE',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:true,awsRequestId:response.$metadata.requestId};
  }
  async createCustomerPolicy(name:string,document:Record<string,unknown>){
   if(env.PROVISIONING_MODE!=='LIVE')return {mode:env.PROVISIONING_MODE,changed:false,policyArn:`arn:aws:iam::${env.AWS_ACCOUNT_ID}:policy/${name}`,message:'Policy creation skipped outside LIVE mode.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
   const response=await this.iam.send(new CreatePolicyCommand({PolicyName:name,PolicyDocument:JSON.stringify(document)}));
-  cache.deletePrefix(`policy-catalogue:${this.context?.accountId??'default'}:Local`);
+  cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);
   return {mode:'LIVE',changed:true,policyArn:response.Policy?.Arn,awsRequestId:response.$metadata.requestId};
  }
  private assertAllowed(policyArn:string,operation:string){
   if(policyArn.endsWith('/AdministratorAccess'))throw new Error('AdministratorAccess provisioning is explicitly blocked.');
   if(!['attach','detach'].includes(operation))throw new Error('Unsupported provisioning operation.');
  }
+ private contextKey(){return this.context?`${this.context.tenantId}:${this.context.accountId}:${this.context.region}`:'default'}
 }
 
 async function collect<T,R>(fn:(marker?:string)=>Promise<R>,items:(response:R)=>T[],next:(response:R)=>string|undefined){const output:T[]=[];let marker:undefined|string;do{const response=await fn(marker);output.push(...items(response));marker=next(response)}while(marker);return output}

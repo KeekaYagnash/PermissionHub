@@ -7,7 +7,9 @@ export interface TenantMembership {id:string;tenantId:string;tenantName:string;t
 export interface SessionUser {id:string;email:string;displayName:string;provider:string;providerSubject:string;activeTenantId?:string;activeAccountId?:string;permissions:string[];memberships:TenantMembership[]}
 export interface AuthClaims { sub:string; organizationId:string; role:AppRole; email:string; name:string }
 export interface AuthenticatedRequest extends Request { auth?:AuthClaims; sessionUser?:SessionUser; tenantId?:string; awsAccountContext?:AwsAccountContext; correlationId?:string }
-export interface AwsAccountContext {id:string;tenantId:string;organisationId?:string;ouId?:string;accountId:string;accountName:string;accountType:AccountType;environment:string;riskTier:string;region:string;connectionType:'DEFAULT_CHAIN'|'ASSUME_ROLE'|'EXTERNAL_ROLE';connectionStatus:'PENDING'|'CONNECTED'|'DISCONNECTED'|'ERROR';executionRoleArn?:string;readRoleArn?:string;provisionRoleArn?:string;externalIdSecretReference?:string}
+export type AwsConnectionType='ORGANISATION_MEMBER'|'STANDALONE'|'EXTERNAL_CUSTOMER'|'LOCAL_DEVELOPMENT'|'DEFAULT_CHAIN'|'ASSUME_ROLE'|'EXTERNAL_ROLE';
+export type AwsConnectionStatus='PENDING'|'CONNECTED'|'DEGRADED'|'ERROR'|'DISABLED'|'DISCONNECTED';
+export interface AwsAccountContext {id:string;tenantId:string;organisationId?:string;ouId?:string;ouPath?:string;accountId:string;accountName:string;accountType:AccountType;environment:string;riskTier:string;region:string;connectionType:AwsConnectionType;connectionStatus:AwsConnectionStatus;executionRoleArn?:string;readRoleArn?:string;provisionRoleArn?:string;externalIdSecretReference?:string;organisationDiscoveryRoleArn?:string;organisationsRegion?:string;provisioningEnabled?:boolean;provisioningStatus?:AwsConnectionStatus;lastValidatedAt?:string;lastSuccessfulReadAt?:string;lastSuccessfulProvisionAt?:string;lastErrorCode?:string;lastErrorMessage?:string}
 export type TargetType='USER'|'ROLE';
 export type PolicyType='AWS_MANAGED'|'CUSTOMER_MANAGED';
 export type RiskLevel='Low'|'Moderate'|'High'|'Critical';

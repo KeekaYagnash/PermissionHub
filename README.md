@@ -1,6 +1,6 @@
 # PermissionHub
 
-The `user_login` branch adds server-managed user authentication, tenant membership, scoped AWS account selection, delegated application roles, approval routing, and guarded cross-account role assumption. See [Authentication architecture](docs/authentication-architecture.md) for configuration, migration, onboarding, and security details.
+The `user_login` branch adds server-managed user authentication, tenant membership, scoped AWS account selection, delegated application roles, approval routing, and guarded cross-account role assumption. See [Authentication architecture](docs/authentication-architecture.md) and [real AWS connectivity](docs/aws-real-connectivity.md) for configuration, onboarding, and security details.
 
 PermissionHub is now a focused AWS permission request and provisioning application. The primary workflow is simple: discover IAM users and roles, choose managed policies or specific actions, submit a justified access request, approve it, preview the exact IAM change, provision the approved attachment through the backend, and audit the result.
 
