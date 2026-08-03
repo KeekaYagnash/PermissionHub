@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import { api } from '../lib/api';
 import { fuzzyIdentities } from '../lib/iam';
-import { EmptyState, ErrorState, LoadingSkeleton, ResponsiveTable, SearchToolbar, type TableColumn } from '../components/ui';
+import { ErrorState, LoadingSkeleton, ResponsiveTable, SearchToolbar, type TableColumn } from '../components/ui';
 import type { IamIdentity,TargetType } from '../types';
 
 export default function Identities(){

@@ -7,17 +7,67 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  ADMINISTRATOR
-  MANAGER
-  ENGINEER
-  AUDITOR
-  VIEWER
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum ApplicationRole {
+  REQUESTER
+  ACCOUNT_APPROVER
+  OU_ADMIN
+  SECURITY_REVIEWER
+  PROVISIONER
+  ORGANISATION_ADMIN
+  PLATFORM_ADMIN
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum ScopeType {
+  TENANT
+  AWS_ORGANISATION
+  ORGANISATIONAL_UNIT
+  AWS_ACCOUNT
+}
+
+enum AccountType {
+  MANAGEMENT
+  SECURITY
+  LOG_ARCHIVE
+  SHARED_SERVICES
+  NETWORK
+  PRODUCTION
+  STAGING
+  DEVELOPMENT
+  SANDBOX
+  EXTERNAL
+}
+
+enum ConnectionType {
+  DEFAULT_CHAIN
+  ASSUME_ROLE
+  EXTERNAL_ROLE
+}
+
+enum ConnectionStatus {
+  PENDING
+  CONNECTED
+  DISCONNECTED
+  ERROR
 }
 
 enum TargetType {
   USER
   ROLE
+  IDENTITY_CENTER_USER
+  IDENTITY_CENTER_GROUP
+  IAM_GROUP
 }
 
 enum RequestStatus {
@@ -36,51 +86,249 @@ enum RequestStatus {
 enum RequestMode {
   MANAGED_POLICY
   SPECIFIC_ACTIONS
+  PERMISSION_SET
 }
 
 enum ProvisioningMode {
   MOCK
   SIMULATE
   LIVE
+  MANUAL
 }
 
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  role      UserRole
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String                 @id @default(uuid())
+  email             String                 @unique
+  displayName       String
+  legacyRole        String?
+  status            UserStatus             @default(ACTIVE)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  lastLoginAt       DateTime?
+  identities        AuthIdentity[]
+  memberships       TenantMembership[]
+  principalMappings AwsPrincipalMapping[]
+  requestedRequests Request[]              @relation("RequestRequester")
+  connectionEvents  ConnectionAuditEvent[]
+}
+
+model AuthIdentity {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        String
+  providerSubject String
+  providerEmail   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+}
+
+model Tenant {
+  id               String                 @id @default(uuid())
+  name             String
+  slug             String                 @unique
+  status           String                 @default("ACTIVE")
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  memberships      TenantMembership[]
+  organisations    AwsOrganisation[]
+  accounts         AwsAccount[]
+  approvalPolicies ApprovalPolicy[]
+  requests         Request[]
+  connectionEvents ConnectionAuditEvent[]
+}
+
+model TenantMembership {
+  id          String           @id @default(uuid())
+  tenantId    String
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        ApplicationRole
+  status      MembershipStatus @default(ACTIVE)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  adminScopes AdminScope[]
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+model AwsOrganisation {
+  id                  String                  @id @default(uuid())
+  tenantId            String
+  tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  organisationId      String
+  organisationName    String
+  managementAccountId String
+  connectionStatus    ConnectionStatus        @default(PENDING)
+  lastSyncedAt        DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  organisationalUnits AwsOrganisationalUnit[]
+  accounts            AwsAccount[]
+  requests            Request[]
+
+  @@unique([tenantId, organisationId])
+}
+
+model AwsOrganisationalUnit {
+  id                String          @id @default(uuid())
+  awsOrganisationId String
+  awsOrganisation   AwsOrganisation @relation(fields: [awsOrganisationId], references: [id], onDelete: Cascade)
+  ouId              String
+  parentOuId        String?
+  name              String
+  fullPath          String
+  status            String          @default("ACTIVE")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  accounts          AwsAccount[]
+  requests          Request[]
+
+  @@unique([awsOrganisationId, ouId])
+}
+
+model AwsAccount {
+  id                        String                 @id @default(uuid())
+  tenantId                  String
+  tenant                    Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  awsOrganisationId         String?
+  awsOrganisation           AwsOrganisation?       @relation(fields: [awsOrganisationId], references: [id])
+  ouId                      String?
+  organisationalUnit        AwsOrganisationalUnit? @relation(fields: [ouId], references: [id])
+  accountId                 String
+  accountName               String
+  accountEmail              String?
+  accountType               AccountType
+  environment               String
+  riskTier                  String
+  region                    String
+  connectionType            ConnectionType
+  connectionStatus          ConnectionStatus       @default(PENDING)
+  executionRoleArn          String?
+  readRoleArn               String?
+  provisionRoleArn          String?
+  externalIdSecretReference String?
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+  principalMappings         AwsPrincipalMapping[]
+  requests                  Request[]
+  connectionEvents          ConnectionAuditEvent[]
+  grants                    PermissionGrant[]
+
+  @@unique([tenantId, accountId])
+  @@index([awsOrganisationId, ouId])
+}
+
+model AdminScope {
+  id                     String           @id @default(uuid())
+  tenantMembershipId     String
+  tenantMembership       TenantMembership @relation(fields: [tenantMembershipId], references: [id], onDelete: Cascade)
+  scopeType              ScopeType
+  scopeId                String
+  includeDescendants     Boolean          @default(true)
+  canView                Boolean          @default(true)
+  canRequest             Boolean          @default(false)
+  canApprove             Boolean          @default(false)
+  canProvision           Boolean          @default(false)
+  canRevoke              Boolean          @default(false)
+  canManageConfiguration Boolean          @default(false)
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  @@unique([tenantMembershipId, scopeType, scopeId])
+  @@index([scopeType, scopeId])
+}
+
+model ApprovalPolicy {
+  id                           String       @id @default(uuid())
+  tenantId                     String
+  tenant                       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name                         String
+  accountType                  AccountType?
+  riskTier                     String?
+  permissionRisk               String?
+  maximumDuration              Int?
+  permanentAccessAllowed       Boolean      @default(false)
+  automaticProvisioningAllowed Boolean      @default(false)
+  requiredApprovalStages       Json
+  createdAt                    DateTime     @default(now())
+  updatedAt                    DateTime     @updatedAt
+  requests                     Request[]
+
+  @@index([tenantId, accountType, riskTier])
+}
+
+model AwsPrincipalMapping {
+  id                    String     @id @default(uuid())
+  userId                String
+  user                  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  awsAccountId          String
+  awsAccount            AwsAccount @relation(fields: [awsAccountId], references: [id], onDelete: Cascade)
+  principalType         TargetType
+  principalArn          String
+  identityCenterUserId  String?
+  identityCenterGroupId String?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  @@unique([userId, awsAccountId, principalArn])
 }
 
 model Request {
-  id            String        @id
-  title         String
-  requester     String
-  approver      String
-  targetType    TargetType
-  targetName    String
-  targetArn     String
-  scope         Json
-  duration      String
-  startDate     DateTime
-  expiryDate    DateTime?
-  priority      String
-  justification String
-  notes         String?
-  status        RequestStatus @default(DRAFT)
-  submittedAt   DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  items         RequestItem[]
-  approvals     Approval[]
-  grants        PermissionGrant[]
-  jobs          ProvisioningJob[]
-  auditEvents   AuditEvent[]
+  id                     String                 @id
+  title                  String
+  tenantId               String?
+  tenant                 Tenant?                @relation(fields: [tenantId], references: [id])
+  awsOrganisationId      String?
+  awsOrganisation        AwsOrganisation?       @relation(fields: [awsOrganisationId], references: [id])
+  ouId                   String?
+  organisationalUnit     AwsOrganisationalUnit? @relation(fields: [ouId], references: [id])
+  awsAccountId           String?
+  awsAccount             AwsAccount?            @relation(fields: [awsAccountId], references: [id])
+  accountType            AccountType?
+  requesterUserId        String?
+  requesterUser          User?                  @relation("RequestRequester", fields: [requesterUserId], references: [id])
+  requester              String
+  approver               String
+  targetSubjectType      TargetType?
+  targetType             TargetType
+  targetName             String
+  targetArn              String
+  permissionSource       String?
+  scope                  Json
+  duration               String
+  startDate              DateTime
+  expiryDate             DateTime?
+  priority               String
+  justification          String
+  notes                  String?
+  approvalPolicyId       String?
+  approvalPolicy         ApprovalPolicy?        @relation(fields: [approvalPolicyId], references: [id])
+  requiredApprovalStages Json?
+  completedApprovalStages Json?
+  provisioningAccountId  String?
+  provisioningRoleArn    String?
+  status                 RequestStatus          @default(DRAFT)
+  submittedAt            DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  items                  RequestItem[]
+  approvals              Approval[]
+  grants                 PermissionGrant[]
+  jobs                   ProvisioningJob[]
+  auditEvents            AuditEvent[]
+
+  @@index([tenantId, awsAccountId, status])
+  @@index([requesterUserId])
 }
 
 model RequestItem {
-  id                      String      @id @default(cuid())
+  id                      String      @id @default(uuid())
   requestId               String
   request                 Request     @relation(fields: [requestId], references: [id], onDelete: Cascade)
   mode                    RequestMode
@@ -91,19 +339,25 @@ model RequestItem {
 }
 
 model Approval {
-  id        String   @id @default(cuid())
-  requestId String
-  request   Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  approver  String
-  decision  String
-  comment   String
-  createdAt DateTime @default(now())
+  id             String   @id @default(uuid())
+  requestId      String
+  request        Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  stage          String   @default("ACCOUNT_APPROVER")
+  approverUserId String?
+  approver       String
+  decision       String
+  comment        String
+  createdAt      DateTime @default(now())
+
+  @@index([requestId, stage])
 }
 
 model PermissionGrant {
-  id                   String    @id @default(cuid())
+  id                   String      @id @default(uuid())
   requestId            String
-  request              Request   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  request              Request     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  awsAccountId         String?
+  awsAccount           AwsAccount? @relation(fields: [awsAccountId], references: [id])
   targetType           TargetType
   targetName           String
   targetArn            String
@@ -113,12 +367,13 @@ model PermissionGrant {
   provisioningResponse Json
   revocationResponse   Json?
   revokedAt            DateTime?
+
   @@index([requestId])
-  @@index([targetArn, policyArn])
+  @@index([awsAccountId, targetArn, policyArn])
 }
 
 model ProvisioningJob {
-  id          String           @id @default(cuid())
+  id          String           @id @default(uuid())
   requestId   String
   request     Request          @relation(fields: [requestId], references: [id], onDelete: Cascade)
   mode        ProvisioningMode
@@ -131,9 +386,11 @@ model ProvisioningJob {
 }
 
 model AuditEvent {
-  id            String   @id @default(cuid())
+  id            String   @id @default(uuid())
   timestamp     DateTime @default(now())
   actor         String
+  actorUserId   String?
+  tenantId      String?
   requestId     String?
   request       Request? @relation(fields: [requestId], references: [id])
   awsAccountId  String?
@@ -145,8 +402,26 @@ model AuditEvent {
   result        String
   errorCode     String?
   awsRequestId  String?
+
   @@index([timestamp])
+  @@index([tenantId, awsAccountId])
   @@index([requestId])
+}
+
+model ConnectionAuditEvent {
+  id           String      @id @default(uuid())
+  tenantId     String
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  awsAccountId String?
+  awsAccount   AwsAccount? @relation(fields: [awsAccountId], references: [id])
+  actorUserId  String
+  actorUser    User        @relation(fields: [actorUserId], references: [id])
+  action       String
+  outcome      String
+  metadata     Json
+  createdAt    DateTime    @default(now())
+
+  @@index([tenantId, createdAt])
 }
 
 model ApplicationSettings {

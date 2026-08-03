@@ -1,5 +1,7 @@
 # PermissionHub
 
+The `user_login` branch adds server-managed user authentication, tenant membership, scoped AWS account selection, delegated application roles, approval routing, and guarded cross-account role assumption. See [Authentication architecture](docs/authentication-architecture.md) for configuration, migration, onboarding, and security details.
+
 PermissionHub is now a focused AWS permission request and provisioning application. The primary workflow is simple: discover IAM users and roles, choose managed policies or specific actions, submit a justified access request, approve it, preview the exact IAM change, provision the approved attachment through the backend, and audit the result.
 
 The frontend never requests, captures, displays, logs, saves, or transmits AWS access keys. Local AWS credentials must stay outside this repository and be resolved by the AWS SDK v3 default credential provider chain in the backend.
@@ -72,7 +74,14 @@ ENABLE_LIVE_PROVISIONING
 PROVISIONING_CONFIRMATION
 DATABASE_URL
 REDIS_URL
-JWT_SECRET
+AUTH_ENABLED
+AUTH_PROVIDER
+ENABLE_DEV_AUTH
+SESSION_SECRET
+SESSION_COOKIE_NAME
+OIDC_ISSUER_URL
+OIDC_CLIENT_ID
+OIDC_CLIENT_SECRET
 FRONTEND_URL
 SES_FROM_EMAIL
 ```
@@ -83,6 +92,10 @@ Recommended local configuration:
 AWS_PROFILE=permissionhub-dev
 AWS_REGION=af-south-1
 PROVISIONING_MODE=MOCK
+AUTH_ENABLED=true
+AUTH_PROVIDER=development
+ENABLE_DEV_AUTH=true
+SESSION_SECRET=<generate-at-least-32-random-characters>
 ```
 
 ## Provisioning Modes

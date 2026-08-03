@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, Check, ChevronRight, Loader2, Search, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Loader2, Search, X } from 'lucide-react';
 import { cn, statusTone } from '../lib/utils';
 
 export function PageHeader({title,description,eyebrow='Governance',actions}:{title:string;description:string;eyebrow?:string;actions?:ReactNode}){return <div className="page-header"><div><div className="breadcrumbs"><span>PermissionHub</span><ChevronRight size={12}/><span>{eyebrow}</span></div><h1>{title}</h1><p>{description}</p></div>{actions&&<div className="page-actions">{actions}</div>}</div>}

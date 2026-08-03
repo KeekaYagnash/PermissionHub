@@ -6,18 +6,20 @@ import { fuzzyPolicies } from '../lib/iam';
 import { mergePolicies } from '../lib/policyCatalogue';
 import { LoadingSkeleton, ResponsiveTable, type TableColumn } from '../components/ui';
 import type { IamPolicySummary, Page } from '../types';
+import { useAuthStore } from '../store/auth';
 
 const catalogueStore=new Map<string,{rows:IamPolicySummary[];isComplete:boolean;nextCursor?:string;loadedCount:number;cacheStatus?:string;fetchedAt:number}>();
 
 export default function Permissions(){
+ const activeAccountId=useAuthStore(state=>state.session?.user?.activeAccountId);
  const [scope,setScope]=useState<'AWS_MANAGED'|'CUSTOMER_MANAGED'>('AWS_MANAGED');
  const [reloadKey,setReloadKey]=useState(0);
  const [search,setSearch]=useState(''),[debouncedSearch,setDebouncedSearch]=useState('');
  const [service,setService]=useState(''),[accessLevel,setAccessLevel]=useState('');
  const [selected,setSelected]=useState<string>(),navigate=useNavigate();
- const [rows,setRows]=useState<IamPolicySummary[]>([]),[nextCursor,setNextCursor]=useState<string>(),[isComplete,setIsComplete]=useState(false),[loadedCount,setLoadedCount]=useState(0),[cacheStatus,setCacheStatus]=useState<string>(),[loadingInitial,setLoadingInitial]=useState(true),[loadingMore,setLoadingMore]=useState(false),[error,setError]=useState<string>(),[slow,setSlow]=useState(false),[firstRenderMs,setFirstRenderMs]=useState<number>();
+ const [rows,setRows]=useState<IamPolicySummary[]>([]),[isComplete,setIsComplete]=useState(false),[loadedCount,setLoadedCount]=useState(0),[cacheStatus,setCacheStatus]=useState<string>(),[loadingInitial,setLoadingInitial]=useState(true),[loadingMore,setLoadingMore]=useState(false),[error,setError]=useState<string>(),[slow,setSlow]=useState(false),[firstRenderMs,setFirstRenderMs]=useState<number>();
  const startedRef=useRef<number>(performance.now());
- const cacheKey=`${scope}`;
+ const cacheKey=`${activeAccountId??'no-account'}:${scope}`;
  const detail=useQuery({queryKey:['policy',selected],queryFn:()=>api.policy(selected!),enabled:Boolean(selected),staleTime:10*60*1000,gcTime:15*60*1000});
 
  useEffect(()=>{const timer=window.setTimeout(()=>setDebouncedSearch(search),250);return ()=>window.clearTimeout(timer)},[search]);
@@ -25,13 +27,13 @@ export default function Permissions(){
  useEffect(()=>{
   const cached=catalogueStore.get(cacheKey);
   startedRef.current=performance.now();setError(undefined);setSlow(false);setSelected(undefined);
-  if(cached){setRows(cached.rows);setIsComplete(cached.isComplete);setNextCursor(cached.nextCursor);setLoadedCount(cached.loadedCount);setCacheStatus(cached.cacheStatus);setLoadingInitial(false);setLoadingMore(!cached.isComplete);setFirstRenderMs(0)}
-  else{setRows([]);setIsComplete(false);setNextCursor(undefined);setLoadedCount(0);setCacheStatus(undefined);setLoadingInitial(true);setLoadingMore(false);setFirstRenderMs(undefined)}
+  if(cached){setRows(cached.rows);setIsComplete(cached.isComplete);setLoadedCount(cached.loadedCount);setCacheStatus(cached.cacheStatus);setLoadingInitial(false);setLoadingMore(!cached.isComplete);setFirstRenderMs(0)}
+  else{setRows([]);setIsComplete(false);setLoadedCount(0);setCacheStatus(undefined);setLoadingInitial(true);setLoadingMore(false);setFirstRenderMs(undefined)}
   const controller=new AbortController();
   const slowTimer=window.setTimeout(()=>setSlow(true),5000);
   void loadCatalogue(scope,controller.signal,cached);
   return ()=>{controller.abort();window.clearTimeout(slowTimer)};
- },[scope,reloadKey]);
+ },[scope,reloadKey,activeAccountId]);
 
  async function loadCatalogue(activeScope:'AWS_MANAGED'|'CUSTOMER_MANAGED',signal:AbortSignal,cached?:{nextCursor?:string;isComplete:boolean;rows:IamPolicySummary[];loadedCount:number;cacheStatus?:string}){
   let cursor=cached?.isComplete?undefined:cached?.nextCursor;
@@ -41,7 +43,7 @@ export default function Permissions(){
     setLoadingInitial(true);
     const first=await fetchPage(activeScope,undefined,signal);
     current=mergePolicies([],first.data);
-    publish(activeScope,current,first);
+    publish(cacheKey,current,first);
     setLoadingInitial(false);setLoadingMore(!first.isComplete);setFirstRenderMs(Math.round(performance.now()-startedRef.current));
     cursor=first.nextCursor;
     if(first.isComplete)return;
@@ -50,12 +52,12 @@ export default function Permissions(){
     setLoadingMore(true);
     const page=await fetchPage(activeScope,cursor,signal);
     current=mergePolicies(current,page.data);
-    publish(activeScope,current,page);
+    publish(cacheKey,current,page);
     cursor=page.nextCursor;
     if(page.isComplete)break;
    }
    setLoadingMore(false);setIsComplete(true);
-   catalogueStore.set(activeScope,{rows:current,isComplete:true,nextCursor:undefined,loadedCount:current.length,cacheStatus, fetchedAt:Date.now()});
+   catalogueStore.set(cacheKey,{rows:current,isComplete:true,nextCursor:undefined,loadedCount:current.length,cacheStatus, fetchedAt:Date.now()});
   }catch(err:any){
    if(signal.aborted)return;
    setLoadingInitial(false);setLoadingMore(false);setError(err?.response?.data?.error?.message??err?.message??'Policy catalogue failed to load.');
@@ -64,7 +66,7 @@ export default function Permissions(){
 
  async function fetchPage(activeScope:'AWS_MANAGED'|'CUSTOMER_MANAGED',cursor:string|undefined,signal:AbortSignal){return api.policies({scope:activeScope,limit:100,cursor,sort:'name'},signal) as Promise<Page<IamPolicySummary>>}
  function publish(activeScope:string,current:IamPolicySummary[],page:Page<IamPolicySummary>){
-  setRows(current);setNextCursor(page.nextCursor);setIsComplete(Boolean(page.isComplete));setLoadedCount(page.loadedCount??current.length);setCacheStatus(page.cacheStatus);
+  setRows(current);setIsComplete(Boolean(page.isComplete));setLoadedCount(page.loadedCount??current.length);setCacheStatus(page.cacheStatus);
   catalogueStore.set(activeScope,{rows:current,isComplete:Boolean(page.isComplete),nextCursor:page.nextCursor,loadedCount:page.loadedCount??current.length,cacheStatus:page.cacheStatus,fetchedAt:Date.now()});
  }
 

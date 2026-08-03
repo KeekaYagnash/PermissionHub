@@ -1,0 +1,1 @@
+export default function SessionExpired(){return <main className="auth-page"><section className="auth-card"><h1>Your session has expired</h1><p>Sign in again to continue. Unsaved browser form data may still be available after authentication.</p><a className="btn primary" href="/login">Sign in again</a></section></main>}

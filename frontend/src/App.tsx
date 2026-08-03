@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
+import AuthGate from './components/AuthGate';
 
 const Overview=lazy(()=>import('./pages/Overview'));
 const Requests=lazy(()=>import('./pages/Requests'));
@@ -10,10 +11,21 @@ const Permissions=lazy(()=>import('./pages/Permissions'));
 const Identities=lazy(()=>import('./pages/Identities'));
 const Activity=lazy(()=>import('./pages/Activity'));
 const Connection=lazy(()=>import('./pages/Connection'));
+const Login=lazy(()=>import('./pages/Login'));
+const SelectTenant=lazy(()=>import('./pages/SelectTenant'));
+const Unauthorised=lazy(()=>import('./pages/Unauthorised'));
+const SessionExpired=lazy(()=>import('./pages/SessionExpired'));
+const Administration=lazy(()=>import('./pages/Administration'));
 
 export default function App(){
  return <Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
   <Routes>
+   <Route path="login" element={<Login/>}/>
+   <Route path="auth/callback" element={<div className="loading-screen">Completing sign in…</div>}/>
+   <Route path="select-tenant" element={<SelectTenant/>}/>
+   <Route path="unauthorised" element={<Unauthorised/>}/>
+   <Route path="session-expired" element={<SessionExpired/>}/>
+   <Route element={<AuthGate/>}>
    <Route element={<Layout/>}>
     <Route index element={<Overview/>}/>
     <Route path="requests" element={<Requests/>}/>
@@ -23,6 +35,8 @@ export default function App(){
     <Route path="identities" element={<Identities/>}/>
     <Route path="activity" element={<Activity/>}/>
     <Route path="connection" element={<Connection/>}/>
+    <Route path="administration" element={<Administration/>}/>
+   </Route>
    </Route>
    <Route path="*" element={<Navigate to="/" replace/>}/>
   </Routes>

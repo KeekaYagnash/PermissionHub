@@ -3,9 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Button, LoadingSkeleton, StatusBadge } from '../components/ui';
+import { useAuthStore } from '../store/auth';
 
 export default function RequestDetail(){
  const {id=''}=useParams(),qc=useQueryClient();
+ const permissions=useAuthStore(state=>state.session?.user?.permissions??[]),canApprove=permissions.includes('approveRequest'),canProvision=permissions.includes('provisionRequest'),canRevoke=permissions.includes('revokeGrant');
  const {data,isLoading}=useQuery({queryKey:['request',id],queryFn:()=>api.request(id),enabled:Boolean(id)});
  const [comment,setComment]=useState('');
  const reload=async()=>{await Promise.all([qc.invalidateQueries({queryKey:['request',id]}),qc.invalidateQueries({queryKey:['requests']}),qc.invalidateQueries({queryKey:['activity']})])};
@@ -46,13 +48,13 @@ export default function RequestDetail(){
     <p className="muted">Approve/reject decisions and provisioning calls are recorded in the audit timeline. Real IAM changes still require the guarded backend provisioning mode.</p>
     <label className="field"><span>Review comment</span><textarea value={comment} onChange={event=>setComment(event.target.value)} placeholder="Add context for reject or information requests. Optional for approval."/><small>Required for Reject and Request information.</small></label>
     <div className="approval-actions">
-     <Button onClick={()=>approve.mutate()} disabled={busy||!pending}>Approve</Button>
-     <Button variant="secondary" className="strong-secondary" onClick={()=>approveAndProvision.mutate()} disabled={busy||!pending}>Approve and provision</Button>
+     {canApprove&&<Button onClick={()=>approve.mutate()} disabled={busy||!pending}>Approve</Button>}
+     {canApprove&&canProvision&&<Button variant="secondary" className="strong-secondary" onClick={()=>approveAndProvision.mutate()} disabled={busy||!pending}>Approve and provision</Button>}
      <Button variant="secondary" onClick={()=>simulate.mutate()} disabled={busy}>Run simulation</Button>
-     <Button variant="secondary" onClick={()=>provision.mutate()} disabled={busy||!approved}>Provision approved change</Button>
-     <Button variant="ghost" onClick={()=>info.mutate()} disabled={busy||needsComment||data.status!=='Pending approval'}>Request information</Button>
-     <Button variant="danger" onClick={()=>reject.mutate()} disabled={busy||needsComment||!pending}>Reject</Button>
-     <Button variant="danger" onClick={()=>revoke.mutate()} disabled={busy||!activeGrant}>Revoke grant</Button>
+     {canProvision&&<Button variant="secondary" onClick={()=>provision.mutate()} disabled={busy||!approved}>Provision approved change</Button>}
+     {canApprove&&<Button variant="ghost" onClick={()=>info.mutate()} disabled={busy||needsComment||data.status!=='Pending approval'}>Request information</Button>}
+     {canApprove&&<Button variant="danger" onClick={()=>reject.mutate()} disabled={busy||needsComment||!pending}>Reject</Button>}
+     {canRevoke&&<Button variant="danger" onClick={()=>revoke.mutate()} disabled={busy||!activeGrant}>Revoke grant</Button>}
     </div>
     {busy&&<p className="muted">Updating request lifecycle...</p>}
     {error&&<p className="warning">{readError(error)}</p>}

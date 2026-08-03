@@ -1,11 +1,32 @@
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt, { type SignOptions } from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { env } from '../config/env.js';
 import { asyncHandler,ApiError } from '../utils/http.js';
-import { appUsers } from '../services/mock.service.js';
-const router=Router();
-const login=z.object({email:z.string().email(),password:z.string().min(6),organizationId:z.string().default('org_acme'),role:z.enum(['ADMINISTRATOR','MANAGER','ENGINEER','AUDITOR','VIEWER']).optional()});
-router.post('/login',asyncHandler(async(req,res)=>{const input=login.parse(req.body);let user=appUsers.find(x=>x.email===input.email);if(!user&&env.NODE_ENV==='development')user={...appUsers[0]!,email:input.email,role:input.role??'ADMINISTRATOR'};if(!user)throw new ApiError(401,'Invalid credentials','INVALID_CREDENTIALS');const passwordOk=env.NODE_ENV==='development'||await bcrypt.compare(input.password,'$2b$12$invalid');if(!passwordOk)throw new ApiError(401,'Invalid credentials','INVALID_CREDENTIALS');const claims={sub:user.id,organizationId:input.organizationId,role:input.role??user.role,email:user.email,name:user.name};const token=jwt.sign(claims,env.JWT_SECRET,{expiresIn:env.JWT_EXPIRES_IN as SignOptions['expiresIn'],issuer:'permissionhub',audience:'permissionhub-web'});res.json({data:{token,user:claims,expiresIn:env.JWT_EXPIRES_IN,organizations:[{id:'org_acme',name:'Sandbox AWS Account'}]}})}));
+import { configuredAuthProvider,csrfToken,DevelopmentAuthProvider,safeEqualToken } from '../services/auth-provider.service.js';
+import { developmentUsers,identityDomain } from '../services/identity-domain.service.js';
+import { authorization } from '../services/authorization.service.js';
+import type { AuthenticatedRequest,SessionUser } from '../types.js';
+import { securityAudit } from '../services/security-audit.service.js';
+
+const router=Router(),provider=configuredAuthProvider();
+const authLimiter=rateLimit({windowMs:60_000,limit:20,standardHeaders:'draft-8',legacyHeaders:false});
+const requireUser=(req:AuthenticatedRequest)=>{if(!req.session.user)throw new ApiError(401,'Authentication required.','UNAUTHENTICATED');return req.session.user};
+const requireCsrf=(req:AuthenticatedRequest)=>{if(!safeEqualToken(req.headers['x-csrf-token']?.toString(),req.session.csrfToken))throw new ApiError(403,'CSRF validation failed.','CSRF_INVALID')};
+const regenerate=(req:AuthenticatedRequest)=>new Promise<void>((resolve,reject)=>req.session.regenerate(error=>error?reject(error):resolve()));
+const save=(req:AuthenticatedRequest)=>new Promise<void>((resolve,reject)=>req.session.save(error=>error?reject(error):resolve()));
+const destroy=(req:AuthenticatedRequest)=>new Promise<void>((resolve,reject)=>req.session.destroy(error=>error?reject(error):resolve()));
+const sessionPayload=(user:SessionUser|undefined,token:string)=>({authenticated:Boolean(user),user:user?{...user,permissions:authorization.permissions(user,user.activeAccountId)}:undefined,csrfToken:token,authProvider:env.AUTH_PROVIDER,devAuthAvailable:env.NODE_ENV!=='production'&&env.ENABLE_DEV_AUTH});
+
+router.get('/session',asyncHandler(async(req:AuthenticatedRequest,res)=>{req.session.csrfToken??=csrfToken();res.json({data:sessionPayload(req.session.user,req.session.csrfToken)})}));
+router.get('/providers',(_req,res)=>res.json({data:{configured:env.AUTH_PROVIDER,oidcConfigured:Boolean(env.OIDC_ISSUER_URL&&env.OIDC_CLIENT_ID),developmentAvailable:env.NODE_ENV!=='production'&&env.ENABLE_DEV_AUTH}}));
+router.get('/development-users',(_req,res)=>{if(env.NODE_ENV==='production'||!env.ENABLE_DEV_AUTH)throw new ApiError(404,'Not found.','NOT_FOUND');res.json({data:developmentUsers.map(user=>({id:user.id,email:user.email,displayName:user.displayName,roles:user.memberships.map(m=>m.role)}))})});
+router.post('/development-login',authLimiter,asyncHandler(async(req:AuthenticatedRequest,res)=>{requireCsrf(req);if(!(provider instanceof DevelopmentAuthProvider))throw new ApiError(400,'Development authentication is not the configured provider.','AUTH_PROVIDER_MISMATCH');const {userId}=z.object({userId:z.string().min(1)}).parse(req.body);const user=await provider.authenticate(userId);await regenerate(req);req.session.user=user;req.session.csrfToken=csrfToken();await save(req);securityAudit.record({tenantId:user.activeTenantId,actorUserId:user.id,action:'USER_LOGIN',outcome:'SUCCESS',metadata:{provider:'development'}});res.json({data:sessionPayload(user,req.session.csrfToken)})}));
+router.get('/login',authLimiter,asyncHandler(async(req:AuthenticatedRequest,res)=>{const started=await provider.signIn();if(!started.redirectUrl)throw new ApiError(400,'Use the development login selector.','USE_DEV_LOGIN');req.session.oidc={state:started.state!,nonce:started.nonce!,codeVerifier:started.codeVerifier!};await save(req);res.redirect(started.redirectUrl)}));
+router.get('/callback',authLimiter,asyncHandler(async(req:AuthenticatedRequest,res)=>{const transaction=req.session.oidc;if(!transaction)throw new ApiError(400,'The authentication transaction has expired.','AUTH_TRANSACTION_EXPIRED');const user=await provider.handleCallback({currentUrl:new URL(req.originalUrl,env.OIDC_REDIRECT_URI).href,...transaction});await regenerate(req);req.session.user=user;req.session.csrfToken=csrfToken();await save(req);securityAudit.record({tenantId:user.activeTenantId,actorUserId:user.id,action:'USER_LOGIN',outcome:'SUCCESS',metadata:{provider:user.provider}});res.redirect(`${env.FRONTEND_URL}${user.activeTenantId?'/':'/select-tenant'}`)}));
+router.post('/logout',asyncHandler(async(req:AuthenticatedRequest,res)=>{requireCsrf(req);const user=req.session.user,target=await provider.signOut(user);if(user)securityAudit.record({tenantId:user.activeTenantId,actorUserId:user.id,action:'USER_LOGOUT',outcome:'SUCCESS',metadata:{provider:user.provider}});await destroy(req);res.clearCookie(env.SESSION_COOKIE_NAME);res.json({data:target})}));
+router.post('/select-tenant',asyncHandler(async(req:AuthenticatedRequest,res)=>{requireCsrf(req);const user=requireUser(req),{tenantId}=z.object({tenantId:z.string()}).parse(req.body);if(!authorization.canViewTenant(user,tenantId))throw new ApiError(403,'Tenant selection is not permitted.','TENANT_FORBIDDEN');user.activeTenantId=tenantId;user.activeAccountId=undefined;req.session.user=user;await save(req);res.json({data:sessionPayload(user,req.session.csrfToken!)})}));
+router.post('/select-account',asyncHandler(async(req:AuthenticatedRequest,res)=>{requireCsrf(req);const user=requireUser(req),{accountId}=z.object({accountId:z.string()}).parse(req.body);const account=identityDomain.account(user,accountId);if(!account||!authorization.canViewAccount(user,account.id))throw new ApiError(403,'AWS account selection is not permitted.','AWS_ACCOUNT_FORBIDDEN');user.activeAccountId=account.id;req.session.user=user;await save(req);res.json({data:sessionPayload(user,req.session.csrfToken!)})}));
+router.get('/context',asyncHandler(async(req:AuthenticatedRequest,res)=>{const user=requireUser(req);res.json({data:{tenants:identityDomain.tenantsFor(user),organisations:identityDomain.organisationsFor(user),organisationalUnits:identityDomain.ousFor(user),accounts:identityDomain.accountsFor(user),activeTenantId:user.activeTenantId,activeAccountId:user.activeAccountId}})}));
+
 export default router;
