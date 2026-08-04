@@ -42,6 +42,7 @@ export class AwsConnectionBroker {
  private readonly secrets:SecretResolver;
  private readonly now:()=>number;
  constructor(deps:BrokerDeps={}){this.stsFactory=deps.stsFactory??((region,credentials)=>new STSClient({region,credentials}));this.secrets=deps.secretResolver??secretResolver;this.now=deps.now??Date.now}
+ async validateLocalCredentialSource(region=env.AWS_REGION){try{const response=await this.stsFactory(region).send(new GetCallerIdentityCommand({}));return {success:true,accountId:response.Account,principalArn:response.Arn,region,credentialSource:'AWS SDK default provider chain',checkedAt:new Date(this.now()).toISOString()}}catch(error){const safe=sanitiseAwsConnectionError(error);throw new ApiError(safe.status,safe.message,safe.code)}}
 
  async validateAccountConnection(actor:SessionUser,accountId:string,mode:ConnectionMode='READ',validationOnly=false){
   const context=this.authorisedAccount(actor,accountId,mode);
@@ -103,14 +104,14 @@ export class AwsConnectionBroker {
   if(mode==='PROVISION'&&!authorization.canProvisionInAccount(actor,context.id))throw new ApiError(403,'Provisioning access is not permitted for this AWS account.','PROVISIONING_FORBIDDEN');
   return context;
  }
- private clientConfig(context:AwsAccountContext,mode:ConnectionMode,actor?:SessionUser,requestId?:string,region=context.region){return ['DEFAULT_CHAIN','LOCAL_DEVELOPMENT'].includes(context.connectionType)?{region}:{region,credentials:()=>this.credentialsFor(context,mode,actor,requestId)} as const}
+ private clientConfig(context:AwsAccountContext,mode:ConnectionMode,actor?:SessionUser,requestId?:string,region=context.region){return ['DEFAULT_CHAIN','LOCAL_DEVELOPMENT','LOCAL_DEFAULT_CREDENTIALS'].includes(context.connectionType)?{region}:{region,credentials:()=>this.credentialsFor(context,mode,actor,requestId)} as const}
  private async credentialsFor(context:AwsAccountContext,mode:ConnectionMode,actor?:SessionUser,requestId?:string,useCache=true,validationOnly=false):Promise<AwsCredentialIdentity>{
   if(mode==='PROVISION'&&!validationOnly){
    if(!env.CROSS_ACCOUNT_PROVISIONING_ENABLED)throw new ApiError(403,'Cross-account provisioning is disabled.','CROSS_ACCOUNT_PROVISIONING_DISABLED');
    if(!context.provisioningEnabled)throw new ApiError(403,'Provisioning is disabled for this AWS account.','ACCOUNT_PROVISIONING_DISABLED');
   }
-  if(['DEFAULT_CHAIN','LOCAL_DEVELOPMENT'].includes(context.connectionType))return this.defaultCredentials(context,mode);
-  const cacheKey=`${context.tenantId}:${context.accountId}:${mode}`;
+  if(['DEFAULT_CHAIN','LOCAL_DEVELOPMENT','LOCAL_DEFAULT_CREDENTIALS'].includes(context.connectionType))return this.defaultCredentials(context,mode);
+  const cacheKey=`${context.tenantId}:${context.accountId}:${context.region}:${context.connectionType}:${mode}`;
   const cached=this.credentials.get(cacheKey);if(useCache&&cached&&cached.expiresAt-this.now()>60_000)return cached.credentials;
   const secret=context.externalIdSecretReference?await this.secrets.getSecret(context.externalIdSecretReference):undefined;
   const input=buildAssumeRoleInput(context,mode,actor,secret,requestId,this.now());

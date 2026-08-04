@@ -7,7 +7,8 @@ import { identityDomain } from '../services/identity-domain.service.js';
 import { safeEqualToken } from '../services/auth-provider.service.js';
 
 export function authenticate(req:AuthenticatedRequest,_res:Response,next:NextFunction){
- if(!env.AUTH_ENABLED)return next(new ApiError(503,'Authentication is disabled without a configured development identity.','AUTH_CONFIGURATION_REQUIRED'));
+ if(!env.AUTH_ENABLED&&!env.ENABLE_DEV_AUTH)return next(new ApiError(503,'Authentication is disabled without a configured development identity.','AUTH_CONFIGURATION_REQUIRED'));
+ if(!req.session.user&&!env.AUTH_ENABLED&&env.NODE_ENV!=='production'&&env.DEV_AUTH_USER_ID){const selected=identityDomain.findDevelopmentUser(env.DEV_AUTH_USER_ID);if(selected)req.session.user=identityDomain.sessionUser(selected,'development')}
  const user=req.session.user;if(!user)return next(new ApiError(401,'Authentication required','UNAUTHENTICATED'));
  req.sessionUser=user;
  const membership=user.memberships.find(item=>item.tenantId===user.activeTenantId&&item.status==='ACTIVE');
@@ -23,9 +24,11 @@ export function tenantScope(req:AuthenticatedRequest,_res:Response,next:NextFunc
  req.tenantId=user.activeTenantId;next();
 }
 export function accountScope(req:AuthenticatedRequest,_res:Response,next:NextFunction){
- const user=req.sessionUser!;const requested=req.headers['x-aws-account-id']?.toString()||user.activeAccountId;
+ const user=req.sessionUser!,headerAccount=req.headers['x-aws-account-id']?.toString(),requested=user.activeAccountId;
+ if(headerAccount&&headerAccount!==requested)return next(new ApiError(403,'The requested AWS account does not match the active server session.','AWS_ACCOUNT_CONTEXT_MISMATCH'));
  if(!requested)return next(new ApiError(409,'Select an authorised AWS account before using this endpoint.','AWS_ACCOUNT_REQUIRED'));
  const account=identityDomain.account(user,requested);if(!account||!authorization.canViewAccount(user,account.id))return next(new ApiError(403,'AWS account access is not permitted.','AWS_ACCOUNT_FORBIDDEN'));
+ if(!['CONNECTED','DEGRADED'].includes(account.connectionStatus))return next(new ApiError(409,'Validate and connect this AWS account before using AWS data.','AWS_ACCOUNT_NOT_CONNECTED'));
  req.awsAccountContext=account;next();
 }
 export function requireCapability(capability:'request'|'approve'|'provision'|'revoke'|'manage'){

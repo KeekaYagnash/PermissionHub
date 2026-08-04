@@ -82,14 +82,17 @@ FRONTEND_URL
 SES_FROM_EMAIL
 ```
 
-Recommended local configuration:
+Recommended manual-connection local configuration (SSO remains disabled on this branch):
 
 ```bash
 AWS_PROFILE=permissionhub-dev
 AWS_REGION=af-south-1
-PROVISIONING_MODE=MOCK
-AUTH_ENABLED=true
+PROVISIONING_MODE=SIMULATE
+AUTH_ENABLED=false
 ENABLE_DEV_AUTH=true
+DEV_AUTH_USER_ID=user_org_admin_dev
+AWS_CONNECTION_MODE=manual
+ENABLE_AWS_DEMO_DATA=false
 SESSION_SECRET=<generate-at-least-32-random-characters>
 ```
 
@@ -145,9 +148,9 @@ Resource discovery:
 - `AdministratorAccess` provisioning is explicitly blocked.
 - Inline policy replacement, trust-policy modification, access-key creation, permission-boundary removal, user deletion, role deletion, and policy deletion are not supported.
 
-## Mock Mode
+## Manual AWS connection mode
 
-The app works immediately without AWS credentials. Mock mode includes 8 IAM users, 8 IAM roles, AWS-managed policies, customer-managed policies, S3 buckets, RDS databases, Lambda functions, existing policy assignments, sample requests, grants, and audit history. The UI clearly displays a mock/disconnected account rather than claiming live AWS connectivity.
+With `AWS_CONNECTION_MODE=manual`, no demo Organisation, OU, account, IAM identity, policy, or resource is used as a fallback. Add an account on Connection, choose `LOCAL_DEFAULT_CREDENTIALS` or `ASSUME_ROLE`, validate STS and IAM read capabilities, then set a validated account active. See [manual AWS connections](docs/manual-aws-connections.md).
 
 ## Temporary Access Expiry
 

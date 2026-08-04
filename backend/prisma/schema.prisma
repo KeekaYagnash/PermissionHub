@@ -50,6 +50,7 @@ enum AccountType {
 }
 
 enum ConnectionType {
+  LOCAL_DEFAULT_CREDENTIALS
   DEFAULT_CHAIN
   ASSUME_ROLE
   EXTERNAL_ROLE
@@ -58,8 +59,18 @@ enum ConnectionType {
 enum ConnectionStatus {
   PENDING
   CONNECTED
+  DEGRADED
+  DISABLED
   DISCONNECTED
   ERROR
+}
+
+enum AwsAccountSource {
+  MANUAL
+  ORGANISATION_DISCOVERY
+  DEMO_SEED
+  MIGRATION
+  LEGACY
 }
 
 enum TargetType {
@@ -169,6 +180,8 @@ model AwsOrganisation {
   lastSyncedAt        DateTime?
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
+  isDemo              Boolean                 @default(false)
+  sourceType          AwsAccountSource        @default(LEGACY)
   organisationalUnits AwsOrganisationalUnit[]
   accounts            AwsAccount[]
   requests            Request[]
@@ -187,6 +200,8 @@ model AwsOrganisationalUnit {
   status            String          @default("ACTIVE")
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
+  isDemo            Boolean         @default(false)
+  sourceType        AwsAccountSource @default(LEGACY)
   accounts          AwsAccount[]
   requests          Request[]
 
@@ -214,6 +229,10 @@ model AwsAccount {
   readRoleArn               String?
   provisionRoleArn          String?
   externalIdSecretReference String?
+  sourceType                 AwsAccountSource       @default(LEGACY)
+  isDemo                     Boolean                @default(false)
+  discoveredAt               DateTime?
+  manuallyCreatedAt          DateTime?
   createdAt                 DateTime               @default(now())
   updatedAt                 DateTime               @updatedAt
   principalMappings         AwsPrincipalMapping[]
@@ -233,7 +252,8 @@ model AwsAccountConnection {
   awsAccountId                  String      @unique
   awsAccount                    AwsAccount  @relation(fields: [awsAccountId], references: [id], onDelete: Cascade)
   connectionType                String
-  readRoleArn                   String
+  connectionSource              AwsAccountSource @default(LEGACY)
+  readRoleArn                   String?
   provisionRoleArn              String?
   externalIdSecretReference     String?
   organisationDiscoveryRoleArn  String?

@@ -1,5 +1,5 @@
 import type { AdminScope,AppRole,AwsAccountContext,SessionUser } from '../types.js';
-import { developmentAccounts,developmentOrganisations,developmentOus } from './identity-domain.service.js';
+import { developmentOrganisations,developmentOus,identityDomain } from './identity-domain.service.js';
 
 type Capability='canView'|'canRequest'|'canApprove'|'canProvision'|'canRevoke'|'canManageConfiguration';
 export interface ScopedRequest {tenantId?:string;awsAccountId?:string;requesterUserId?:string;requester?:string;status?:string;requiredApprovalStages?:string[];completedApprovalStages?:string[]}
@@ -9,7 +9,7 @@ export class AuthorizationService {
  canViewTenant(user:SessionUser,tenantId:string){return this.membership(user,tenantId)!==undefined}
  canViewOrganisation(user:SessionUser,organisationId:string){const org=developmentOrganisations.find(o=>o.id===organisationId||o.organisationId===organisationId);return Boolean(org&&this.allowed(user,'canView',{tenantId:org.tenantId,organisationId:org.id}))}
  canViewOU(user:SessionUser,ouId:string){const ou=developmentOus.find(o=>o.id===ouId||o.ouId===ouId),org=ou&&developmentOrganisations.find(o=>o.id===ou.organisationId);return Boolean(ou&&org&&this.allowed(user,'canView',{tenantId:org.tenantId,organisationId:org.id,ouId:ou.id}))}
- canViewAccount(user:SessionUser,accountId:string){const account=developmentAccounts.find(a=>a.id===accountId||a.accountId===accountId);return Boolean(account&&this.allowed(user,'canView',account))}
+ canViewAccount(user:SessionUser,accountId:string){const account=identityDomain.allAccounts().find(a=>a.id===accountId||a.accountId===accountId);return Boolean(account&&this.allowed(user,'canView',account))}
  canRequestAccess(user:SessionUser,accountId:string){return this.forAccount(user,accountId,'canRequest')}
  canApproveInAccount(user:SessionUser,accountId:string){return this.forAccount(user,accountId,'canApprove')}
  canProvisionInAccount(user:SessionUser,accountId:string){return this.forAccount(user,accountId,'canProvision')}
@@ -19,7 +19,7 @@ export class AuthorizationService {
  canRevokeGrant(user:SessionUser,grant:ScopedGrant){return Boolean(grant.awsAccountId&&this.forAccount(user,grant.awsAccountId,'canRevoke'))}
  canManageAccountConfiguration(user:SessionUser,accountId:string){return this.forAccount(user,accountId,'canManageConfiguration')}
  permissions(user:SessionUser,accountId?:string){const checks:Record<string,boolean>={viewTenant:Boolean(user.activeTenantId&&this.canViewTenant(user,user.activeTenantId))};if(accountId)Object.assign(checks,{viewAccount:this.canViewAccount(user,accountId),requestAccess:this.canRequestAccess(user,accountId),approveRequest:this.canApproveInAccount(user,accountId),provisionRequest:this.canProvisionInAccount(user,accountId),revokeGrant:this.canRevokeInAccount(user,accountId),manageAccount:this.canManageAccountConfiguration(user,accountId)});return Object.entries(checks).filter(([,allowed])=>allowed).map(([permission])=>permission)}
- private forAccount(user:SessionUser,accountId:string,capability:Capability){const account=developmentAccounts.find(a=>a.id===accountId||a.accountId===accountId);return Boolean(account&&this.allowed(user,capability,account))}
+ private forAccount(user:SessionUser,accountId:string,capability:Capability){const account=identityDomain.allAccounts().find(a=>a.id===accountId||a.accountId===accountId);return Boolean(account&&this.allowed(user,capability,account))}
  private membership(user:SessionUser,tenantId:string){return user.memberships.find(m=>m.tenantId===tenantId&&m.status==='ACTIVE')}
  private allowed(user:SessionUser,capability:Capability,context:Pick<AwsAccountContext,'tenantId'> & Partial<AwsAccountContext>){
   const membership=this.membership(user,context.tenantId);if(!membership)return false;

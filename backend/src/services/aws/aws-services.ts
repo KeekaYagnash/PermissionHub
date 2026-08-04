@@ -42,6 +42,7 @@ export class AwsConnectionService{
  private sts:STSClient;
  constructor(private context?:AwsAccountContext,private actor?:SessionUser){this.sts=new STSClient({region:context?.region??region})}
  async status(){
+  if(env.AWS_CONNECTION_MODE==='manual'&&!this.context)return {mode:'LIVE',connected:false,accountId:'',principalArn:'',region,credentialSource:'not selected',lastChecked:new Date().toISOString(),message:'No manually connected AWS account is selected.'};
   if(env.AWS_LIVE_MODE==='false')return this.mockConnection('AWS live mode is disabled.');
   if(env.AWS_LIVE_MODE==='auto'&&!hasCredentialHint())return this.mockConnection('No AWS credential source was detected for the backend default provider chain.');
   try{
@@ -49,6 +50,7 @@ export class AwsConnectionService{
    const identity=await this.sts.send(new GetCallerIdentityCommand({}));
    return {mode:'LIVE',connected:true,accountId:identity.Account??'unknown',principalArn:identity.Arn??'unknown',region,credentialSource:this.credentialSource(),lastChecked:new Date().toISOString()};
   }catch(error:any){
+   if(env.AWS_CONNECTION_MODE==='manual')return {mode:'LIVE',connected:false,accountId:this.context?.accountId??'',principalArn:'',region:this.context?.region??region,credentialSource:this.context?.connectionType??'default provider chain',lastChecked:new Date().toISOString(),message:'The selected manual AWS connection could not be validated.',errorCode:error?.name};
    return {...this.mockConnection('No usable AWS credentials were found by the backend default provider chain.'),errorCode:error?.name};
   }
  }
@@ -68,7 +70,7 @@ function hasCredentialHint(){
  return Boolean(process.env.AWS_PROFILE||process.env.AWS_ACCESS_KEY_ID||process.env.AWS_WEB_IDENTITY_TOKEN_FILE||process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI||process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI||existsSync(join(homedir(),'.aws','credentials'))||existsSync(join(homedir(),'.aws','config')));
 }
 
-async function liveAvailable(context?:AwsAccountContext,actor?:SessionUser){return (await new AwsConnectionService(context,actor).status()).connected}
+async function liveAvailable(context?:AwsAccountContext,actor?:SessionUser){const status=await new AwsConnectionService(context,actor).status();if(!status.connected&&env.AWS_CONNECTION_MODE==='manual')throw new Error('The selected manual AWS account is not connected. Mock AWS data is disabled in manual mode.');return status.connected}
 
 export class IamIdentityService{
  private iam:IAMClient;
@@ -140,7 +142,7 @@ export class IamPolicyService{
  private riskKey(policy:Policy){return `policy-risk:${this.contextKey()}:${policy.Arn}:${policy.DefaultVersionId}`}
  private toAwsScope(scope?:string){return scope==='CUSTOMER_MANAGED'?'Local':scope==='AWS_MANAGED'?'AWS':'All'}
  private catalogueKey(scope:string,attached?:string){return `policy-catalogue:${this.contextKey()}:${scope}:attached=${attached??'all'}`}
- private contextKey(){return this.context?`${this.context.tenantId}:${this.context.accountId}:${this.context.region}`:'default'}
+ private contextKey(){return this.context?`${this.context.tenantId}:${this.context.accountId}:${this.context.region}:${this.context.connectionType}`:'default'}
  private completeCatalogueInBackground(scope:string,attached?:string){
   const key=this.catalogueKey(scope,attached);
   if(this.inflightFull.has(key))return;
@@ -227,7 +229,7 @@ export class IamProvisioningService{
   if(policyArn.endsWith('/AdministratorAccess'))throw new Error('AdministratorAccess provisioning is explicitly blocked.');
   if(!['attach','detach'].includes(operation))throw new Error('Unsupported provisioning operation.');
  }
- private contextKey(){return this.context?`${this.context.tenantId}:${this.context.accountId}:${this.context.region}`:'default'}
+ private contextKey(){return this.context?`${this.context.tenantId}:${this.context.accountId}:${this.context.region}:${this.context.connectionType}`:'default'}
 }
 
 async function collect<T,R>(fn:(marker?:string)=>Promise<R>,items:(response:R)=>T[],next:(response:R)=>string|undefined){const output:T[]=[];let marker:undefined|string;do{const response=await fn(marker);output.push(...items(response));marker=next(response)}while(marker);return output}

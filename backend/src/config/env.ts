@@ -8,6 +8,9 @@ const schema=z.object({
  REDIS_URL:z.string().default('redis://localhost:6379'),
  AUTH_ENABLED:z.string().transform(v=>v==='true').default(true),
  ENABLE_DEV_AUTH:z.string().optional().transform(value=>value===undefined||value.trim()===''?process.env.NODE_ENV!=='production':value==='true'),
+ DEV_AUTH_USER_ID:z.string().optional(),
+ AWS_CONNECTION_MODE:z.enum(['manual','organisation','hybrid']).default('manual'),
+ ENABLE_AWS_DEMO_DATA:z.string().optional().transform(value=>value==='true').default(false),
  MULTI_TENANT_ENABLED:z.string().transform(v=>v==='true').default(true),
  SESSION_SECRET:z.string().min(32).default('development-only-session-secret-change-me'),
  SESSION_COOKIE_NAME:z.string().default('permissionhub.sid'),
@@ -40,5 +43,6 @@ const schema=z.object({
 });
 export const env=schema.parse(process.env);
 if(env.NODE_ENV==='production'&&env.ENABLE_DEV_AUTH)throw new Error('ENABLE_DEV_AUTH must never be enabled in production.');
+if(env.NODE_ENV==='production'&&env.AWS_CONNECTION_MODE==='manual'&&env.ENABLE_AWS_DEMO_DATA)throw new Error('AWS demo data must not be enabled in production manual mode.');
 if(env.NODE_ENV==='production'&&env.SESSION_SECRET.startsWith('development-only'))throw new Error('SESSION_SECRET must be configured in production.');
 export const liveProvisioningEnabled=env.PROVISIONING_MODE==='LIVE'&&env.ENABLE_LIVE_PROVISIONING&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS';

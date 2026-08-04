@@ -35,8 +35,9 @@ export default function Layout(){
   return ()=>media.removeEventListener('change',sync);
  },[]);
  return <div className="app">
+  {session?.developmentAuthenticationActive&&<div className="development-auth-banner" role="status">Development authentication is active</div>}
   <AppHeader connection={data} context={context.data} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen}/>
-  <main id="main-content"><Outlet/></main>
+  <main id="main-content"><Outlet key={session?.user?.activeAccountId??'no-aws-account'}/></main>
   <MobileBottomNavigation drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} menuButtonRef={menuButtonRef}/>
   <MobileNavigationDrawer open={drawerOpen} onClose={()=>setDrawerOpen(false)} connection={data} context={context.data} returnFocusRef={menuButtonRef}/>
  </div>;
@@ -50,7 +51,7 @@ function AppHeader({connection,context,drawerOpen,setDrawerOpen}:{connection:any
    <Brand/>
    <DesktopNavigation/>
    <div className="desktop-sidebar-footer">
-    {hasTenantRole(session,'ORGANISATION_ADMIN')&&<NavLink to="/administration"><Settings size={16}/><span>Administration</span></NavLink>}
+    {session?.awsConnectionMode!=='manual'&&hasTenantRole(session,'ORGANISATION_ADMIN')&&<NavLink to="/administration"><Settings size={16}/><span>Administration</span></NavLink>}
     <NavLink to="/connection" aria-current={isNavActive(location.pathname,'connection')?'page':undefined} className={isNavActive(location.pathname,'connection')?'active':''}><PlugZap size={16}/><span>Connection</span></NavLink>
     <ThemeControl/>
     <ConnectionStatus connection={connection}/><UserMenu compact/>

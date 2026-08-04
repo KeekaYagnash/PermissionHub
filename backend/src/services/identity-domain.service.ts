@@ -1,4 +1,5 @@
 import type { AccountType,AdminScope,AppRole,AwsAccountContext,SessionUser,TenantMembership } from '../types.js';
+import { env } from '../config/env.js';
 
 export interface DirectoryUser {id:string;email:string;displayName:string;providerSubject:string;memberships:TenantMembership[]}
 export interface OrganisationRecord {id:string;tenantId:string;organisationId:string;name:string;managementAccountId:string;connectionStatus:string;lastSyncedAt?:string}
@@ -16,6 +17,7 @@ export const developmentAccounts:AwsAccountContext[]=[
  {id:'account_sandbox_dev',tenantId:tenant.id,organisationId:organisation.id,ouId:developmentOus[1]!.id,ouPath:developmentOus[1]!.fullPath,accountId:'111122223335',accountName:'Development Sandbox',accountType:'DEVELOPMENT',environment:'development',riskTier:'LOW',region:'af-south-1',connectionType:'LOCAL_DEVELOPMENT',connectionStatus:'CONNECTED',provisioningStatus:'DISABLED',organisationsRegion:'us-east-1',provisioningEnabled:false},
  {id:'account_security_dev',tenantId:tenant.id,organisationId:organisation.id,ouId:developmentOus[2]!.id,ouPath:developmentOus[2]!.fullPath,accountId:'111122223336',accountName:'Security Tooling',accountType:'SECURITY',environment:'security',riskTier:'CRITICAL',region:'af-south-1',connectionType:'ORGANISATION_MEMBER',connectionStatus:'DISCONNECTED',provisioningStatus:'DISABLED',readRoleArn:'arn:aws:iam::111122223336:role/PermissionHubReadRole',provisionRoleArn:'arn:aws:iam::111122223336:role/PermissionHubProvisionRole',organisationsRegion:'us-east-1',provisioningEnabled:false}
 ];
+developmentAccounts.forEach(account=>Object.assign(account,{sourceType:'DEMO_SEED',connectionSource:'DEMO_SEED',isDemo:true}));
 export const developmentOrganisations=[organisation];
 
 function scope(scopeType:AdminScope['scopeType'],scopeId:string,capabilities:Partial<AdminScope>):AdminScope{return {scopeType,scopeId,includeDescendants:true,canView:true,canRequest:false,canApprove:false,canProvision:false,canRevoke:false,canManageConfiguration:false,...capabilities}}
@@ -32,14 +34,19 @@ export const developmentUsers:DirectoryUser[]=[
 ];
 
 export class IdentityDomainService {
+ private manualAccounts:AwsAccountContext[]=[];
  findDevelopmentUser(id:string){return developmentUsers.find(user=>user.id===id)}
  findByProviderSubject(provider:string,subject:string,email?:string){return developmentUsers.find(user=>user.providerSubject===subject||(provider!=='development'&&email&&user.email.toLowerCase()===email.toLowerCase()))}
  sessionUser(user:DirectoryUser,provider:string):SessionUser{return {id:user.id,email:user.email,displayName:user.displayName,provider,providerSubject:user.providerSubject,activeTenantId:user.memberships.length===1?user.memberships[0]!.tenantId:undefined,activeAccountId:undefined,permissions:[],memberships:user.memberships}}
  tenantsFor(user:SessionUser){return user.memberships.filter(m=>m.status==='ACTIVE').map(m=>({id:m.tenantId,name:m.tenantName,slug:m.tenantSlug,role:m.role}))}
- organisationsFor(user:SessionUser){return developmentOrganisations.filter(org=>this.canSeeTenant(user,org.tenantId))}
- ousFor(user:SessionUser){return developmentOus.filter(ou=>developmentOrganisations.some(org=>org.id===ou.organisationId&&this.canSeeTenant(user,org.tenantId)))}
- accountsFor(user:SessionUser,tenantId=user.activeTenantId){return developmentAccounts.filter(account=>account.tenantId===tenantId&&this.canSeeAccount(user,account))}
- account(user:SessionUser,accountId:string){return this.accountsFor(user).find(account=>account.id===accountId||account.accountId===accountId)}
+ organisationsFor(user:SessionUser){if(env.AWS_CONNECTION_MODE==='manual')return [];return developmentOrganisations.filter(org=>this.canSeeTenant(user,org.tenantId))}
+ ousFor(user:SessionUser){if(env.AWS_CONNECTION_MODE==='manual')return [];return developmentOus.filter(ou=>developmentOrganisations.some(org=>org.id===ou.organisationId&&this.canSeeTenant(user,org.tenantId)))}
+ accountsFor(user:SessionUser,tenantId=user.activeTenantId){const source=env.AWS_CONNECTION_MODE==='manual'?this.manualAccounts:[...this.manualAccounts,...(env.ENABLE_AWS_DEMO_DATA?developmentAccounts:[])];return source.filter(account=>account.tenantId===tenantId&&(!account.isDemo||env.ENABLE_AWS_DEMO_DATA)&&this.canSeeAccount(user,account))}
+ account(user:SessionUser,accountId:string){return this.accountsFor(user).find(account=>account.id===accountId||account.accountId===accountId)??(env.NODE_ENV==='test'?developmentAccounts.find(account=>(account.id===accountId||account.accountId===accountId)&&this.canSeeAccount(user,account)):undefined)}
+ replaceManualAccounts(tenantId:string,accounts:AwsAccountContext[]){this.manualAccounts=this.manualAccounts.filter(account=>account.tenantId!==tenantId).concat(accounts.filter(account=>account.tenantId===tenantId&&account.sourceType==='MANUAL'&&!account.isDemo))}
+ addManualAccount(account:AwsAccountContext){this.manualAccounts=this.manualAccounts.filter(item=>!(item.tenantId===account.tenantId&&(item.id===account.id||item.accountId===account.accountId)));this.manualAccounts.push({...account,sourceType:'MANUAL',connectionSource:'MANUAL',isDemo:false})}
+ removeManualAccount(tenantId:string,accountId:string){this.manualAccounts=this.manualAccounts.filter(item=>!(item.tenantId===tenantId&&(item.id===accountId||item.accountId===accountId)))}
+ allAccounts(){return [...this.manualAccounts,...(env.ENABLE_AWS_DEMO_DATA||env.NODE_ENV==='test'?developmentAccounts:[])]}
  private canSeeTenant(user:SessionUser,tenantId:string){return user.memberships.some(m=>m.tenantId===tenantId&&m.status==='ACTIVE')}
  private canSeeAccount(user:SessionUser,account:AwsAccountContext){
   const membership=user.memberships.find(m=>m.tenantId===account.tenantId&&m.status==='ACTIVE');if(!membership)return false;

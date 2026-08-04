@@ -14,6 +14,7 @@
     "seed": "npm run seed -w backend",
     "aws:whoami": "npm run aws:whoami -w backend",
     "aws:validate-account": "npm run aws:validate-account -w backend --"
+    ,"aws:clear-demo-data": "npm run aws:clear-demo-data -w backend --"
   },
   "devDependencies": {
     "concurrently": "^9.2.0",
