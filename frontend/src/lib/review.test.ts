@@ -17,5 +17,6 @@ describe('review request payload',()=>{
   expect(approvalProvisionLabel('disabled')).toBe('Approve — provisioning disabled');
   expect(approvalProvisionLabel('dry-run')).toBe('Approve and validate change');
   expect(approvalProvisionLabel('live')).toBe('Approve and provision');
+  expect(approvalProvisionLabel('local')).toBe('Approve and provision locally');
  });
 });

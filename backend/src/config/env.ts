@@ -43,6 +43,7 @@ const schema=z.object({
  ,IDENTITY_CENTER_ENABLED:z.string().transform(v=>v==='true').default(false)
  ,CROSS_ACCOUNT_PROVISIONING_ENABLED:z.string().transform(v=>v==='true').default(false)
  ,ALLOW_DEV_SELF_APPROVAL:z.string().optional().transform(value=>value==='true').default(false)
+ ,ALLOW_LOCAL_PROVISIONING:z.string().optional().transform(value=>value==='true').default(false)
  ,AWS_LIVE_TEST_ALLOWED_PRINCIPALS:z.string().default('')
  ,EXPIRY_REVOCATION_MODE:z.enum(['disabled','manual','worker']).default('disabled')
  ,AWS_ROLE_SESSION_DURATION_SECONDS:z.coerce.number().int().min(900).max(3600).optional()
@@ -50,7 +51,9 @@ const schema=z.object({
 export const env=schema.parse(process.env);
 process.env.DATABASE_URL=env.DATABASE_URL;
 if(env.NODE_ENV==='production'&&env.ENABLE_DEV_AUTH)throw new Error('ENABLE_DEV_AUTH must never be enabled in production.');
+if(env.NODE_ENV==='production'&&env.ALLOW_LOCAL_PROVISIONING)throw new Error('ALLOW_LOCAL_PROVISIONING must never be enabled in production.');
 if(env.NODE_ENV==='production'&&env.AWS_CONNECTION_MODE==='manual'&&env.ENABLE_AWS_DEMO_DATA)throw new Error('AWS demo data must not be enabled in production manual mode.');
 if(env.NODE_ENV==='production'&&env.SESSION_SECRET.startsWith('development-only'))throw new Error('SESSION_SECRET must be configured in production.');
 export const liveProvisioningEnabled=env.AWS_PROVISIONING_MODE==='live'&&env.ENABLE_LIVE_PROVISIONING&&env.CROSS_ACCOUNT_PROVISIONING_ENABLED&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS';
+export const isLocalProvisioningEnabled=()=>env.NODE_ENV==='development'&&env.ALLOW_LOCAL_PROVISIONING;
 export const liveTestAllowedPrincipals=env.AWS_LIVE_TEST_ALLOWED_PRINCIPALS.split(',').map(value=>value.trim()).filter(Boolean);

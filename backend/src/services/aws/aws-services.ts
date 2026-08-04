@@ -29,7 +29,7 @@ import { AccessAnalyzerClient,ValidatePolicyCommand } from '@aws-sdk/client-acce
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { env,liveProvisioningEnabled } from '../../config/env.js';
+import { env,liveProvisioningEnabled,isLocalProvisioningEnabled } from '../../config/env.js';
 import type { AwsAccountContext,DiscoveredResource,IamIdentity,IamPolicyDetail,IamPolicySummary,PolicyType,RiskAnalysis,SessionUser,TargetType } from '../../types.js';
 import { analyzePolicyDocument,extractActions,extractResources,mockAccount,mockIdentities,mockPolicies,mockResources } from '../mock.service.js';
 import { cache,cacheTtl } from '../cache.service.js';
@@ -199,22 +199,23 @@ export class IamPolicyValidationService{
 }
 
 export class IamProvisioningService{
- private iam:IAMClient;constructor(private context?:AwsAccountContext,private actor?:SessionUser,private requestId?:string){this.iam=context?awsConnectionBroker.getIamClient(context,'provision',actor,requestId):new IAMClient(cfg)}
+ private iam:IAMClient;constructor(private context?:AwsAccountContext,private actor?:SessionUser,private requestId?:string){this.iam=context?awsConnectionBroker.getIamClient(context,isLocalProvisioningEnabled()?'read':'provision',actor,requestId):new IAMClient(cfg)}
  async attach(input:{targetType:TargetType;targetName:string;policyArn:string}){
   this.assertAllowed(input.policyArn,'attach');
-  if(env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Provisioning is disabled; no AWS change was made.'};
-  if(env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Dry-run mode does not attach policies.'};
-  if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Provisioning is disabled; no AWS change was made.'};
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Dry-run mode does not attach policies.'};
+  if(!isLocalProvisioningEnabled()&&!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
   const listed=input.targetType==='USER'?await this.iam.send(new ListAttachedUserPoliciesCommand({UserName:input.targetName})):await this.iam.send(new ListAttachedRolePoliciesCommand({RoleName:input.targetName}));
   if(listed.AttachedPolicies?.some(policy=>policy.PolicyArn===input.policyArn))return {mode:'LIVE',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,idempotent:true,message:'The approved policy was already attached.'};
   const response=input.targetType==='USER'?await this.iam.send(new AttachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new AttachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn}));
   const verified=input.targetType==='USER'?await this.iam.send(new ListAttachedUserPoliciesCommand({UserName:input.targetName})):await this.iam.send(new ListAttachedRolePoliciesCommand({RoleName:input.targetName}));
   if(!verified.AttachedPolicies?.some(policy=>policy.PolicyArn===input.policyArn))throw new Error('AWS did not report the approved policy attachment after provisioning.');
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);cache.delete(`policy-detail:${this.contextKey()}:${input.policyArn}`);
-  return {mode:'LIVE',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:true,awsRequestId:response.$metadata.requestId};
+  return {mode:isLocalProvisioningEnabled()?'local':'LIVE',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:true,awsRequestId:response.$metadata.requestId};
  }
  async detach(input:{targetType:TargetType;targetName:string;policyArn:string}){
   this.assertAllowed(input.policyArn,'detach');
+  if(isLocalProvisioningEnabled())throw new Error('Development-only local provisioning does not permit policy detachment.');
   if(env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:false,message:'Provisioning is disabled; no AWS change was made.'};
   if(env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:false,message:'Dry-run mode does not detach policies.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
@@ -224,12 +225,12 @@ export class IamProvisioningService{
  }
  async createCustomerPolicy(name:string,document:Record<string,unknown>,path='/permissionhub/',requestId=this.requestId){
   const accountId=this.context?.accountId??env.AWS_ACCOUNT_ID,policyArn=`arn:aws:iam::${accountId}:policy/${path.replace(/^\/+|\/+$/g,'')}/${name}`;
-  if(env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,changed:false,policyArn,message:'Policy creation skipped outside live mode.'};
-  if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,changed:false,policyArn,message:'Policy creation skipped outside live mode.'};
+  if(!isLocalProvisioningEnabled()&&!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
   try{const existing=await this.iam.send(new GetPolicyCommand({PolicyArn:policyArn}));if(existing.Policy?.DefaultVersionId){const version=await this.iam.send(new GetPolicyVersionCommand({PolicyArn:policyArn,VersionId:existing.Policy.DefaultVersionId})),current=parsePolicyDocument(version.PolicyVersion?.Document);if(stableJson(current)!==stableJson(document))throw new Error('POLICY_NAME_CONFLICT');return {mode:'LIVE',changed:false,idempotent:true,policyArn,message:'A matching PermissionHub policy already exists and was reused.'}}}catch(error:any){if(error?.name!=='NoSuchEntity'&&error?.Code!=='NoSuchEntity')throw error}
   const response=await this.iam.send(new CreatePolicyCommand({PolicyName:name,Path:path,PolicyDocument:JSON.stringify(document),Tags:[{Key:'ManagedBy',Value:'PermissionHub'},...(requestId?[{Key:'PermissionHubRequestId',Value:requestId}]:[])]}));
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);
-  return {mode:'LIVE',changed:true,policyArn:response.Policy?.Arn,awsRequestId:response.$metadata.requestId};
+  return {mode:isLocalProvisioningEnabled()?'local':'LIVE',changed:true,policyArn:response.Policy?.Arn,awsRequestId:response.$metadata.requestId};
  }
  private assertAllowed(policyArn:string,operation:string){
   if(policyArn.endsWith('/AdministratorAccess'))throw new Error('AdministratorAccess provisioning is explicitly blocked.');
