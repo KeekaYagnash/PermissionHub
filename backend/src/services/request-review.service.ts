@@ -32,7 +32,7 @@ export function parseReviewInput(value:unknown):ReviewInput{
 
 export function provisioningMode():AwsProvisioningMode{return isLocalProvisioningEnabled()?'local':env.AWS_PROVISIONING_MODE}
 
-export function effectiveApprovalStages(request:PermissionRequest){return isLocalProvisioningEnabled()?['SECURITY_REVIEWER']:(request.requiredApprovalStages??['ACCOUNT_APPROVER']).filter(stage=>stage!=='PROVISIONER')}
+export function effectiveApprovalStages(request:PermissionRequest){return isLocalProvisioningEnabled()?['DEVELOPMENT_REVIEW']:(request.requiredApprovalStages??['ACCOUNT_APPROVER']).filter(stage=>stage!=='PROVISIONER')}
 
 export function buildProvisioningPlan(request:PermissionRequest,account:AwsAccountContext):ProvisioningPlan{
  const errors:{field:string;message:string}[]=[],operations:PlannedOperation[]=[],generatedPolicyNames:string[]=[];
@@ -73,11 +73,11 @@ export function validateGeneratedPolicyDocument(document:Record<string,unknown>|
 }
 
 export function reviewCapabilities(input:{request:PermissionRequest;account:AwsAccountContext;approvalAllowed:boolean;provisionPermission:boolean;canReview?:boolean;currentUserRoles?:AppRole[];selfApprovalBlocked?:boolean;assignedApproverMatch?:boolean}){
- const mode=provisioningMode(),local=mode==='local',plan=buildProvisioningPlan(input.request,input.account),requiredApproverRoles=effectiveApprovalStages(input.request),currentUserRoles=input.currentUserRoles??[],securityReviewer=currentUserRoles.includes('SECURITY_REVIEWER'),provisionRoleValidated=input.account.provisionRoleStatus==='VALIDATED',safeTarget=liveTestAllowedPrincipals.length===0||liveTestAllowedPrincipals.includes(input.request.targetArn),expiryConfigured=!input.request.expiryDate||env.EXPIRY_REVOCATION_MODE==='worker'||(input.account.accountType!=='PRODUCTION'&&env.EXPIRY_REVOCATION_MODE==='manual'),liveFlagsReady=liveProvisioningEnabled&&Boolean(input.account.provisioningEnabled),connected=input.account.connectionStatus==='CONNECTED',effectiveProvisionPermission=local?securityReviewer:input.provisionPermission,blockingReasons:string[]=[];
- if(input.selfApprovalBlocked)blockingReasons.push('SELF_APPROVAL_BLOCKED');
+ const mode=provisioningMode(),local=mode==='local',plan=buildProvisioningPlan(input.request,input.account),requiredApproverRoles=effectiveApprovalStages(input.request),currentUserRoles=input.currentUserRoles??[],provisionRoleValidated=input.account.provisionRoleStatus==='VALIDATED',safeTarget=liveTestAllowedPrincipals.length===0||liveTestAllowedPrincipals.includes(input.request.targetArn),expiryConfigured=!input.request.expiryDate||env.EXPIRY_REVOCATION_MODE==='worker'||(input.account.accountType!=='PRODUCTION'&&env.EXPIRY_REVOCATION_MODE==='manual'),liveFlagsReady=liveProvisioningEnabled&&Boolean(input.account.provisioningEnabled),connected=input.account.connectionStatus==='CONNECTED',effectiveProvisionPermission=local||input.provisionPermission,effectiveApprovalAllowed=local?Boolean(input.canReview):input.approvalAllowed,blockingReasons:string[]=[];
+ if(!local&&input.selfApprovalBlocked)blockingReasons.push('SELF_APPROVAL_BLOCKED');
  if(!local&&input.assignedApproverMatch===false)blockingReasons.push('CURRENT_USER_NOT_ASSIGNED_APPROVER');
- if(!input.approvalAllowed&&!input.selfApprovalBlocked&&input.assignedApproverMatch!==false)blockingReasons.push('CURRENT_USER_NOT_ELIGIBLE_APPROVER');
- if(!effectiveProvisionPermission)blockingReasons.push(local?'SECURITY_REVIEWER_REQUIRED':'ACCOUNT_SCOPED_PROVISIONER_REQUIRED');
+ if(!local&&!input.approvalAllowed&&!input.selfApprovalBlocked&&input.assignedApproverMatch!==false)blockingReasons.push('CURRENT_USER_NOT_ELIGIBLE_APPROVER');
+ if(!effectiveProvisionPermission)blockingReasons.push('ACCOUNT_SCOPED_PROVISIONER_REQUIRED');
  if(mode==='disabled')blockingReasons.push('PROVISIONING_DISABLED');
  if(mode==='dry-run')blockingReasons.push('PROVISIONING_MODE_DRY_RUN');
  if(mode==='live'&&!liveFlagsReady)blockingReasons.push('LIVE_PROVISIONING_FLAGS_INCOMPLETE');
@@ -86,18 +86,18 @@ export function reviewCapabilities(input:{request:PermissionRequest;account:AwsA
  if(!safeTarget)blockingReasons.push('LIVE_TEST_TARGET_NOT_ALLOWED');
  if(!local&&!expiryConfigured)blockingReasons.push('EXPIRY_REVOCATION_NOT_CONFIGURED');
  if(local&&!connected)blockingReasons.push('LOCAL_PROVISIONING_REQUIRES_CONNECTED_ACCOUNT');
- const provisioningAllowed=input.approvalAllowed&&effectiveProvisionPermission&&plan.valid&&safeTarget&&(local?connected:mode==='dry-run'||mode==='live'&&liveFlagsReady&&provisionRoleValidated&&expiryConfigured);
- const reason=blockingReasons.length?blockingReasons[0]!:local?'Development-only local provisioning is enabled. The connected AWS credentials will be used after explicit confirmation.':mode==='live'?'Live provisioning is enabled and requires explicit confirmation.':'Dry-run validation is available; no AWS changes will be made.';
+ const provisioningAllowed=effectiveApprovalAllowed&&effectiveProvisionPermission&&plan.valid&&safeTarget&&(local?connected:mode==='dry-run'||mode==='live'&&liveFlagsReady&&provisionRoleValidated&&expiryConfigured);
+ const reason=blockingReasons.length?blockingReasons[0]!:local?'Development Provisioning Mode is enabled. Approve and Provision will use the connected backend AWS credentials.':mode==='live'?'Live provisioning is enabled and requires explicit confirmation.':'Dry-run validation is available; no AWS changes will be made.';
  const checklist=[
-  {key:'approvalEligibility',label:'Eligible approver',passed:input.approvalAllowed,reason:input.approvalAllowed?undefined:'Assign the required reviewer role or reassign the request.'},
-  {key:'provisioningPermission',label:local?'Security Reviewer':'Account-scoped Provisioner',passed:effectiveProvisionPermission,reason:effectiveProvisionPermission?undefined:local?'Sign in as a Security Reviewer for this account.':'Grant PROVISIONER for this AWS account.'},
+  {key:'approvalEligibility',label:local?'Development authorization bypass':'Eligible approver',passed:effectiveApprovalAllowed,reason:effectiveApprovalAllowed?undefined:local?'The user must retain view access to the active AWS account.':'Assign the required reviewer role or reassign the request.'},
+  {key:'provisioningPermission',label:local?'Development provisioning authorization bypass':'Account-scoped Provisioner',passed:effectiveProvisionPermission,reason:effectiveProvisionPermission?undefined:'Grant PROVISIONER for this AWS account.'},
   {key:'provisioningMode',label:local?'Local development provisioning':'Live provisioning mode',passed:local||mode==='live',reason:local||mode==='live'?undefined:`Current mode is ${mode}.`},
   {key:'provisionRole',label:local?'Connected credentials':'Provision role validated',passed:local?connected:provisionRoleValidated,reason:local?(connected?undefined:'Connect and validate the AWS account.'):provisionRoleValidated?undefined:'Configure and validate the separate provision role.'},
   {key:'planValidation',label:'Provisioning plan valid',passed:plan.valid,reason:plan.valid?undefined:'Complete the IAM operation plan.'},
   {key:'safeTarget',label:'Approved test target',passed:safeTarget,reason:safeTarget?undefined:'Select a principal from the live-test allowlist.'},
   {key:'expiryHandling',label:local?'Expiry worker bypassed for local validation':'Expiry handling configured',passed:local||expiryConfigured,reason:local||expiryConfigured?undefined:'Configure a tested expiry worker before production temporary access.'},
  ];
- return {requestId:input.request.id,canReview:input.canReview??true,canApprove:input.approvalAllowed,canProvision:effectiveProvisionPermission,approvalAllowed:input.approvalAllowed,provisioningAllowed,provisioningMode:mode,localProvisioningEnabled:local,reason,blockingReasons,requiredApproverRoles,currentUserRoles,checklist,planValid:plan.valid,plannedOperations:plan.plannedOperations,blockingFields:plan.errors,liveTestAllowedPrincipals,provisionRoleStatus:input.account.provisionRoleStatus??'NOT_VALIDATED',expiryRevocationMode:env.EXPIRY_REVOCATION_MODE,selfApprovalAllowed:env.NODE_ENV!=='production'&&env.ALLOW_DEV_SELF_APPROVAL};
+ return {requestId:input.request.id,canReview:input.canReview??true,canApprove:effectiveApprovalAllowed,canProvision:effectiveProvisionPermission,approvalAllowed:effectiveApprovalAllowed,provisioningAllowed,provisioningMode:mode,localProvisioningEnabled:local,reason,blockingReasons,requiredApproverRoles,currentUserRoles,checklist,planValid:plan.valid,plannedOperations:plan.plannedOperations,blockingFields:plan.errors,liveTestAllowedPrincipals,provisionRoleStatus:input.account.provisionRoleStatus??'NOT_VALIDATED',expiryRevocationMode:env.EXPIRY_REVOCATION_MODE,selfApprovalAllowed:local||env.NODE_ENV!=='production'&&env.ALLOW_DEV_SELF_APPROVAL};
 }
 
 export function dryRunResult(request:PermissionRequest,plan:ProvisioningPlan){return {requestId:request.id,approvalStatus:'APPROVED',provisioning:{mode:'dry-run' as const,executed:false,safe:plan.valid,targetAccount:plan.targetAccount,targetPrincipal:plan.targetPrincipal,plannedOperations:plan.plannedOperations,validationResults:plan.validationResults,message:'Request approved. Provisioning plan validated; no AWS changes were made.'}}}

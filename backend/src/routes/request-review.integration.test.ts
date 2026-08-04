@@ -24,6 +24,7 @@ afterEach(()=>{
  const approver=developmentUsers.find(item=>item.id==='user_approver_dev');if(approver)approver.memberships[0]!.scopes=approver.memberships[0]!.scopes.filter(scope=>scope.scopeId!==temporaryScopeId);
  const admin=developmentUsers.find(item=>item.id==='user_org_admin_dev');if(admin)admin.memberships[0]!.scopes=admin.memberships[0]!.scopes.filter(scope=>scope.scopeId!==temporaryScopeId);
  const reviewer=developmentUsers.find(item=>item.id==='user_security_dev');if(reviewer)reviewer.memberships[0]!.scopes=reviewer.memberships[0]!.scopes.filter(scope=>scope.scopeId!==temporaryScopeId);
+ const requester=developmentUsers.find(item=>item.id==='user_requester_dev');if(requester)requester.memberships[0]!.scopes=requester.memberships[0]!.scopes.filter(scope=>scope.scopeId!==temporaryScopeId);
  vi.restoreAllMocks();
 });
 
@@ -35,6 +36,7 @@ function pending(id:string,items:PermissionRequest['items']=[{mode:'SPECIFIC_ACT
 async function authenticatedAgent(userId='user_org_admin_dev'){
  if(userId==='user_org_admin_dev'){const admin=developmentUsers.find(item=>item.id===userId)!;admin.memberships[0]!.scopes.push({scopeType:'AWS_ACCOUNT',scopeId:temporaryScopeId,includeDescendants:false,canView:true,canRequest:true,canApprove:true,canProvision:true,canRevoke:true,canManageConfiguration:true})}
  if(userId==='user_security_dev'){const reviewer=developmentUsers.find(item=>item.id===userId)!;reviewer.memberships[0]!.scopes.push({scopeType:'AWS_ACCOUNT',scopeId:temporaryScopeId,includeDescendants:false,canView:true,canRequest:false,canApprove:true,canProvision:false,canRevoke:false,canManageConfiguration:false})}
+ if(userId==='user_requester_dev'){const requester=developmentUsers.find(item=>item.id===userId)!;requester.memberships[0]!.scopes.push({scopeType:'AWS_ACCOUNT',scopeId:temporaryScopeId,includeDescendants:false,canView:true,canRequest:true,canApprove:false,canProvision:false,canRevoke:false,canManageConfiguration:false})}
  identityDomain.addManualAccount(account);
  vi.spyOn(awsAccountRepository,'refreshManualAccounts').mockResolvedValue([account]);
  vi.spyOn(awsAccountRepository,'getByRecordId').mockImplementation(async(_tenant,id)=>id===account.id?account:undefined);
@@ -97,12 +99,12 @@ describe('safe request review HTTP workflow',()=>{
   await agent.post(`/api/requests/${incomplete.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(422).expect(response=>expect(response.body.error).toMatchObject({code:'INCOMPLETE_PROVISIONING_PLAN'}));
  });
 
- it('requires confirmation before development-only local provisioning and never reaches an AWS mutation',async()=>{
+ it('removes the named enterprise blockers for a self-requester without reaching provisioning before the action',async()=>{
   (env as {NODE_ENV:'development'}).NODE_ENV='development';(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=true;
-  const item=pending('PR-TEST-LOCAL-CONFIRM');requests.unshift(item);
+  const item={...pending('PR-TEST-LOCAL-CAPABILITY'),approverUserId:'user_approver_dev'};requests.unshift(item);
   const attach=vi.spyOn(IamProvisioningService.prototype,'attach'),create=vi.spyOn(IamProvisioningService.prototype,'createCustomerPolicy');
-  const {agent,csrf}=await authenticatedAgent('user_security_dev');
-  await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(422).expect(response=>expect(response.body.error).toMatchObject({code:'LIVE_CONFIRMATION_REQUIRED'}));
+  const {agent}=await authenticatedAgent('user_requester_dev'),response=await agent.get(`/api/requests/${item.id}`).expect(200);
+  expect(response.body.data.reviewCapabilities).toMatchObject({provisioningMode:'local',approvalAllowed:true,provisioningAllowed:true,canProvision:true,blockingReasons:expect.not.arrayContaining(['CURRENT_USER_NOT_ELIGIBLE_APPROVER','CURRENT_USER_NOT_ASSIGNED_APPROVER','ACCOUNT_SCOPED_PROVISIONER_REQUIRED','PROVISIONING_MODE_DRY_RUN','PROVISION_ROLE_NOT_CONFIGURED','EXPIRY_REVOCATION_NOT_CONFIGURED','SELF_APPROVAL_BLOCKED'])});
   expect(item.status).toBe('Pending approval');expect(attach).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
  });
 
@@ -114,8 +116,8 @@ describe('safe request review HTTP workflow',()=>{
   const policyValidation=vi.spyOn(IamPolicyValidationService.prototype,'validate').mockResolvedValue({mode:'LIVE',findings:[]});
   const create=vi.spyOn(IamProvisioningService.prototype,'createCustomerPolicy').mockResolvedValue({mode:'local',changed:true,policyArn,awsRequestId:'mock-create-request'});
   const attach=vi.spyOn(IamProvisioningService.prototype,'attach').mockResolvedValue({mode:'local',operation:'AttachUserPolicy',changed:true,awsRequestId:'mock-attach-request'});
-  const {agent,csrf}=await authenticatedAgent('user_security_dev');
-  const response=await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','local-provision-operation').send({action:'APPROVE_AND_PROVISION',confirmation:{phrase:`PROVISION ${item.id}`,safeTargetConfirmed:true,awsMutationConfirmed:true}}).expect(200);
-  expect(response.body.data).toMatchObject({request:{status:'Provisioned'},provisioning:{mode:'local',executed:true}});expect(validate).toHaveBeenCalledWith(expect.anything(),account.id,'READ',true);expect(identity).toHaveBeenCalledWith(item.targetName);expect(policyValidation).toHaveBeenCalledTimes(1);expect(create).toHaveBeenCalledTimes(1);expect(attach).toHaveBeenCalledTimes(1);
+  const {agent,csrf}=await authenticatedAgent('user_requester_dev');
+  const response=await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','local-provision-operation').send({action:'APPROVE_AND_PROVISION'}).expect(200);
+  expect(response.body.data).toMatchObject({request:{status:'Provisioned',completedApprovalStages:['DEVELOPMENT_REVIEW']},provisioning:{mode:'local',executed:true}});expect(validate).toHaveBeenCalledWith(expect.anything(),account.id,'READ',true);expect(identity).toHaveBeenCalledWith(item.targetName);expect(policyValidation).toHaveBeenCalledTimes(1);expect(create).toHaveBeenCalledTimes(1);expect(attach).toHaveBeenCalledTimes(1);
  });
 });

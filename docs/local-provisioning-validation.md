@@ -15,15 +15,14 @@ The backend refuses to start in production if `ALLOW_LOCAL_PROVISIONING=true`. W
 
 Local mode still requires:
 
-- an authenticated PermissionHub Security Reviewer with access to the selected account;
+- an authenticated PermissionHub user with view access to the selected account;
 - a connected account whose STS identity matches the configured 12-digit account number;
 - a valid target IAM user or role in that account;
 - a complete and valid generated policy document or an existing managed policy;
 - a target permitted by `AWS_LIVE_TEST_ALLOWED_PRINCIPALS` when that allowlist is configured;
-- the exact `PROVISION <request-id>` confirmation and both safety acknowledgements;
-- an explicit **Approve and provision locally** action from the request review page.
+- an explicit **Approve and Provision** action from the request review page.
 
-The standalone provision endpoint is blocked in local mode so it cannot bypass review confirmation. Local mode permits policy creation and attachment only; it does not enable detachment or automatic expiry cleanup.
+The standalone provision endpoint is blocked in local mode so provisioning still originates from the combined review action. Local mode permits policy creation and attachment only; it does not enable detachment or automatic expiry cleanup.
 
 ## Recommended local validation
 

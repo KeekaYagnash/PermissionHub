@@ -88,7 +88,7 @@ async function handleReview(req:AuthenticatedRequest,res:Response,forcedAction?:
  if(input.action==='APPROVE_AND_PROVISION'){
   if(!isLocalProvisioningEnabled()&&!authorization.canProvisionInAccount(req.sessionUser!,account.id))throw new ApiError(403,'Approve and provision requires both approval and provisioning permission.','PROVISIONING_FORBIDDEN');
   if(!plan.valid)throw incompletePlan(plan);
-  if(provisioningMode()==='live'||provisioningMode()==='local'){
+  if(provisioningMode()==='live'){
    const capabilities=capabilitiesFor(req,request,account);if(!capabilities.provisioningAllowed)throw new ApiError(409,'Live provisioning prerequisites are not satisfied.','LIVE_PROVISIONING_NOT_READY',{blockingReasons:capabilities.blockingReasons});
    if(!input.confirmation||input.confirmation.phrase!==`PROVISION ${request.id}`)throw new ApiError(422,`Type PROVISION ${request.id} and confirm both live-change acknowledgements.`,'LIVE_CONFIRMATION_REQUIRED');
   }

@@ -2,7 +2,7 @@ import {useState} from 'react';
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query';
 import {Link,useParams} from 'react-router-dom';
 import {api} from '../lib/api';
-import {approvalProvisionLabel,reviewCommentError,type ReviewAction} from '../lib/review';
+import {approvalProvisionLabel,reviewCommentError,reviewProvisionButtonDisabled,type ReviewAction} from '../lib/review';
 import {Button,LoadingSkeleton,Modal,StatusBadge} from '../components/ui';
 import {useAuthStore} from '../store/auth';
 import type {ReviewCapabilities} from '../types';
@@ -21,10 +21,11 @@ export default function RequestDetail(){
  const simulate=useMutation({mutationFn:()=>api.simulate(id),onSuccess:reload}),provision=useMutation({mutationFn:()=>api.provision(id),onSuccess:async value=>{setResult(value);await reload()}}),revoke=useMutation({mutationFn:()=>api.revoke(id),onSuccess:reload});
  const busy=review.isPending||simulate.isPending||provision.isPending||revoke.isPending||reassign.isPending,error=review.error||simulate.error||provision.error||revoke.error||reassign.error;
  if(isLoading||!data)return <div className="page"><LoadingSkeleton rows={8}/></div>;
- const capabilities=data.reviewCapabilities,mode=capabilities?.provisioningMode??'disabled',pending=data.status==='Pending approval',approved=['Approved','Provisioning failed'].includes(data.status),activeGrant=data.status==='Provisioned',approvalAllowed=canApprove&&Boolean(capabilities?.approvalAllowed),effectiveCanProvision=canProvision||(mode==='local'&&Boolean(capabilities?.canProvision)),provisionReviewAllowed=approvalAllowed&&effectiveCanProvision&&Boolean(capabilities?.provisioningAllowed)&&Boolean(capabilities?.planValid),issue=error?readIssue(error):undefined;
+ const capabilities=data.reviewCapabilities,mode=capabilities?.provisioningMode??'disabled',localMode=mode==='local',pending=data.status==='Pending approval',approved=['Approved','Provisioning failed'].includes(data.status),activeGrant=data.status==='Provisioned',approvalAllowed=(localMode||canApprove)&&Boolean(capabilities?.approvalAllowed),effectiveCanProvision=localMode||canProvision,provisionReviewAllowed=approvalAllowed&&effectiveCanProvision&&Boolean(capabilities?.provisioningAllowed)&&Boolean(capabilities?.planValid),issue=error?readIssue(error):undefined;
  function submitReview(action:ReviewAction){
+  if(review.isPending)return;
   const validationError=reviewCommentError(action,comment);if(validationError){setCommentError(validationError);return}setCommentError(undefined);
-  if(action==='APPROVE_AND_PROVISION'&&(mode==='live'||mode==='local')&&!liveConfirmOpen){setLiveConfirmOpen(true);return}review.mutate({action,key:operationId()});
+  if(action==='APPROVE_AND_PROVISION'&&mode==='live'&&!liveConfirmOpen){setLiveConfirmOpen(true);return}review.mutate({action,key:operationId()});
  }
  return <div className="page detail-page">
   <div className="detail-header"><div><Link to="/requests" className="back-link">Requests</Link><h1>{data.id}</h1><p>{data.title}</p></div><StatusBadge status={data.status}/></div>
@@ -41,15 +42,17 @@ export default function RequestDetail(){
    </article>
    <aside className="panel side-panel approval-panel">
     <h2>Review and provisioning</h2><p className="muted">The server controls provisioning capability. Approval comments are optional; rejection and information requests require a reason.</p>
+    {localMode&&<div className="status-badge warning" role="status">Development Provisioning Mode</div>}
     <div className={`provisioning-mode ${mode}`}><strong>{mode.replace('-',' ')} mode</strong><span>{capabilities?.reason??'Provisioning capability is unavailable.'}</span></div>
     {capabilities&&<CapabilityChecklist capabilities={capabilities}/>}
     {canManage&&<div className="reassign-approver"><h3>Reassign approver</h3><select aria-label="Eligible approver" value={selectedApprover} onChange={event=>setSelectedApprover(event.target.value)}><option value="">Select an eligible approver</option>{approvers.data?.map((item:any)=><option key={item.id} value={item.id}>{item.name} — {item.roles.join(', ')}</option>)}</select><Button variant="secondary" disabled={!selectedApprover||busy} onClick={()=>reassign.mutate()}>Reassign approver</Button></div>}
     <label className="field"><span>Review comment</span><textarea value={comment} onChange={event=>{setComment(event.target.value);setCommentError(undefined)}} placeholder="Optional for approval; required for reject or information requests."/><small>Required for Reject and Request information.</small>{commentError&&<span className="field-error" role="alert">{commentError}</span>}</label>
     <div className="approval-actions">
      {canApprove&&<Button onClick={()=>submitReview('APPROVE')} disabled={busy||!pending||!approvalAllowed}>Approve request</Button>}
-     {canApprove&&effectiveCanProvision&&mode!=='disabled'&&<Button variant="secondary" className="strong-secondary" title={capabilities?.reason} onClick={()=>submitReview('APPROVE_AND_PROVISION')} disabled={busy||!pending||!provisionReviewAllowed}>{approvalProvisionLabel(mode)}</Button>}
-     {canApprove&&effectiveCanProvision&&mode==='disabled'&&<Button variant="secondary" title={capabilities?.reason} disabled>{approvalProvisionLabel(mode)}</Button>}
-     <Button variant="secondary" onClick={()=>simulate.mutate()} disabled={busy||!canApprove}>Run simulation</Button>
+     {localMode&&pending&&<Button variant="secondary" className="strong-secondary" title={capabilities?.reason} aria-busy={review.isPending} onClick={()=>submitReview('APPROVE_AND_PROVISION')} disabled={reviewProvisionButtonDisabled(mode,busy,pending,provisionReviewAllowed)}>{approvalProvisionLabel(mode)}</Button>}
+     {!localMode&&canApprove&&effectiveCanProvision&&mode!=='disabled'&&<Button variant="secondary" className="strong-secondary" title={capabilities?.reason} onClick={()=>submitReview('APPROVE_AND_PROVISION')} disabled={reviewProvisionButtonDisabled(mode,busy,pending,provisionReviewAllowed)}>{approvalProvisionLabel(mode)}</Button>}
+     {!localMode&&canApprove&&effectiveCanProvision&&mode==='disabled'&&<Button variant="secondary" title={capabilities?.reason} disabled>{approvalProvisionLabel(mode)}</Button>}
+     <Button variant="secondary" onClick={()=>simulate.mutate()} disabled={busy||(!localMode&&!canApprove)}>Run simulation</Button>
      {canProvision&&mode==='live'&&<Button variant="secondary" title={capabilities?.reason} onClick={()=>provision.mutate()} disabled={busy||!approved||!capabilities?.planValid||!data.reviewContext?.provisionRoleConfigured}>Provision approved change</Button>}
      {canApprove&&<Button variant="ghost" onClick={()=>submitReview('REQUEST_INFORMATION')} disabled={busy||!pending||!approvalAllowed}>Request information</Button>}
      {canApprove&&<Button variant="danger" onClick={()=>submitReview('REJECT')} disabled={busy||!pending||!approvalAllowed}>Reject</Button>}

@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {approvalProvisionLabel,buildReviewPayload,reviewCommentError} from './review';
+import {approvalProvisionLabel,buildReviewPayload,reviewCommentError,reviewProvisionButtonDisabled} from './review';
 
 describe('review request payload',()=>{
  it.each(['APPROVE','APPROVE_AND_PROVISION'] as const)('omits an empty optional comment for %s',action=>{
@@ -17,6 +17,7 @@ describe('review request payload',()=>{
   expect(approvalProvisionLabel('disabled')).toBe('Approve — provisioning disabled');
   expect(approvalProvisionLabel('dry-run')).toBe('Approve and validate change');
   expect(approvalProvisionLabel('live')).toBe('Approve and provision');
-  expect(approvalProvisionLabel('local')).toBe('Approve and provision locally');
+ expect(approvalProvisionLabel('local')).toBe('Approve and Provision');
  });
+ it('never disables the combined button because of workflow gates in local mode',()=>{expect(reviewProvisionButtonDisabled('local',false,false,false)).toBe(false);expect(reviewProvisionButtonDisabled('local',true,true,true)).toBe(false);expect(reviewProvisionButtonDisabled('live',false,true,false)).toBe(true)});
 });
