@@ -5,6 +5,5 @@ declare module 'express-session' {
  interface SessionData {
   user?:SessionUser;
   csrfToken?:string;
-  oidc?:{state:string;nonce:string;codeVerifier:string};
  }
 }

@@ -4,11 +4,10 @@ This document describes the `user_login` branch. The branch introduces Permissio
 
 ## Authentication providers
 
-`AuthProvider` separates login from application authorisation. It exposes `signIn`, `signOut`, `getSession`, `refreshSession`, `getCurrentUser`, and `handleCallback`.
+`AuthProvider` separates login from application authorisation. The abstraction remains available so an external provider can be reintroduced later without changing tenant or account authorisation.
 
-- `development` provides an explicitly enabled local user selector. It is rejected when `NODE_ENV=production`.
-- `oidc`, `entra`, and `identity-center` use OpenID Connect discovery, authorization code flow, state, nonce, and PKCE. The client secret remains in the backend.
-- Unknown OIDC identities are rejected unless a matching pre-provisioned provider subject or invited email exists. They are not added to every tenant.
+- `development` is currently the only configured provider. It provides an explicitly enabled local user selector and is rejected when `NODE_ENV=production`.
+- SSO/OIDC login routes, callback handling, configuration, and frontend controls are currently removed.
 
 The browser receives an HTTP-only session cookie. Redis stores production sessions; the Express memory store is used only outside production. State-changing API requests require the session CSRF token in `X-CSRF-Token`. No access token, refresh token, AWS credential, or external ID is stored in browser storage.
 
@@ -68,7 +67,7 @@ The in-code defaults are a bootstrap path. Persisted `ApprovalPolicy` records ar
 
 ## Environment variables
 
-See `.env.example`. Required secure values for production include `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `AUTH_PROVIDER`, `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` where required, redirect URIs, and AWS runtime configuration. `ENABLE_DEV_AUTH` must be false in production.
+See `.env.example`. Local authentication requires `AUTH_ENABLED=true`, `ENABLE_DEV_AUTH=true`, and a strong `SESSION_SECRET`. `ENABLE_DEV_AUTH` must be false in production. A production login provider must be implemented and reviewed before production deployment.
 
 ## Local branch test
 
@@ -76,7 +75,7 @@ See `.env.example`. Required secure values for production include `DATABASE_URL`
 git checkout user_login
 npm install
 Copy-Item .env.example .env
-# Set NODE_ENV=development, AUTH_PROVIDER=development, ENABLE_DEV_AUTH=true,
+# Set NODE_ENV=development, ENABLE_DEV_AUTH=true,
 # AUTH_ENABLED=true, and a random SESSION_SECRET of at least 32 characters.
 docker compose up -d postgres redis
 npm run prisma:generate -w backend
@@ -89,7 +88,7 @@ Open `http://localhost:5173/login`, select a development identity, choose an aut
 
 ## Security limitations
 
-- Live OIDC depends on provider registration and has not been verified without that environment.
+- SSO/OIDC login is not currently available. Development login is intentionally unavailable in production.
 - Identity Center discovery and assignment are modeled but deferred.
 - AWS Organizations discovery and cross-account role assumption require real role deployment and have not been asserted live by this branch.
 - Development directory and request persistence retain an in-memory compatibility path while the existing app is migrated incrementally to Prisma.

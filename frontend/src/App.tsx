@@ -21,7 +21,6 @@ export default function App(){
  return <Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
   <Routes>
    <Route path="login" element={<Login/>}/>
-   <Route path="auth/callback" element={<div className="loading-screen">Completing sign in…</div>}/>
    <Route path="select-tenant" element={<SelectTenant/>}/>
    <Route path="unauthorised" element={<Unauthorised/>}/>
    <Route path="session-expired" element={<SessionExpired/>}/>

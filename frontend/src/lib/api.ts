@@ -11,7 +11,6 @@ const unwrapPage=<T>(value:{data:Page<T>})=>value.data;
 
 export const api={
  session:()=>http.get('/auth/session').then(unwrap<AuthSession>),
- authProviders:()=>http.get('/auth/providers').then(unwrap<any>),
  developmentUsers:()=>http.get('/auth/development-users').then(unwrap<any[]>),
  developmentLogin:(userId:string)=>http.post('/auth/development-login',{userId}).then(unwrap<AuthSession>),
  logout:()=>http.post('/auth/logout').then(unwrap<{redirectUrl:string}>),
