@@ -7,7 +7,7 @@ const schema=z.object({
  DATABASE_URL:z.string().default('postgresql://permissionhub:permissionhub@localhost:5432/permissionhub'),
  REDIS_URL:z.string().default('redis://localhost:6379'),
  AUTH_ENABLED:z.string().transform(v=>v==='true').default(true),
- ENABLE_DEV_AUTH:z.string().transform(v=>v==='true').default(false),
+ ENABLE_DEV_AUTH:z.string().optional().transform(value=>value===undefined||value.trim()===''?process.env.NODE_ENV!=='production':value==='true'),
  MULTI_TENANT_ENABLED:z.string().transform(v=>v==='true').default(true),
  SESSION_SECRET:z.string().min(32).default('development-only-session-secret-change-me'),
  SESSION_COOKIE_NAME:z.string().default('permissionhub.sid'),
