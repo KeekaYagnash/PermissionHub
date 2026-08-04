@@ -42,3 +42,25 @@ npm run aws:clear-demo-data -- --confirm
 ```
 
 Manual and unclassified legacy records are not deleted. Legacy records remain excluded from manual mode until explicitly reviewed and classified.
+
+## Diagnose and recover an onboarding conflict
+
+Inspect every tenant-scoped record for an AWS account without printing roles, external IDs, or credentials:
+
+```bash
+npm run aws:inspect-account -- --account-id 143671530412
+```
+
+Preview a repair:
+
+```bash
+npm run aws:repair-account -- --account-id 143671530412 --dry-run
+```
+
+Apply the repair only after reviewing the output:
+
+```bash
+npm run aws:repair-account -- --account-id 143671530412 --confirm
+```
+
+Repair preserves the account and audit-related foreign keys. It classifies the connection as manual, creates a missing connection row when required, and resets the connection to `PENDING`. It never marks an account connected; STS account matching and IAM capability validation must succeed first.

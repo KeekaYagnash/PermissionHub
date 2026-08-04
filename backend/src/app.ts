@@ -15,6 +15,7 @@ import { authenticate,csrfProtection,tenantScope } from './middleware/auth.js';
 import { errorHandler } from './utils/http.js';
 import authRoutes from './routes/auth.routes.js';
 import apiRoutes from './routes/api.routes.js';
+import awsAccountRoutes from './routes/aws-account.routes.js';
 import { openapi } from './openapi.js';
 
 export const app=express();
@@ -28,5 +29,5 @@ app.get('/api/v1/health',(_req,res)=>res.json({status:'ok',version:'2.0.0',times
 app.get('/api/health',(_req,res)=>res.json({status:'ok',version:'2.0.0',timestamp:new Date().toISOString(),provisioningMode:env.PROVISIONING_MODE,liveProvisioningEnabled:env.ENABLE_LIVE_PROVISIONING}));
 app.use('/api/docs',swaggerUi.serve,swaggerUi.setup(openapi,{customSiteTitle:'PermissionHub API',customCss:'.swagger-ui .topbar{background:#07111f}'}));
 app.get('/api/openapi.json',(_req,res)=>res.json(openapi));
-app.use('/api/v1/auth',authRoutes);app.use('/api/auth',authRoutes);app.use('/api/v1',authenticate,tenantScope,csrfProtection,apiRoutes);app.use('/api',authenticate,tenantScope,csrfProtection,apiRoutes);
+app.use('/api/v1/auth',authRoutes);app.use('/api/auth',authRoutes);app.use('/api/v1',authenticate,tenantScope,csrfProtection,awsAccountRoutes,apiRoutes);app.use('/api',authenticate,tenantScope,csrfProtection,awsAccountRoutes,apiRoutes);
 app.use((_req,res)=>res.status(404).json({error:{code:'NOT_FOUND',message:'Route not found'}}));app.use(errorHandler);

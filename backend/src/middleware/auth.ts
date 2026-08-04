@@ -15,7 +15,9 @@ export function authenticate(req:AuthenticatedRequest,_res:Response,next:NextFun
  if(membership)req.auth={sub:user.id,organizationId:membership.tenantId,role:membership.role,email:user.email,name:user.displayName};
  next();
 }
-export const authorize=(...roles:AppRole[])=>(req:AuthenticatedRequest,_res:Response,next:NextFunction)=>req.auth&&roles.includes(req.auth.role)?next():next(new ApiError(403,'You do not have permission to perform this action','FORBIDDEN'));
+export function isConnectionAdmin(req:AuthenticatedRequest){const user=req.sessionUser!,tenantId=req.tenantId??user.activeTenantId,membership=user.memberships.find(item=>item.tenantId===tenantId&&item.status==='ACTIVE');return Boolean(membership?.scopes.some(scope=>scope.canManageConfiguration&&scope.canView&&scope.scopeType==='TENANT'&&scope.scopeId===tenantId))}
+export const authorize=(...roles:AppRole[])=>(req:AuthenticatedRequest,_res:Response,next:NextFunction)=>req.auth&&(roles.includes(req.auth.role)||(roles.includes('ORGANISATION_ADMIN')&&(req.path.startsWith('/aws/accounts')||req.path.startsWith('/aws/local-credentials'))&&isConnectionAdmin(req)))?next():next(new ApiError(403,'You do not have permission to perform this action','FORBIDDEN'));
+export function requireConnectionAdmin(req:AuthenticatedRequest,_res:Response,next:NextFunction){return isConnectionAdmin(req)?next():next(new ApiError(403,'You are not authorised to administer AWS account connections.','AWS_CONNECTION_ADMIN_REQUIRED'))}
 export function tenantScope(req:AuthenticatedRequest,_res:Response,next:NextFunction){
  const user=req.sessionUser;if(!user?.activeTenantId)return next(new ApiError(409,'Select a tenant before continuing.','TENANT_REQUIRED'));
  const requested=req.headers['x-tenant-id']?.toString()||req.headers['x-organization-id']?.toString();

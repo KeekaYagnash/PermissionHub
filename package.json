@@ -15,6 +15,8 @@
     "aws:whoami": "npm run aws:whoami -w backend",
     "aws:validate-account": "npm run aws:validate-account -w backend --"
     ,"aws:clear-demo-data": "npm run aws:clear-demo-data -w backend --"
+    ,"aws:inspect-account": "npm run aws:inspect-account -w backend --"
+    ,"aws:repair-account": "npm run aws:repair-account -w backend --"
   },
   "devDependencies": {
     "concurrently": "^9.2.0",
