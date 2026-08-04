@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './load-environment.js';
 import { z } from 'zod';
 
 const schema=z.object({
@@ -36,12 +36,15 @@ const schema=z.object({
  ENABLE_LIVE_PROVISIONING:z.string().transform(v=>v==='true').default(false),
  PROVISIONING_CONFIRMATION:z.string().default(''),
  SES_FROM_EMAIL:z.string().default('access@permissionhub.local')
+ ,ENABLE_RUNTIME_DEBUG:z.string().optional().transform(value=>value==='true').default(false)
+ ,BUILD_COMMIT:z.string().default('development')
  ,AWS_ORGANISATIONS_DISCOVERY_ENABLED:z.string().transform(v=>v==='true').default(false)
  ,IDENTITY_CENTER_ENABLED:z.string().transform(v=>v==='true').default(false)
  ,CROSS_ACCOUNT_PROVISIONING_ENABLED:z.string().transform(v=>v==='true').default(false)
  ,AWS_ROLE_SESSION_DURATION_SECONDS:z.coerce.number().int().min(900).max(3600).optional()
 });
 export const env=schema.parse(process.env);
+process.env.DATABASE_URL=env.DATABASE_URL;
 if(env.NODE_ENV==='production'&&env.ENABLE_DEV_AUTH)throw new Error('ENABLE_DEV_AUTH must never be enabled in production.');
 if(env.NODE_ENV==='production'&&env.AWS_CONNECTION_MODE==='manual'&&env.ENABLE_AWS_DEMO_DATA)throw new Error('AWS demo data must not be enabled in production manual mode.');
 if(env.NODE_ENV==='production'&&env.SESSION_SECRET.startsWith('development-only'))throw new Error('SESSION_SECRET must be configured in production.');

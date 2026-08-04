@@ -4,6 +4,7 @@ import type { AppRole,AuthenticatedRequest } from '../types.js';
 import { ApiError } from '../utils/http.js';
 import { authorization } from '../services/authorization.service.js';
 import { identityDomain } from '../services/identity-domain.service.js';
+import { awsAccountRepository } from '../services/aws-account.repository.js';
 import { safeEqualToken } from '../services/auth-provider.service.js';
 
 export function authenticate(req:AuthenticatedRequest,_res:Response,next:NextFunction){
@@ -25,13 +26,15 @@ export function tenantScope(req:AuthenticatedRequest,_res:Response,next:NextFunc
  if(!authorization.canViewTenant(user,user.activeTenantId))return next(new ApiError(403,'Tenant membership is not active.','TENANT_VIOLATION'));
  req.tenantId=user.activeTenantId;next();
 }
-export function accountScope(req:AuthenticatedRequest,_res:Response,next:NextFunction){
- const user=req.sessionUser!,headerAccount=req.headers['x-aws-account-id']?.toString(),requested=user.activeAccountId;
- if(headerAccount&&headerAccount!==requested)return next(new ApiError(403,'The requested AWS account does not match the active server session.','AWS_ACCOUNT_CONTEXT_MISMATCH'));
- if(!requested)return next(new ApiError(409,'Select an authorised AWS account before using this endpoint.','AWS_ACCOUNT_REQUIRED'));
- const account=identityDomain.account(user,requested);if(!account||!authorization.canViewAccount(user,account.id))return next(new ApiError(403,'AWS account access is not permitted.','AWS_ACCOUNT_FORBIDDEN'));
- if(!['CONNECTED','DEGRADED'].includes(account.connectionStatus))return next(new ApiError(409,'Validate and connect this AWS account before using AWS data.','AWS_ACCOUNT_NOT_CONNECTED'));
- req.awsAccountContext=account;next();
+export async function accountScope(req:AuthenticatedRequest,_res:Response,next:NextFunction){
+ try{const user=req.sessionUser!,headerRecordId=req.headers['x-aws-account-record-id']?.toString(),requested=user.activeAwsAccountRecordId??user.activeAccountId;
+  if(headerRecordId&&headerRecordId!==requested)return next(new ApiError(403,'The requested AWS account does not match the active server session.','AWS_ACCOUNT_CONTEXT_MISMATCH'));
+  if(!requested)return next(new ApiError(409,'Select an authorised AWS account before using this endpoint.','AWS_ACCOUNT_REQUIRED'));
+  await awsAccountRepository.refreshManualAccounts(req.tenantId!);
+  const account=identityDomain.account(user,requested);if(!account||!authorization.canViewAccount(user,account.id))return next(new ApiError(403,'AWS account access is not permitted.','AWS_ACCOUNT_FORBIDDEN'));
+  if(!['CONNECTED','DEGRADED'].includes(account.connectionStatus))return next(new ApiError(409,'Validate and connect this AWS account before using AWS data.','AWS_ACCOUNT_NOT_CONNECTED'));
+  req.awsAccountContext=account;next();
+ }catch(error){next(error)}
 }
 export function requireCapability(capability:'request'|'approve'|'provision'|'revoke'|'manage'){
  return (req:AuthenticatedRequest,_res:Response,next:NextFunction)=>{const user=req.sessionUser!,account=req.awsAccountContext!;const allowed=capability==='request'?authorization.canRequestAccess(user,account.id):capability==='manage'?authorization.canManageAccountConfiguration(user,account.id):user.memberships.some(m=>m.tenantId===account.tenantId&&m.scopes.some(s=>s[`can${capability[0]!.toUpperCase()}${capability.slice(1)}` as keyof typeof s]===true));return allowed?next():next(new ApiError(403,`You cannot ${capability} in this AWS account.`,'SCOPE_FORBIDDEN'))};

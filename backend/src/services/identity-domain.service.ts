@@ -1,5 +1,6 @@
 import type { AccountType,AdminScope,AppRole,AwsAccountContext,SessionUser,TenantMembership } from '../types.js';
 import { env } from '../config/env.js';
+import { prisma } from '../config/database.js';
 
 export interface DirectoryUser {id:string;email:string;displayName:string;providerSubject:string;memberships:TenantMembership[]}
 export interface OrganisationRecord {id:string;tenantId:string;organisationId:string;name:string;managementAccountId:string;connectionStatus:string;lastSyncedAt?:string}
@@ -56,3 +57,14 @@ export class IdentityDomainService {
 
 export const identityDomain=new IdentityDomainService();
 export const accountTypeLabel=(type:AccountType)=>type.replaceAll('_',' ').toLowerCase().replace(/^\w/,c=>c.toUpperCase());
+
+export async function persistDevelopmentIdentity(user:SessionUser){
+ if(env.NODE_ENV!=='development'||user.provider!=='development')return;
+ const membership=user.memberships.find(item=>item.tenantId===user.activeTenantId);if(!membership)return;
+ await prisma.$transaction(async tx=>{
+  await tx.tenant.upsert({where:{id:membership.tenantId},create:{id:membership.tenantId,name:membership.tenantName,slug:membership.tenantSlug,status:'ACTIVE'},update:{name:membership.tenantName,status:'ACTIVE'}});
+  await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()},update:{email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()}});
+  await tx.tenantMembership.upsert({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}},create:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'},update:{role:membership.role,status:'ACTIVE'}});
+  for(const item of membership.scopes)await tx.adminScope.upsert({where:{tenantMembershipId_scopeType_scopeId:{tenantMembershipId:membership.id,scopeType:item.scopeType,scopeId:item.scopeId}},create:{tenantMembershipId:membership.id,...item},update:{includeDescendants:item.includeDescendants,canView:item.canView,canRequest:item.canRequest,canApprove:item.canApprove,canProvision:item.canProvision,canRevoke:item.canRevoke,canManageConfiguration:item.canManageConfiguration}});
+ });
+}

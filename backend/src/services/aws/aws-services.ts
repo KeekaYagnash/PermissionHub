@@ -46,7 +46,7 @@ export class AwsConnectionService{
   if(env.AWS_LIVE_MODE==='false')return this.mockConnection('AWS live mode is disabled.');
   if(env.AWS_LIVE_MODE==='auto'&&!hasCredentialHint())return this.mockConnection('No AWS credential source was detected for the backend default provider chain.');
   try{
-   if(this.context){const identity=await awsConnectionBroker.validate(this.context,this.actor);return {mode:'LIVE',...identity,credentialSource:this.context.connectionType,lastChecked:new Date().toISOString()}}
+   if(this.context){const identity=await awsConnectionBroker.validate(this.context,this.actor);return {mode:'LIVE',connected:true,...identity,credentialSource:this.context.connectionType,lastChecked:new Date().toISOString()}}
    const identity=await this.sts.send(new GetCallerIdentityCommand({}));
    return {mode:'LIVE',connected:true,accountId:identity.Account??'unknown',principalArn:identity.Arn??'unknown',region,credentialSource:this.credentialSource(),lastChecked:new Date().toISOString()};
   }catch(error:any){

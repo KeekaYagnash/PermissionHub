@@ -1,12 +1,12 @@
-import 'dotenv/config';
+import { env } from '../config/env.js';
+import { prisma as db } from '../config/database.js';
 import { developmentUsers,identityDomain } from '../services/identity-domain.service.js';
 
 const value=(name:string)=>{const index=process.argv.indexOf(name),result=index>=0?process.argv[index+1]:undefined;if(!result)throw new Error(`${name} is required.`);return result};
 async function main(){
- if(process.env.NODE_ENV==='production')throw new Error('AWS account inspection is disabled in production.');
- process.env.DATABASE_URL??='postgresql://permissionhub:permissionhub@localhost:5432/permissionhub';
- const { PrismaClient }=await import('@prisma/client'),db=new PrismaClient(),accountId=value('--account-id');
- try{const rows=await db.awsAccount.findMany({where:{accountId},include:{connection:true},orderBy:{tenantId:'asc'}}),configuredUser=developmentUsers.find(user=>user.id===(process.env.DEV_AUTH_USER_ID??'user_org_admin_dev'));
+ if(env.NODE_ENV==='production')throw new Error('AWS account inspection is disabled in production.');
+ const accountId=value('--account-id');
+ try{const rows=await db.awsAccount.findMany({where:{accountId},include:{connection:true},orderBy:{tenantId:'asc'}}),configuredUser=developmentUsers.find(user=>user.id===(env.DEV_AUTH_USER_ID??'user_org_admin_dev'));
   const user=configuredUser?identityDomain.sessionUser(configuredUser,'development'):undefined;
   const output=rows.map(row=>{
    const connection=row.connection;

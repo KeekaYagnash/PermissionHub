@@ -11,7 +11,7 @@ import { useAuthStore } from '../store/auth';
 const catalogueStore=new Map<string,{rows:IamPolicySummary[];isComplete:boolean;nextCursor?:string;loadedCount:number;cacheStatus?:string;fetchedAt:number}>();
 
 export default function Permissions(){
- const activeAccountId=useAuthStore(state=>state.session?.user?.activeAccountId);
+ const activeAccountId=useAuthStore(state=>state.session?.user?.activeAwsAccountRecordId??state.session?.user?.activeAccountId);
  const [scope,setScope]=useState<'AWS_MANAGED'|'CUSTOMER_MANAGED'>('AWS_MANAGED');
  const [reloadKey,setReloadKey]=useState(0);
  const [search,setSearch]=useState(''),[debouncedSearch,setDebouncedSearch]=useState('');

@@ -37,8 +37,9 @@ export default function NewRequest(){
  const policies=useQuery({queryKey:['policies','request'],queryFn:()=>api.policies({pageSize:100})});
  const awsResources=useQuery({queryKey:['resources'],queryFn:api.resources});
  const approvers=useQuery({queryKey:['approvers'],queryFn:api.approvers});
- const context=useQuery({queryKey:['auth-context','request',session?.user?.activeAccountId],queryFn:api.context});
- const activeAccount=context.data?.accounts.find(account=>account.id===session?.user?.activeAccountId);
+ const activeAccountRecordId=session?.user?.activeAwsAccountRecordId??session?.user?.activeAccountId;
+ const context=useQuery({queryKey:['auth-context','request',activeAccountRecordId],queryFn:api.context});
+ const activeAccount=context.data?.accounts.find(account=>account.accountRecordId===activeAccountRecordId);
  const policyValidation=useMutation({mutationFn:(document:Record<string,unknown>)=>api.validatePolicy(document),onSuccess:()=>setToast('Policy validated. Access Analyzer findings are shown in review when available.')});
  const create=useMutation({mutationFn:api.createRequest,onSuccess:async request=>{const submittedRequest=await api.submitRequest(request.id);setSubmitted(submittedRequest);setToast(`Request ${submittedRequest.id} submitted for approval.`);await Promise.all([qc.invalidateQueries({queryKey:['requests']}),qc.invalidateQueries({queryKey:['activity']})])}});
  const preselected=params.get('policyArn');
