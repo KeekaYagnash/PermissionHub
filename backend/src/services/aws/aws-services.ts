@@ -202,8 +202,8 @@ export class IamProvisioningService{
  private iam:IAMClient;constructor(private context?:AwsAccountContext,private actor?:SessionUser,private requestId?:string){this.iam=context?awsConnectionBroker.getIamClient(context,'provision',actor,requestId):new IAMClient(cfg)}
  async attach(input:{targetType:TargetType;targetName:string;policyArn:string}){
   this.assertAllowed(input.policyArn,'attach');
-  if(env.PROVISIONING_MODE==='MOCK')return {mode:'MOCK',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,awsRequestId:`mock-${Date.now()}`,message:'Mock provisioning completed without changing AWS.'};
-  if(env.PROVISIONING_MODE==='SIMULATE')return {mode:'SIMULATE',changed:false,message:'Simulation mode does not attach policies.'};
+  if(env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Provisioning is disabled; no AWS change was made.'};
+  if(env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Dry-run mode does not attach policies.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
   const response=input.targetType==='USER'?await this.iam.send(new AttachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new AttachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn}));
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);cache.delete(`policy-detail:${this.contextKey()}:${input.policyArn}`);
@@ -211,15 +211,15 @@ export class IamProvisioningService{
  }
  async detach(input:{targetType:TargetType;targetName:string;policyArn:string}){
   this.assertAllowed(input.policyArn,'detach');
-  if(env.PROVISIONING_MODE==='MOCK')return {mode:'MOCK',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:false,awsRequestId:`mock-${Date.now()}`,message:'Mock revocation completed without changing AWS.'};
-  if(env.PROVISIONING_MODE==='SIMULATE')return {mode:'SIMULATE',changed:false,message:'Simulation mode does not detach policies.'};
+  if(env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:false,message:'Provisioning is disabled; no AWS change was made.'};
+  if(env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:false,message:'Dry-run mode does not detach policies.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
   const response=input.targetType==='USER'?await this.iam.send(new DetachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new DetachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn}));
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);cache.delete(`policy-detail:${this.contextKey()}:${input.policyArn}`);
   return {mode:'LIVE',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:true,awsRequestId:response.$metadata.requestId};
  }
  async createCustomerPolicy(name:string,document:Record<string,unknown>){
-  if(env.PROVISIONING_MODE!=='LIVE')return {mode:env.PROVISIONING_MODE,changed:false,policyArn:`arn:aws:iam::${env.AWS_ACCOUNT_ID}:policy/${name}`,message:'Policy creation skipped outside LIVE mode.'};
+  if(env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,changed:false,policyArn:`arn:aws:iam::${this.context?.accountId??env.AWS_ACCOUNT_ID}:policy/permissionhub/${name}`,message:'Policy creation skipped outside live mode.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
   const response=await this.iam.send(new CreatePolicyCommand({PolicyName:name,PolicyDocument:JSON.stringify(document)}));
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);

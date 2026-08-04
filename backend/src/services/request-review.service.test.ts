@@ -1,0 +1,35 @@
+import {afterEach,describe,expect,it} from 'vitest';
+import {env} from '../config/env.js';
+import type {AwsAccountContext,PermissionRequest} from '../types.js';
+import {buildProvisioningPlan,parseReviewInput,provisioningMode,reviewCapabilities} from './request-review.service.js';
+
+const originalMode=env.AWS_PROVISIONING_MODE;
+afterEach(()=>{(env as {AWS_PROVISIONING_MODE:'disabled'|'dry-run'|'live'}).AWS_PROVISIONING_MODE=originalMode});
+
+const account:AwsAccountContext={id:'00000000-0000-4000-8000-000000000008',tenantId:'tenant_disraptor_dev',accountId:'143671530412',accountName:'Disraptor',accountType:'PRODUCTION',environment:'production',riskTier:'HIGH',region:'af-south-1',connectionType:'LOCAL_DEFAULT_CREDENTIALS',connectionStatus:'CONNECTED',provisioningStatus:'DISABLED',provisioningEnabled:false};
+const request=(overrides:Partial<PermissionRequest>={}):PermissionRequest=>({id:'PR-1008',tenantId:account.tenantId,awsAccountId:account.id,requesterUserId:'user_requester_dev',requester:'Permission Requester',approver:'Organisation Admin',title:'List finance bucket',targetType:'USER',targetName:'maya.chen',targetArn:'arn:aws:iam::143671530412:user/maya.chen',items:[{mode:'SPECIFIC_ACTIONS',generatedPolicyName:'PH-PR-1008-1',actions:['s3:ListBucket'],generatedPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:['s3:ListBucket'],Resource:'*'}]}}],scope:{type:'ALL',resources:[]},duration:'8 hours',startDate:new Date().toISOString(),expiryDate:new Date(Date.now()+28_800_000).toISOString(),priority:'Normal',justification:'Inspect finance bucket contents for the approved support task.',status:'Pending approval',createdAt:new Date().toISOString(),timeline:[],...overrides});
+
+describe('review action comment validation',()=>{
+ it.each(['APPROVE','APPROVE_AND_PROVISION'] as const)('%s accepts an omitted or blank comment',action=>{
+  expect(parseReviewInput({action})).not.toHaveProperty('comment');
+  expect(parseReviewInput({action,comment:'   '})).not.toHaveProperty('comment');
+ });
+ it('trims an optional supplied approval comment',()=>expect(parseReviewInput({action:'APPROVE',comment:'  ok  '})).toMatchObject({comment:'ok'}));
+ it('reject requires a meaningful reason',()=>expect(()=>parseReviewInput({action:'REJECT',comment:'  '})).toThrow('Provide a reason for rejecting this request.'));
+ it('request information requires an explanation',()=>expect(()=>parseReviewInput({action:'REQUEST_INFORMATION'})).toThrow('Explain what additional information is required.'));
+});
+
+describe('safe provisioning plan',()=>{
+ it('defaults to disabled and does not advertise provisioning',()=>{
+  expect(provisioningMode()).toBe('disabled');
+  expect(reviewCapabilities({request:request(),account,approvalAllowed:true,provisionPermission:true})).toMatchObject({provisioningAllowed:false,provisioningMode:'disabled'});
+ });
+ it('describes CreatePolicy before AttachUserPolicy for a specific-action request',()=>{
+  const plan=buildProvisioningPlan(request(),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.policyMode).toBe('GENERATED_CUSTOMER_POLICY');
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreatePolicy','AttachUserPolicy']);
+  expect(plan.plannedOperations.every(item=>item.executed===false)).toBe(true);
+ });
+ it('blocks an incomplete generated policy plan',()=>expect(buildProvisioningPlan(request({items:[{mode:'SPECIFIC_ACTIONS',actions:['s3:ListBucket']}]}),account)).toMatchObject({valid:false,errors:expect.arrayContaining([expect.objectContaining({field:'items.0.generatedPolicyDocument'})])}));
+});

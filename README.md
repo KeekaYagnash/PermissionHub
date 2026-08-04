@@ -69,9 +69,10 @@ Open `http://localhost:5173`. The backend serves REST APIs at `http://localhost:
 ```text
 AWS_PROFILE
 AWS_REGION
-PROVISIONING_MODE
+AWS_PROVISIONING_MODE
 ENABLE_LIVE_PROVISIONING
 PROVISIONING_CONFIRMATION
+CROSS_ACCOUNT_PROVISIONING_ENABLED
 DATABASE_URL
 REDIS_URL
 AUTH_ENABLED
@@ -87,7 +88,8 @@ Recommended manual-connection local configuration (SSO remains disabled on this 
 ```bash
 AWS_PROFILE=permissionhub-dev
 AWS_REGION=af-south-1
-PROVISIONING_MODE=SIMULATE
+AWS_PROVISIONING_MODE=dry-run
+CROSS_ACCOUNT_PROVISIONING_ENABLED=false
 AUTH_ENABLED=false
 ENABLE_DEV_AUTH=true
 DEV_AUTH_USER_ID=user_org_admin_dev
@@ -98,18 +100,19 @@ SESSION_SECRET=<generate-at-least-32-random-characters>
 
 ## Provisioning Modes
 
-`PROVISIONING_MODE=MOCK` is the default. It makes no AWS changes and returns realistic test results.
+`AWS_PROVISIONING_MODE=disabled` is the default. Approval succeeds, the request remains `APPROVED`, and no AWS change is attempted.
 
-`PROVISIONING_MODE=SIMULATE` uses IAM simulation where supported and makes no policy attachments or modifications.
+`AWS_PROVISIONING_MODE=dry-run` builds and validates the exact operation plan and makes no policy attachments or modifications. Specific-action requests show both policy creation and attachment steps.
 
-`PROVISIONING_MODE=LIVE` can attach or detach policies only when both server-side guards are present:
+`AWS_PROVISIONING_MODE=live` can run an approved mutation only when every server-side guard is present:
 
 ```bash
 ENABLE_LIVE_PROVISIONING=true
+CROSS_ACCOUNT_PROVISIONING_ENABLED=true
 PROVISIONING_CONFIRMATION=I_UNDERSTAND_THIS_CHANGES_AWS
 ```
 
-The frontend cannot enable live provisioning.
+The legacy `PROVISIONING_MODE` variable remains accepted for compatibility with older deployments, but it does not enable this review workflow. The frontend cannot enable live provisioning.
 
 ## AWS APIs Implemented
 

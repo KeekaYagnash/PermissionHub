@@ -84,7 +84,7 @@ npm run seed
 npm run dev
 ```
 
-Open `http://localhost:5173/login`, select a development identity, choose an authorised AWS account, and exercise request/approval/provisioning with separate seeded users. Start with `PROVISIONING_MODE=MOCK` or `SIMULATE`.
+Open `http://localhost:5173/login`, select a development identity, choose an authorised AWS account, and exercise the request/review workflow with separate seeded users. Start with `AWS_PROVISIONING_MODE=disabled`; use `AWS_PROVISIONING_MODE=dry-run` to validate an operation plan without changing AWS.
 
 ## Security limitations
 

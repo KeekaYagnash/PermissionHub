@@ -33,6 +33,7 @@ const schema=z.object({
  AWS_ACCOUNT_ID:z.string().default('000000000000'),
  AWS_LIVE_MODE:z.enum(['auto','true','false']).default('auto'),
  PROVISIONING_MODE:z.enum(['MOCK','SIMULATE','LIVE']).default('MOCK'),
+ AWS_PROVISIONING_MODE:z.enum(['disabled','dry-run','live']).default('disabled'),
  ENABLE_LIVE_PROVISIONING:z.string().transform(v=>v==='true').default(false),
  PROVISIONING_CONFIRMATION:z.string().default(''),
  SES_FROM_EMAIL:z.string().default('access@permissionhub.local')
@@ -48,4 +49,4 @@ process.env.DATABASE_URL=env.DATABASE_URL;
 if(env.NODE_ENV==='production'&&env.ENABLE_DEV_AUTH)throw new Error('ENABLE_DEV_AUTH must never be enabled in production.');
 if(env.NODE_ENV==='production'&&env.AWS_CONNECTION_MODE==='manual'&&env.ENABLE_AWS_DEMO_DATA)throw new Error('AWS demo data must not be enabled in production manual mode.');
 if(env.NODE_ENV==='production'&&env.SESSION_SECRET.startsWith('development-only'))throw new Error('SESSION_SECRET must be configured in production.');
-export const liveProvisioningEnabled=env.PROVISIONING_MODE==='LIVE'&&env.ENABLE_LIVE_PROVISIONING&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS';
+export const liveProvisioningEnabled=env.AWS_PROVISIONING_MODE==='live'&&env.ENABLE_LIVE_PROVISIONING&&env.CROSS_ACCOUNT_PROVISIONING_ENABLED&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS';
