@@ -1,0 +1,25 @@
+// @vitest-environment jsdom
+import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import {createRef,useRef,useState} from 'react';
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {AwsConnectionGuideButton} from './AwsConnectionGuideButton';
+import {AwsConnectionGuideDialog} from './AwsConnectionGuideDialog';
+import {guideStorageKey,policyText} from './guide-content';
+
+let copyMock:ReturnType<typeof vi.fn>;
+afterEach(()=>{cleanup();document.documentElement.removeAttribute('data-theme');localStorage.clear();vi.unstubAllGlobals()});
+beforeEach(()=>{copyMock=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:copyMock}});vi.stubGlobal('scrollTo',vi.fn())});
+
+function Harness(){const [open,setOpen]=useState(false),buttonRef=useRef<HTMLButtonElement>(null);return <><AwsConnectionGuideButton ref={buttonRef} userId="guide-user" attention onOpen={()=>setOpen(true)}/><AwsConnectionGuideDialog open={open} onClose={()=>setOpen(false)} returnFocusRef={buttonRef} onUseMethod={()=>undefined}/></>}
+
+describe('AWS connection guide',()=>{
+ it('opens from the Connection guide button, records that it was opened, and defaults to IAM Role',async()=>{const user=userEvent.setup();render(<Harness/>);const button=screen.getByRole('button',{name:'How to connect an AWS account'});expect(button.className).toContain('needs-attention');await user.click(button);expect(button.className).not.toContain('needs-attention');expect(localStorage.getItem(guideStorageKey('guide-user'))).toBe('true');expect(screen.getByRole('dialog')).toBeTruthy();expect(screen.getByRole('tab',{name:/IAM Role/}).getAttribute('aria-selected')).toBe('true')});
+ it('does not animate when reduced motion is preferred',()=>{vi.stubGlobal('matchMedia',vi.fn().mockReturnValue({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()}));render(<AwsConnectionGuideButton attention onOpen={()=>undefined}/>);expect(screen.getByRole('button',{name:'How to connect an AWS account'}).className).not.toContain('needs-attention')});
+ it('opens the IAM User tab without rendering an access-key input',async()=>{const user=userEvent.setup();render(<Harness/>);await user.click(screen.getByRole('button',{name:'How to connect an AWS account'}));await user.click(screen.getByRole('tab',{name:'IAM User'}));expect(screen.getByRole('heading',{name:'Connect using an IAM User'})).toBeTruthy();expect(document.querySelector('input[name*="access" i],input[name*="secret" i]')).toBeNull()});
+ it('closes with Escape, restores focus, and restores page scrolling',async()=>{const user=userEvent.setup();render(<Harness/>);const button=screen.getByRole('button',{name:'How to connect an AWS account'});await user.click(button);expect(document.body.style.overflow).toBe('hidden');fireEvent.keyDown(document,{key:'Escape'});expect(screen.queryByRole('dialog')).toBeNull();expect(document.body.style.overflow).toBe('');expect(document.activeElement).toBe(button)});
+ it('keeps Tab focus inside the dialog',async()=>{const user=userEvent.setup();render(<Harness/>);await user.click(screen.getByRole('button',{name:'How to connect an AWS account'}));const dialog=screen.getByRole('dialog');const focusable=[...dialog.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])')];focusable.at(-1)!.focus();fireEvent.keyDown(document,{key:'Tab'});expect(document.activeElement).toBe(focusable[0])});
+ it('copies policy text and announces success',async()=>{render(<Harness/>);fireEvent.click(screen.getByRole('button',{name:'How to connect an AWS account'}));fireEvent.click(screen.getAllByRole('button',{name:/Copy: copy to clipboard/})[0]);await waitFor(()=>expect(copyMock).toHaveBeenCalledWith(policyText.trust));expect(screen.getByText('Copied to clipboard')).toBeTruthy()});
+ it('uses secure attributes for every external link',async()=>{const user=userEvent.setup();render(<Harness/>);await user.click(screen.getByRole('button',{name:'How to connect an AWS account'}));for(const link of screen.getAllByRole('link')){expect(link.getAttribute('target')).toBe('_blank');expect(link.getAttribute('rel')).toBe('noopener noreferrer')}});
+ it('renders the fixed-shell scrolling structure in both themes',()=>{const ref=createRef<HTMLButtonElement>();const {rerender}=render(<AwsConnectionGuideDialog open onClose={()=>undefined} returnFocusRef={ref} onUseMethod={()=>undefined}/>);const dialog=screen.getByRole('dialog');expect(dialog.className).toBe('connection-guide-dialog');expect(dialog.querySelector('.connection-guide-content')).toBeTruthy();document.documentElement.dataset.theme='dark';rerender(<AwsConnectionGuideDialog open onClose={()=>undefined} returnFocusRef={ref} onUseMethod={()=>undefined}/>);expect(screen.getByRole('dialog')).toBeTruthy();document.documentElement.dataset.theme='light';expect(screen.getByRole('dialog')).toBeTruthy()});
+});
