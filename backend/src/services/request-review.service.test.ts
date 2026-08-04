@@ -28,8 +28,11 @@ describe('safe provisioning plan',()=>{
   const plan=buildProvisioningPlan(request(),account);
   expect(plan.valid).toBe(true);
   expect(plan.policyMode).toBe('GENERATED_CUSTOMER_POLICY');
-  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreatePolicy','AttachUserPolicy']);
+ expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreatePolicy','AttachUserPolicy']);
+  expect(plan.plannedOperations[0]).toMatchObject({policyName:'PH-PR-1008-1',policyPath:'/permissionhub/',policyDocument:expect.any(Object)});
+  expect(plan.plannedOperations[1]).toMatchObject({targetName:'maya.chen',targetArn:'arn:aws:iam::143671530412:user/maya.chen'});
   expect(plan.plannedOperations.every(item=>item.executed===false)).toBe(true);
  });
  it('blocks an incomplete generated policy plan',()=>expect(buildProvisioningPlan(request({items:[{mode:'SPECIFIC_ACTIONS',actions:['s3:ListBucket']}]}),account)).toMatchObject({valid:false,errors:expect.arrayContaining([expect.objectContaining({field:'items.0.generatedPolicyDocument'})])}));
+ it('reports concrete live-readiness blockers',()=>expect(reviewCapabilities({request:request(),account,approvalAllowed:false,provisionPermission:false,currentUserRoles:['ORGANISATION_ADMIN'],assignedApproverMatch:false})).toMatchObject({requestId:'PR-1008',blockingReasons:expect.arrayContaining(['CURRENT_USER_NOT_ASSIGNED_APPROVER','ACCOUNT_SCOPED_PROVISIONER_REQUIRED','PROVISIONING_DISABLED','PROVISION_ROLE_NOT_CONFIGURED']),requiredApproverRoles:['ACCOUNT_APPROVER'],currentUserRoles:['ORGANISATION_ADMIN'],checklist:expect.arrayContaining([expect.objectContaining({key:'approvalEligibility',passed:false}),expect.objectContaining({key:'planValidation',passed:true})])}));
 });

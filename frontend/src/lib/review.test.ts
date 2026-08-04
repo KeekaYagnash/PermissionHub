@@ -6,6 +6,7 @@ describe('review request payload',()=>{
   expect(buildReviewPayload(action,'   ','operation-123')).toEqual({action,idempotencyKey:'operation-123'});
  });
  it('trims a supplied comment',()=>expect(buildReviewPayload('APPROVE','  looks good  ')).toEqual({action:'APPROVE',comment:'looks good'}));
+ it('includes explicit live confirmation without changing comment normalisation',()=>expect(buildReviewPayload('APPROVE_AND_PROVISION',' ','operation-123',{phrase:'PROVISION PR-1009',safeTargetConfirmed:true,awsMutationConfirmed:true})).toEqual({action:'APPROVE_AND_PROVISION',idempotencyKey:'operation-123',confirmation:{phrase:'PROVISION PR-1009',safeTargetConfirmed:true,awsMutationConfirmed:true}}));
  it('requires comments only for reject and request information',()=>{
   expect(reviewCommentError('APPROVE','')).toBeUndefined();
   expect(reviewCommentError('APPROVE_AND_PROVISION','   ')).toBeUndefined();

@@ -1,5 +1,5 @@
 import { AccessAnalyzerClient } from '@aws-sdk/client-accessanalyzer';
-import { IAMClient,ListPoliciesCommand,ListRolesCommand,ListUsersCommand } from '@aws-sdk/client-iam';
+import { IAMClient,ListPoliciesCommand,ListRolesCommand,ListUsersCommand,SimulatePrincipalPolicyCommand } from '@aws-sdk/client-iam';
 import { OrganizationsClient } from '@aws-sdk/client-organizations';
 import { S3Client } from '@aws-sdk/client-s3';
 import { RDSClient } from '@aws-sdk/client-rds';
@@ -53,12 +53,12 @@ export class AwsConnectionBroker {
    context.connectionStatus='CONNECTED';context.lastValidatedAt=new Date(this.now()).toISOString();
    if(mode==='READ')context.lastSuccessfulReadAt=context.lastValidatedAt;else context.lastSuccessfulProvisionAt=context.lastValidatedAt;
    context.lastErrorCode=undefined;context.lastErrorMessage=undefined;
-   this.persistStatus(context,mode,true);
+   await this.persistStatus(context,mode,true);
    this.audit(context,actor,mode==='READ'?'AWS_CONNECTION_VALIDATED':'AWS_PROVISION_ROLE_VALIDATED','SUCCESS',{mode,principalArn:identity.principalArn});
    return {...identity,connected:true,mode,connectionStatus:context.connectionStatus,lastValidatedAt:context.lastValidatedAt};
   }catch(error){
    const safe=sanitiseAwsConnectionError(error);context.connectionStatus='ERROR';context.lastErrorCode=safe.code;context.lastErrorMessage=safe.message;
-   this.persistStatus(context,mode,false);
+   await this.persistStatus(context,mode,false);
    this.audit(context,actor,'AWS_CONNECTION_FAILED','FAILED',{mode,errorCode:safe.code});throw new ApiError(safe.status,safe.message,safe.code);
   }
  }
@@ -71,6 +71,11 @@ export class AwsConnectionBroker {
   const [users,roles,policies]=await Promise.all([capability(new ListUsersCommand({MaxItems:1})),capability(new ListRolesCommand({MaxItems:1})),capability(new ListPoliciesCommand({Scope:'AWS',MaxItems:1}))]);
   this.audit(context,actor,'AWS_DISCOVERY_PERFORMED','SUCCESS',{capabilities:{users:users.available,roles:roles.available,policies:policies.available}});
   return {accountValidated:true,iamUsersReadable:users.available,iamRolesReadable:roles.available,policiesReadable:policies.available,policyValidationAvailable:false,provisionRoleConfigured:Boolean(context.provisionRoleArn),details:{users,roles,policies}};
+ }
+ async testProvisionCapabilities(actor:SessionUser,accountId:string){
+  const context=this.authorisedAccount(actor,accountId,'READ');if(!context.provisionRoleArn)throw new ApiError(422,'No provision role is configured.','PROVISION_ROLE_REQUIRED');
+  const actions=['iam:CreatePolicy','iam:GetPolicy','iam:GetPolicyVersion','iam:TagPolicy','iam:ListAttachedUserPolicies','iam:ListAttachedRolePolicies','iam:AttachUserPolicy','iam:AttachRolePolicy'];
+  try{const iam=new IAMClient({region:context.region,credentials:await this.credentialsFor(context,'READ',actor)}),response=await iam.send(new SimulatePrincipalPolicyCommand({PolicySourceArn:context.provisionRoleArn,ActionNames:actions}));const evaluations=response.EvaluationResults??[];return {available:true,actions:evaluations.map(item=>({action:item.EvalActionName,decision:item.EvalDecision,allowed:item.EvalDecision==='allowed'})),allRequiredAllowed:actions.every(action=>evaluations.some(item=>item.EvalActionName===action&&item.EvalDecision==='allowed'))}}catch(error){const safe=sanitiseAwsConnectionError(error);return {available:false,errorCode:safe.code,message:'The provision role identity was validated, but IAM policy simulation was unavailable. Review the role policy manually before enabling live provisioning.'}}
  }
  async getReadCredentials(actor:SessionUser,accountId:string){const context=this.authorisedAccount(actor,accountId,'READ');return this.credentialsFor(context,'READ',actor)}
  async getProvisionCredentials(actor:SessionUser,requestId:string,accountId?:string){
@@ -104,13 +109,14 @@ export class AwsConnectionBroker {
   if(mode==='PROVISION'&&!authorization.canProvisionInAccount(actor,context.id))throw new ApiError(403,'Provisioning access is not permitted for this AWS account.','PROVISIONING_FORBIDDEN');
   return context;
  }
- private clientConfig(context:AwsAccountContext,mode:ConnectionMode,actor?:SessionUser,requestId?:string,region=context.region){return ['DEFAULT_CHAIN','LOCAL_DEVELOPMENT','LOCAL_DEFAULT_CREDENTIALS'].includes(context.connectionType)?{region}:{region,credentials:()=>this.credentialsFor(context,mode,actor,requestId)} as const}
+ private clientConfig(context:AwsAccountContext,mode:ConnectionMode,actor?:SessionUser,requestId?:string,region=context.region){const local=['DEFAULT_CHAIN','LOCAL_DEVELOPMENT','LOCAL_DEFAULT_CREDENTIALS'].includes(context.connectionType);return local&&mode==='READ'?{region}:{region,credentials:()=>this.credentialsFor(context,mode,actor,requestId)} as const}
  private async credentialsFor(context:AwsAccountContext,mode:ConnectionMode,actor?:SessionUser,requestId?:string,useCache=true,validationOnly=false):Promise<AwsCredentialIdentity>{
   if(mode==='PROVISION'&&!validationOnly){
    if(!env.CROSS_ACCOUNT_PROVISIONING_ENABLED)throw new ApiError(403,'Cross-account provisioning is disabled.','CROSS_ACCOUNT_PROVISIONING_DISABLED');
    if(!context.provisioningEnabled)throw new ApiError(403,'Provisioning is disabled for this AWS account.','ACCOUNT_PROVISIONING_DISABLED');
   }
-  if(['DEFAULT_CHAIN','LOCAL_DEVELOPMENT','LOCAL_DEFAULT_CREDENTIALS'].includes(context.connectionType))return this.defaultCredentials(context,mode);
+  const local=['DEFAULT_CHAIN','LOCAL_DEVELOPMENT','LOCAL_DEFAULT_CREDENTIALS'].includes(context.connectionType);
+  if(local&&(mode==='READ'||!context.provisionRoleArn))return this.defaultCredentials(context,mode);
   const cacheKey=`${context.tenantId}:${context.accountId}:${context.region}:${context.connectionType}:${mode}`;
   const cached=this.credentials.get(cacheKey);if(useCache&&cached&&cached.expiresAt-this.now()>60_000)return cached.credentials;
   const secret=context.externalIdSecretReference?await this.secrets.getSecret(context.externalIdSecretReference):undefined;
@@ -140,7 +146,7 @@ export class AwsConnectionBroker {
  }
  private matchesRole(identityArn:string,roleArn:string){const roleName=roleArn.split('/').at(-1);return identityArn.includes(`:assumed-role/${roleName}/`)}
  private audit(context:AwsAccountContext,actor:SessionUser|undefined,action:string,outcome:'SUCCESS'|'FAILED'|'INFO',metadata:Record<string,unknown>){securityAudit.record({tenantId:context.tenantId,awsAccountId:context.id,actorUserId:actor?.id,action,outcome,metadata:{accountId:context.accountId,...metadata}})}
- private persistStatus(context:AwsAccountContext,mode:ConnectionMode,success:boolean){if(env.NODE_ENV==='test')return;void prisma.awsAccountConnection.updateMany({where:{tenantId:context.tenantId,awsAccountId:context.id},data:{connectionStatus:success?'CONNECTED':'ERROR',provisioningStatus:mode==='PROVISION'?(success?'CONNECTED':'ERROR'):undefined,lastValidatedAt:new Date(this.now()),lastSuccessfulReadAt:success&&mode==='READ'?new Date(this.now()):undefined,lastSuccessfulProvisionAt:success&&mode==='PROVISION'?new Date(this.now()):undefined,lastErrorCode:success?null:context.lastErrorCode,lastErrorMessage:success?null:context.lastErrorMessage}}).catch(()=>undefined)}
+ private async persistStatus(context:AwsAccountContext,mode:ConnectionMode,success:boolean){if(env.NODE_ENV==='test')return;const now=new Date(this.now());await prisma.awsAccountConnection.updateMany({where:{tenantId:context.tenantId,awsAccountId:context.id},data:{connectionStatus:mode==='READ'?(success?'CONNECTED':'ERROR'):undefined,provisioningStatus:mode==='PROVISION'?(success?'CONNECTED':'ERROR'):undefined,provisionRoleStatus:mode==='PROVISION'?(success?'VALIDATED':'ERROR'):undefined,provisionRoleLastValidatedAt:mode==='PROVISION'?now:undefined,provisionRoleLastError:mode==='PROVISION'?(success?null:context.lastErrorMessage):undefined,lastValidatedAt:now,lastSuccessfulReadAt:success&&mode==='READ'?now:undefined,lastSuccessfulProvisionAt:success&&mode==='PROVISION'?now:undefined,lastErrorCode:success?null:context.lastErrorCode,lastErrorMessage:success?null:context.lastErrorMessage}})}
 }
 
 export function sanitiseAwsConnectionError(error:unknown){

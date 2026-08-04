@@ -52,7 +52,7 @@ function AppHeader({connection,context,drawerOpen,setDrawerOpen}:{connection:any
    <Brand/>
    <DesktopNavigation/>
    <div className="desktop-sidebar-footer">
-    {session?.awsConnectionMode!=='manual'&&hasTenantRole(session,'ORGANISATION_ADMIN')&&<NavLink to="/administration"><Settings size={16}/><span>Administration</span></NavLink>}
+    {(import.meta.env.DEV||session?.awsConnectionMode!=='manual')&&hasTenantRole(session,'ORGANISATION_ADMIN')&&<NavLink to="/administration"><Settings size={16}/><span>Administration</span></NavLink>}
     <NavLink to="/connection" aria-current={isNavActive(location.pathname,'connection')?'page':undefined} className={isNavActive(location.pathname,'connection')?'active':''}><PlugZap size={16}/><span>Connection</span></NavLink>
     <ThemeControl/>
     <ConnectionStatus connection={connection}/><UserMenu compact/>

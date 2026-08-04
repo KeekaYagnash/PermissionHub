@@ -205,7 +205,11 @@ export class IamProvisioningService{
   if(env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Provisioning is disabled; no AWS change was made.'};
   if(env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Dry-run mode does not attach policies.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
+  const listed=input.targetType==='USER'?await this.iam.send(new ListAttachedUserPoliciesCommand({UserName:input.targetName})):await this.iam.send(new ListAttachedRolePoliciesCommand({RoleName:input.targetName}));
+  if(listed.AttachedPolicies?.some(policy=>policy.PolicyArn===input.policyArn))return {mode:'LIVE',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,idempotent:true,message:'The approved policy was already attached.'};
   const response=input.targetType==='USER'?await this.iam.send(new AttachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new AttachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn}));
+  const verified=input.targetType==='USER'?await this.iam.send(new ListAttachedUserPoliciesCommand({UserName:input.targetName})):await this.iam.send(new ListAttachedRolePoliciesCommand({RoleName:input.targetName}));
+  if(!verified.AttachedPolicies?.some(policy=>policy.PolicyArn===input.policyArn))throw new Error('AWS did not report the approved policy attachment after provisioning.');
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);cache.delete(`policy-detail:${this.contextKey()}:${input.policyArn}`);
   return {mode:'LIVE',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:true,awsRequestId:response.$metadata.requestId};
  }
@@ -218,10 +222,12 @@ export class IamProvisioningService{
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);cache.delete(`policy-detail:${this.contextKey()}:${input.policyArn}`);
   return {mode:'LIVE',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:true,awsRequestId:response.$metadata.requestId};
  }
- async createCustomerPolicy(name:string,document:Record<string,unknown>){
-  if(env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,changed:false,policyArn:`arn:aws:iam::${this.context?.accountId??env.AWS_ACCOUNT_ID}:policy/permissionhub/${name}`,message:'Policy creation skipped outside live mode.'};
+ async createCustomerPolicy(name:string,document:Record<string,unknown>,path='/permissionhub/',requestId=this.requestId){
+  const accountId=this.context?.accountId??env.AWS_ACCOUNT_ID,policyArn=`arn:aws:iam::${accountId}:policy/${path.replace(/^\/+|\/+$/g,'')}/${name}`;
+  if(env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,changed:false,policyArn,message:'Policy creation skipped outside live mode.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
-  const response=await this.iam.send(new CreatePolicyCommand({PolicyName:name,PolicyDocument:JSON.stringify(document)}));
+  try{const existing=await this.iam.send(new GetPolicyCommand({PolicyArn:policyArn}));if(existing.Policy?.DefaultVersionId){const version=await this.iam.send(new GetPolicyVersionCommand({PolicyArn:policyArn,VersionId:existing.Policy.DefaultVersionId})),current=parsePolicyDocument(version.PolicyVersion?.Document);if(stableJson(current)!==stableJson(document))throw new Error('POLICY_NAME_CONFLICT');return {mode:'LIVE',changed:false,idempotent:true,policyArn,message:'A matching PermissionHub policy already exists and was reused.'}}}catch(error:any){if(error?.name!=='NoSuchEntity'&&error?.Code!=='NoSuchEntity')throw error}
+  const response=await this.iam.send(new CreatePolicyCommand({PolicyName:name,Path:path,PolicyDocument:JSON.stringify(document),Tags:[{Key:'ManagedBy',Value:'PermissionHub'},...(requestId?[{Key:'PermissionHubRequestId',Value:requestId}]:[])]}));
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);
   return {mode:'LIVE',changed:true,policyArn:response.Policy?.Arn,awsRequestId:response.$metadata.requestId};
  }
@@ -231,6 +237,8 @@ export class IamProvisioningService{
  }
  private contextKey(){return this.context?`${this.context.tenantId}:${this.context.accountId}:${this.context.region}:${this.context.connectionType}`:'default'}
 }
+
+function stableJson(value:unknown):string{if(Array.isArray(value))return `[${value.map(stableJson).join(',')}]`;if(value&&typeof value==='object')return `{${Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>`${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;return JSON.stringify(value)}
 
 async function collect<T,R>(fn:(marker?:string)=>Promise<R>,items:(response:R)=>T[],next:(response:R)=>string|undefined){const output:T[]=[];let marker:undefined|string;do{const response=await fn(marker);output.push(...items(response));marker=next(response)}while(marker);return output}
 async function collectLimited<T,R>(fn:(marker?:string)=>Promise<R>,items:(response:R)=>T[],next:(response:R)=>string|undefined,limit:number){const output:T[]=[];let marker:undefined|string;do{const response=await fn(marker);output.push(...items(response));marker=output.length>=limit?undefined:next(response)}while(marker);return output.slice(0,limit)}

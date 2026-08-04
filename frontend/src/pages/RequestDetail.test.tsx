@@ -1,0 +1,10 @@
+import {renderToStaticMarkup} from 'react-dom/server';
+import {describe,expect,it} from 'vitest';
+import {CapabilityChecklist,isLiveConfirmationReady} from './RequestDetail';
+import type {ReviewCapabilities} from '../types';
+
+const capabilities:ReviewCapabilities={requestId:'PR-1009',canReview:true,canApprove:false,canProvision:false,approvalAllowed:false,provisioningAllowed:false,provisioningMode:'dry-run',reason:'CURRENT_USER_NOT_ELIGIBLE_APPROVER',blockingReasons:['CURRENT_USER_NOT_ELIGIBLE_APPROVER','PROVISIONING_MODE_DRY_RUN'],requiredApproverRoles:['SECURITY_REVIEWER'],currentUserRoles:['ORGANISATION_ADMIN'],checklist:[{key:'approvalEligibility',label:'Eligible approver',passed:false,reason:'Assign the required reviewer role.'},{key:'planValidation',label:'Provisioning plan valid',passed:true}],planValid:true,plannedOperations:[],blockingFields:[],liveTestAllowedPrincipals:[],provisionRoleStatus:'NOT_VALIDATED',expiryRevocationMode:'disabled',selfApprovalAllowed:false};
+describe('request provisioning capability UI',()=>{
+ it('renders blocker codes and remediation',()=>{const html=renderToStaticMarkup(<CapabilityChecklist capabilities={capabilities}/>);expect(html).toContain('CURRENT_USER_NOT_ELIGIBLE_APPROVER');expect(html).toContain('Assign the required reviewer role.');expect(html).toContain('SECURITY_REVIEWER');expect(html).toContain('ORGANISATION_ADMIN')});
+ it('requires the exact request phrase and both acknowledgements',()=>{expect(isLiveConfirmationReady('PR-1009','PROVISION PR-1009',true,true)).toBe(true);expect(isLiveConfirmationReady('PR-1009','PROVISION PR-1008',true,true)).toBe(false);expect(isLiveConfirmationReady('PR-1009','PROVISION PR-1009',false,true)).toBe(false)});
+});

@@ -36,7 +36,7 @@ export default function NewRequest(){
  const roles=useQuery({queryKey:['roles',includeServiceLinked],queryFn:()=>api.roles('',includeServiceLinked),enabled:targetType==='ROLE'});
  const policies=useQuery({queryKey:['policies','request'],queryFn:()=>api.policies({pageSize:100})});
  const awsResources=useQuery({queryKey:['resources'],queryFn:api.resources});
- const approvers=useQuery({queryKey:['approvers'],queryFn:api.approvers});
+ const approvers=useQuery({queryKey:['approvers'],queryFn:()=>api.approvers()});
  const activeAccountRecordId=session?.user?.activeAwsAccountRecordId??session?.user?.activeAccountId;
  const context=useQuery({queryKey:['auth-context','request',activeAccountRecordId],queryFn:api.context});
  const activeAccount=context.data?.accounts.find(account=>account.accountRecordId===activeAccountRecordId);

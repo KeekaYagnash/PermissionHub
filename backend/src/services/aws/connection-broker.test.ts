@@ -3,7 +3,7 @@ import { describe,expect,it,vi } from 'vitest';
 import { developmentAccounts,developmentUsers,identityDomain } from '../identity-domain.service.js';
 import { AwsConnectionBroker,buildAssumeRoleInput,buildRoleArn,sanitiseAwsConnectionError,sanitiseSessionTag,sanitiseSourceIdentity } from './connection-broker.service.js';
 
-function actor(){const user=developmentUsers.find(item=>item.id==='user_org_admin_dev')!;const result=identityDomain.sessionUser(user,'development');result.activeTenantId=user.memberships[0]!.tenantId;result.activeAccountId=developmentAccounts[0]!.id;return result}
+function actor(){const user=developmentUsers.find(item=>item.id==='user_org_admin_dev')!;const result=identityDomain.sessionUser(user,'development');result.activeTenantId=user.memberships[0]!.tenantId;result.activeAccountId=developmentAccounts[0]!.id;result.roleAssignments=[{id:'test-provisioner',tenantId:developmentAccounts[0]!.tenantId,awsAccountId:developmentAccounts[0]!.id,role:'PROVISIONER'}];return result}
 
 describe('cross-account connection broker',()=>{
  it('constructs role ARNs with optional paths',()=>{expect(buildRoleArn('123456789012','PermissionHubReadRole')).toBe('arn:aws:iam::123456789012:role/PermissionHubReadRole');expect(buildRoleArn('123456789012','Read','platform/security')).toBe('arn:aws:iam::123456789012:role/platform/security/Read')});

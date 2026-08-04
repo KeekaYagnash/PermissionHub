@@ -17,6 +17,8 @@
     ,"aws:clear-demo-data": "npm run aws:clear-demo-data -w backend --"
     ,"aws:inspect-account": "npm run aws:inspect-account -w backend --"
     ,"aws:repair-account": "npm run aws:repair-account -w backend --"
+    ,"dev:grant-request-access": "npm run dev:grant-request-access -w backend --"
+    ,"dev:revoke-request-access": "npm run dev:revoke-request-access -w backend --"
   },
   "devDependencies": {
     "concurrently": "^9.2.0",

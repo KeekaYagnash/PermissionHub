@@ -17,6 +17,8 @@
     ,"aws:clear-demo-data": "tsx src/scripts/aws-clear-demo-data.ts"
     ,"aws:inspect-account": "tsx src/scripts/aws-inspect-account.ts"
     ,"aws:repair-account": "tsx src/scripts/aws-repair-account.ts"
+    ,"dev:grant-request-access": "tsx src/scripts/development-request-access.ts"
+    ,"dev:revoke-request-access": "tsx src/scripts/development-request-access.ts --revoke"
   },
   "dependencies": {
     "@aws-sdk/client-accessanalyzer": "^3.1101.0",

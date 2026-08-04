@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type { AppContext,AuditEvent,AuthSession,AwsAccountContext,AwsResource,ConnectionStatus,IamIdentity,IamPolicyDetail,IamPolicySummary,Page,PermissionRequest } from '../types';
-import {buildReviewPayload,type ReviewAction} from './review';
+import {buildReviewPayload,type LiveConfirmation,type ReviewAction} from './review';
 
 export const http=axios.create({baseURL:'/api',withCredentials:true});
 let csrfToken='';
@@ -48,7 +48,7 @@ export const api={
  request:(id:string)=>http.get(`/requests/${id}`).then(unwrap<PermissionRequest>),
  createRequest:(payload:unknown)=>http.post('/requests',payload).then(unwrap<PermissionRequest>),
  submitRequest:(id:string)=>http.post(`/requests/${id}/submit`).then(unwrap<PermissionRequest>),
- review:(id:string,action:ReviewAction,comment:string,idempotencyKey:string)=>http.post(`/requests/${id}/review`,buildReviewPayload(action,comment,idempotencyKey)).then(unwrap<any>),
+ review:(id:string,action:ReviewAction,comment:string,idempotencyKey:string,confirmation?:LiveConfirmation)=>http.post(`/requests/${id}/review`,buildReviewPayload(action,comment,idempotencyKey,confirmation)).then(unwrap<any>),
  approve:(id:string,comment:string)=>http.post(`/requests/${id}/approve`,buildReviewPayload('APPROVE',comment)).then(unwrap<PermissionRequest>),
  reject:(id:string,comment:string)=>http.post(`/requests/${id}/reject`,buildReviewPayload('REJECT',comment)).then(unwrap<PermissionRequest>),
  requestInfo:(id:string,comment:string)=>http.post(`/requests/${id}/request-information`,buildReviewPayload('REQUEST_INFORMATION',comment)).then(unwrap<PermissionRequest>),
@@ -56,7 +56,9 @@ export const api={
  provision:(id:string)=>http.post(`/requests/${id}/provision`).then(unwrap<any>),
  revoke:(id:string)=>http.post(`/requests/${id}/revoke`).then(unwrap<any>),
  activity:()=>http.get('/activity',{params:{pageSize:100}}).then(unwrapPage<AuditEvent>),
- approvers:()=>http.get('/approvers').then(unwrap<any[]>),
+ approvers:(requestId?:string)=>http.get('/approvers',{params:{requestId}}).then(unwrap<any[]>),
+ reassignApprover:(requestId:string,approverUserId:string)=>http.post(`/requests/${requestId}/reassign-approver`,{approverUserId}).then(unwrap<any>),
+ validateProvisionRole:(accountRecordId:string)=>http.post(`/aws/accounts/${encodeURIComponent(accountRecordId)}/validate-provision-role`).then(unwrap<any>),
  adminDirectory:()=>http.get('/admin/directory').then(unwrap<any>),
  approvalPolicies:()=>http.get('/admin/approval-policies').then(unwrap<any[]>),
  saveScope:(scope:unknown)=>http.post('/admin/scopes',scope).then(unwrap<any>),

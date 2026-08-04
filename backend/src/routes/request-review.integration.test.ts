@@ -19,6 +19,7 @@ afterEach(()=>{
  for(const id of addedIds.splice(0)){const index=requests.findIndex(item=>item.id===id);if(index>=0)requests.splice(index,1)}
  identityDomain.removeManualAccount(account.tenantId,account.id);
  const approver=developmentUsers.find(item=>item.id==='user_approver_dev');if(approver)approver.memberships[0]!.scopes=approver.memberships[0]!.scopes.filter(scope=>scope.scopeId!==temporaryScopeId);
+ const admin=developmentUsers.find(item=>item.id==='user_org_admin_dev');if(admin)admin.memberships[0]!.scopes=admin.memberships[0]!.scopes.filter(scope=>scope.scopeId!==temporaryScopeId);
  vi.restoreAllMocks();
 });
 
@@ -28,6 +29,7 @@ function pending(id:string,items:PermissionRequest['items']=[{mode:'SPECIFIC_ACT
 }
 
 async function authenticatedAgent(userId='user_org_admin_dev'){
+ if(userId==='user_org_admin_dev'){const admin=developmentUsers.find(item=>item.id===userId)!;admin.memberships[0]!.scopes.push({scopeType:'AWS_ACCOUNT',scopeId:temporaryScopeId,includeDescendants:false,canView:true,canRequest:true,canApprove:true,canProvision:true,canRevoke:true,canManageConfiguration:true})}
  identityDomain.addManualAccount(account);
  vi.spyOn(awsAccountRepository,'refreshManualAccounts').mockResolvedValue([account]);
  vi.spyOn(awsAccountRepository,'getByRecordId').mockImplementation(async(_tenant,id)=>id===account.id?account:undefined);
