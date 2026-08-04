@@ -4,15 +4,18 @@ import {Link,useParams} from 'react-router-dom';
 import {api} from '../lib/api';
 import {approvalProvisionLabel,reviewCommentError,reviewProvisionButtonDisabled,type ReviewAction} from '../lib/review';
 import {Button,LoadingSkeleton,Modal,StatusBadge} from '../components/ui';
+import {ProvisioningExperience,type ProvisioningEnvelope} from '../components/ProvisioningExperience';
 import {useAuthStore} from '../store/auth';
 import type {ReviewCapabilities} from '../types';
 
-type ReviewResult={request?:{id:string;status:string};provisioning?:{mode:string;executed:boolean;safe:boolean;message?:string;plannedOperations?:unknown[];validationResults?:unknown[]}};
+type ReviewResult=ProvisioningEnvelope;
 type ApiIssue={code:string;message:string;correlationId?:string;blockingFields?:{field:string;message:string}[];recommendedAction?:string;awsError?:string;plannedOperations?:unknown[]};
 
 export default function RequestDetail(){
  const {id=''}=useParams(),qc=useQueryClient(),permissions=useAuthStore(state=>state.session?.user?.permissions??[]),canApprove=permissions.includes('approveRequest'),canProvision=permissions.includes('provisionRequest'),canRevoke=permissions.includes('revokeGrant'),canManage=permissions.includes('manageAccount');
  const {data,isLoading}=useQuery({queryKey:['request',id],queryFn:()=>api.request(id),enabled:Boolean(id)});
+ const connection=useQuery({queryKey:['connection'],queryFn:api.connection,enabled:Boolean(data?.provisioningResult)});
+ const activity=useQuery({queryKey:['activity'],queryFn:api.activity,enabled:Boolean(data?.provisioningResult)});
  const approvers=useQuery({queryKey:['approvers',id],queryFn:()=>api.approvers(id),enabled:Boolean(id)&&canManage});
  const [comment,setComment]=useState(''),[commentError,setCommentError]=useState<string>(),[result,setResult]=useState<ReviewResult>(),[liveConfirmOpen,setLiveConfirmOpen]=useState(false),[safeTargetConfirmed,setSafeTargetConfirmed]=useState(false),[awsMutationConfirmed,setAwsMutationConfirmed]=useState(false),[confirmationPhrase,setConfirmationPhrase]=useState(''),[selectedApprover,setSelectedApprover]=useState('');
  const reload=async()=>{await Promise.all([qc.invalidateQueries({queryKey:['request',id]}),qc.invalidateQueries({queryKey:['requests']}),qc.invalidateQueries({queryKey:['activity']})])};
@@ -37,8 +40,7 @@ export default function RequestDetail(){
     <section className="panel"><h2>Resource scope</h2><p>{data.scope.type==='ALL'?'All applicable resources':data.scope.resources.join(', ')||data.scope.arn}</p><h3>Timing</h3><dl className="detail-dl"><div><dt>Duration</dt><dd>{data.duration}</dd></div><div><dt>Starts</dt><dd>{fmt(data.startDate)}</dd></div><div><dt>Expires</dt><dd>{data.expiryDate?fmt(data.expiryDate):'No automatic expiry'}</dd></div></dl></section>
     <section className="panel"><h2>Permission change preview</h2><div className="preview-grid"><div><h3>Before</h3>{data.preview?.before.managedPolicies.map(p=><p key={p.policyArn}>{p.policyName}</p>)}{data.preview?.before.inlinePolicies.map(p=><p key={p}>{p} inline</p>)||<p className="muted">No inline policies reported.</p>}</div><div><h3>Requested change</h3>{data.preview?.change.policiesToAttach.map(p=><p key={p.policyArn??p.policyName}>{p.policyName??p.actions?.join(', ')}</p>)}<p><strong>Operation plan:</strong> {data.preview?.awsOperation}</p><small>Simulation is an estimate, not a guarantee of final live authorization.</small></div><div><h3>After</h3>{data.preview?.after.managedPolicies.map(p=><p key={p.policyArn}>{p.policyName}</p>)}{data.preview?.after.riskFlags.map(flag=><p className="risk-text" key={flag}>{flag}</p>)}</div></div>{data.items.some(i=>i.generatedPolicyDocument)&&<><h3>Generated policy document</h3><pre>{JSON.stringify(data.items.find(i=>i.generatedPolicyDocument)?.generatedPolicyDocument,null,2)}</pre></>}</section>
     {Boolean(data.simulationResult)&&<section className="panel"><h2>Simulation results</h2><pre>{JSON.stringify(data.simulationResult,null,2)}</pre></section>}
-    {Boolean(data.provisioningResult)&&<section className="panel"><h2>Provisioning result</h2><pre>{JSON.stringify(data.provisioningResult,null,2)}</pre></section>}
-    {result?.provisioning&&<section className="panel safe-provisioning-result" aria-live="polite"><h2>{result.provisioning.mode==='dry-run'?'Dry-run completed':'Review completed'}</h2><p>{result.provisioning.message}</p><p><strong>AWS changes executed:</strong> {result.provisioning.executed?'Yes':'No'}</p>{result.provisioning.plannedOperations&&<pre>{JSON.stringify(result.provisioning.plannedOperations,null,2)}</pre>}</section>}
+    <ProvisioningExperience request={data} envelope={result} connection={connection.data} auditEvents={activity.data?.data} inProgress={review.isPending&&review.variables?.action==='APPROVE_AND_PROVISION'||provision.isPending} failure={issue?.code.includes('PROVISION')?{message:issue.message,code:issue.code,correlationId:issue.correlationId}:undefined} canRevoke={canRevoke&&activeGrant} revokePending={revoke.isPending} onRevoke={()=>revoke.mutate()}/>
    </article>
    <aside className="panel side-panel approval-panel">
     <h2>Review and provisioning</h2><p className="muted">The server controls provisioning capability. Approval comments are optional; rejection and information requests require a reason.</p>
