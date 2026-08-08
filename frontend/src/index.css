@@ -43,7 +43,32 @@ dl{display:grid;gap:10px;margin:0}dt{font-size:11px;text-transform:uppercase;col
 table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;background:#f9fafb;color:#4b5563;font-size:11px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid #e5e7eb;padding:10px}td{padding:11px 10px;border-bottom:1px solid #f3f4f6;vertical-align:top}tr:hover td,tr.selected td{background:color-mix(in srgb,var(--brand-cyan) 10%,var(--surface))}td small{display:block;margin-top:4px;color:#6b7280;max-width:520px;word-break:break-word}.link{color:var(--brand-blue);font-weight:700}
 .status,.risk{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:800;border:1px solid transparent;white-space:nowrap}
 .pending-approval,.info{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.approved,.success,.provisioned{background:#ecfdf5;color:#047857;border-color:#bbf7d0}.rejected,.failed,.provisioning-failed{background:#fef2f2;color:#b91c1c;border-color:#fecaca}.draft,.expired,.revoked{background:#f3f4f6;color:#4b5563;border-color:#e5e7eb}.provisioning{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.more-information-required{background:#fef3c7;color:#92400e;border-color:#fde68a}
-.risk.low{background:#ecfdf5;color:#047857}.risk.moderate{background:#fffbeb;color:#92400e}.risk.high{background:#fff7ed;color:#c2410c}.risk.critical{background:#fef2f2;color:#b91c1c}
+.risk.low {
+  background: rgba(22, 163, 74, 0.14);
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.22);
+}
+
+/* Moderate */
+.risk.moderate {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.22);
+}
+
+/* High */
+.risk.high {
+  background: rgba(249, 115, 22, 0.14);
+  color: #fb923c;
+  border-color: rgba(251, 146, 60, 0.22);
+}
+
+/* Critical */
+.risk.critical {
+  background: rgba(239, 68, 68, 0.14);
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.22);
+}
 .tabs{display:flex;gap:8px;border-bottom:1px solid #e5e7eb;padding-bottom:8px}
 .split{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:16px;align-items:start}.policy-detail{position:sticky;top:72px;max-height:calc(100vh - 96px);overflow:auto}.policy-detail h2,.panel h2{font-size:16px;margin:0 0 10px;color:#111827}.policy-detail h3,.panel h3{font-size:13px;margin:16px 0 8px;color:#111827}
 .policy-detail button{width:100%;background:#111827!important;color:#fff!important;border-color:#111827!important;margin:8px 0 14px}
