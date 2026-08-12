@@ -6,7 +6,7 @@ import { api } from '../lib/api';
 import {can} from '../lib/authz';
 import {useAuthStore} from '../store/auth';
 import { fuzzyIdentities } from '../lib/iam';
-import { ErrorState, LoadingSkeleton, ResponsiveTable, SearchToolbar, type TableColumn } from '../components/ui';
+import { ErrorState, LoadingSkeleton, PageHeader, ResponsiveTable, SearchToolbar, type TableColumn } from '../components/ui';
 import {MyAccessCard} from '../components/requestJourney';
 import {isGrantedRequest,isOpenRequest,needsRequesterResponse} from '../lib/requestPresentation';
 import type { IamIdentity,TargetType } from '../types';
@@ -36,7 +36,7 @@ export default function Identities(){
  ];
  if(!canViewAll)return <MyAwsAccess isLoading={myRequests.isLoading} requests={myRequests.data?.data??[]}/>;
  return <div className="page">
-  <div className="page-header"><div><p className="eyebrow">AWS identities</p><h1>IAM users and roles</h1><p>Read-only identity discovery for selecting request targets. Credential material is never requested or displayed.</p></div></div>
+  <PageHeader eyebrow="AWS identities" title="IAM users and roles" description="Read-only identity discovery for selecting request targets. Credential material is never requested or displayed."/>
   <div className="tabs"><button className={type==='USER'?'active':''} onClick={()=>{setType('USER');setSelected(undefined)}}>IAM users</button><button className={type==='ROLE'?'active':''} onClick={()=>{setType('ROLE');setSelected(undefined)}}>IAM roles</button></div>
   <SearchToolbar resultCount={rows.length}>
    <label className="search-field"><Search size={15}/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Search name, ARN, path or description"/></label>
@@ -53,7 +53,7 @@ function MyAwsAccess({isLoading,requests}:{isLoading:boolean;requests:any[]}){
  const open=requests.filter(request=>isOpenRequest(request)&&!isGrantedRequest(request));
  const responseNeeded=requests.filter(request=>needsRequesterResponse(request));
  return <div className="page">
-  <div className="page-header"><div><p className="eyebrow">AWS identities</p><h1>My AWS access</h1><p>Your granted access and open permission requests for the selected AWS account.</p></div><Link className="primary-action" to="/new-request">Request additional access</Link></div>
+  <PageHeader eyebrow="AWS identities" title="My AWS access" description="Your granted access and open permission requests for the selected AWS account." actions={<Link className="primary-action" to="/new-request">Request additional access</Link>}/>
   {isLoading?<LoadingSkeleton rows={6}/>:<>
    {responseNeeded.length>0&&<section className="panel attention-card warning"><h2>Action required</h2><p>{responseNeeded.length} request{responseNeeded.length===1?' needs':'s need'} more information before review can continue.</p><Link to="/requests?filter=Needs%20my%20response">View requests</Link></section>}
    <section className="panel"><div className="section-heading"><div><p className="eyebrow">Currently granted</p><h2>Active AWS access</h2></div><span>{active.length} grant{active.length===1?'':'s'}</span></div>{active.length?<div className="my-access-grid">{active.map(request=><MyAccessCard key={request.id} request={request}/>)}</div>:<div className="empty-state"><h2>No active AWS access found</h2><p>Approved and provisioned requests will appear here after access is granted.</p></div>}</section>

@@ -6,7 +6,11 @@ import { fuzzyPolicies } from "../lib/iam";
 import { mergePolicies } from "../lib/policyCatalogue";
 import {
   LoadingSkeleton,
+  PageHeader,
   ResponsiveTable,
+  RiskBadge,
+  SearchToolbar,
+  TechnicalDetails,
   type TableColumn,
 } from "../components/ui";
 import type { IamPolicySummary, Page } from "../types";
@@ -236,14 +240,8 @@ export default function Permissions() {
       header: "Risk",
       priority: "high",
       render: (policy) => (
-        <span
-          className={`risk ${policy.risk.level.toLowerCase()}`}
-          title={
-            policy.risk.flags.join(", ") ||
-            "Open policy for document-level analysis"
-          }
-        >
-          {policy.risk.level}
+        <span title={policy.risk.flags.join(", ") || "Open policy for document-level analysis"}>
+          <RiskBadge risk={policy.risk.level} />
         </span>
       ),
     },
@@ -279,16 +277,12 @@ export default function Permissions() {
   ];
   return (
     <div className="page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Permissions</p>
-          <h1>IAM managed policy catalogue</h1>
-          <p>
-            Live IAM policy metadata loads progressively. Policy documents and
-            detailed risk analysis load only when a policy is selected.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Permissions"
+        title="IAM managed policies"
+        description="Browse AWS permissions available for access requests. Policy documents and detailed risk analysis load only when selected."
+        actions={<button className="primary-action" onClick={() => navigate('/new-request')}>Request access</button>}
+      />
       <div className="tabs">
         <button
           className={scope === "AWS_MANAGED" ? "active" : ""}
@@ -303,12 +297,15 @@ export default function Permissions() {
           Customer-managed policies
         </button>
       </div>
-      <div className="filter-row">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search policy name, ARN, description"
-        />
+      <SearchToolbar resultCount={displayed.length}>
+        <label className="search-field">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search permissions"
+            aria-label="Search permissions"
+          />
+        </label>
         <select value={service} onChange={(e) => setService(e.target.value)}>
           <option value="">All services</option>
           {services.map((s) => (
@@ -324,7 +321,8 @@ export default function Permissions() {
             <option key={x}>{x}</option>
           ))}
         </select>
-      </div>
+        {(search || service || accessLevel) && <button className="btn btn-secondary" onClick={() => { setSearch(''); setService(''); setAccessLevel(''); }}>Clear filters</button>}
+      </SearchToolbar>
       <div className="catalogue-progress" role="status">
         {loadingInitial
           ? "Loading policy catalogue…"
@@ -418,8 +416,9 @@ export default function Permissions() {
                   <code key={a}>{a}</code>
                 ))}
               </div>
-              <h3>Raw policy JSON</h3>
-              <pre>{JSON.stringify(detail.data.document, null, 2)}</pre>
+              <TechnicalDetails title="Policy JSON" summary={`${detail.data.statements.length} statement${detail.data.statements.length===1?'':'s'}`}>
+                <pre>{JSON.stringify(detail.data.document, null, 2)}</pre>
+              </TechnicalDetails>
             </>
           ) : (
             <p className="muted">

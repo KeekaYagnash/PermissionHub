@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import { api } from '../lib/api';
 import { permissionLabel, requestSearchText, scopeLabel, sortRequests } from '../lib/requestQueue';
-import { EmptyState, LoadingSkeleton, ResponsiveTable, SearchToolbar, StatusBadge, type TableColumn } from '../components/ui';
+import { EmptyState, LoadingSkeleton, PageHeader, ResponsiveTable, RiskBadge, SearchToolbar, StatusBadge, type TableColumn } from '../components/ui';
 import { can } from '../lib/authz';
 import { useAuthStore } from '../store/auth';
 import { accountLabel, expiringSoon, isClosedRequest, isGrantedRequest, isOpenRequest, needsRequesterResponse, requestRisk } from '../lib/requestPresentation';
@@ -36,14 +36,14 @@ export default function Requests(){
   {key:'account',header:'AWS account',priority:'high',render:r=><><strong>{accountLabel(r)}</strong><small>{scopeLabel(r)}</small></>},
   {key:'requester',header:'Requested by',priority:canViewAll||canReview?'medium':'low',render:r=>canViewAll||canReview?r.requester:<span className="muted">You</span>},
   {key:'target',header:'Target',priority:'medium',render:r=><><strong>{r.targetName}</strong><small>{r.targetType}</small></>},
-  {key:'risk',header:'Risk',priority:'medium',render:r=><span className={`risk ${requestRisk(r).toLowerCase()}`}>{requestRisk(r)}</span>},
+  {key:'risk',header:'Risk',priority:'medium',render:r=><RiskBadge risk={requestRisk(r)}/>},
   {key:'status',header:'Status',priority:'high',render:r=><StatusBadge status={r.status}/>},
   {key:'duration',header:'Duration',priority:'medium',render:r=><><span>{r.duration}</span>{r.expiryDate&&<small>Expires {fmt(r.expiryDate)}</small>}</>},
   {key:'submitted',header:'Submitted',priority:'low',render:r=>fmt(r.submittedAt)}
  ];
  const title=canViewAll?'Requests':canReview?'Requests':'My Requests';
  return <div className="page">
-  <div className="page-header"><div><p className="eyebrow">Requests</p><h1>{title}</h1><p>{canViewAll?'Review all access requests, provisioning work, and completed grants.':canReview?'Start with requests that need your decision, then review your own request history.':'Track your access requests, approval progress, granted access, and closed requests.'}</p></div><Link className="primary-action" to="/new-request">New request</Link></div>
+  <PageHeader eyebrow="Requests" title={title} description={canViewAll?'Review all access requests, provisioning work, and completed grants.':canReview?'Start with requests that need your decision, then review your own request history.':'Track your access requests, approval progress, granted access, and closed requests.'} actions={<Link className="primary-action" to="/new-request">New request</Link>}/>
   <SearchToolbar resultCount={rows.length}>
    <label className="search-field"><Search size={15}/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Search request, permission, account, target or approver"/></label>
    <select value={sort} onChange={event=>setSort(event.target.value)} aria-label="Sort requests">{sortOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select>

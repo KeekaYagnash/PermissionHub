@@ -6,6 +6,7 @@ import { can } from '../lib/authz';
 import { useAuthStore } from '../store/auth';
 import { AttentionCard, MyAccessCard, RequestMiniList } from '../components/requestJourney';
 import { expiringSoon, isGrantedRequest, isOpenRequest, needsRequesterResponse } from '../lib/requestPresentation';
+import { PageHeader } from '../components/ui';
 
 export default function Overview(){
  const session=useAuthStore(state=>state.session),userId=session?.user?.id;
@@ -17,7 +18,7 @@ export default function Overview(){
  const list=requests.data?.data??[],granted=list.filter(isGrantedRequest),open=list.filter(isOpenRequest),needsResponse=list.filter(request=>needsRequesterResponse(request,userId)),expiring=granted.filter(expiringSoon),pending=list.filter(request=>request.status==='Pending approval'),highRisk=pending.filter(request=>['High','Critical'].includes(request.priority)||request.scope.type==='ALL'),failures=list.filter(request=>request.status==='Provisioning failed'),pendingProvision=list.filter(request=>request.status==='Approved'),connectionIssues=(context.data?.accounts??[]).filter(account=>!['CONNECTED','DEGRADED'].includes(account.connectionStatus));
  const title=canViewAllRequests?'AWS permission operations':canReview?'Approval workbench':'My AWS access requests';
  return <div className="page role-overview">
-  <div className="page-header"><div><p className="eyebrow">Overview</p><h1>{title}</h1><p>{canViewAllRequests?'Track review queues, provisioning health, and AWS account connection posture.':canReview?'Start with requests that need your decision, then return to your own access when needed.':'Start here to request AWS access, track approvals, and see current grants.'}</p></div><Link className="primary-action" to={canReview?'/requests?filter=Needs%20my%20attention':'/new-request'}>{canReview?'Review requests':'New permission request'} <ArrowRight size={16}/></Link></div>
+  <PageHeader eyebrow="Overview" title={title} description={canViewAllRequests?'Track review queues, provisioning health, and AWS account connection posture.':canReview?'Start with requests that need your decision, then return to your own access when needed.':'Start here to request AWS access, track approvals, and see current grants.'} actions={<Link className="primary-action" to={canReview?'/requests?filter=Needs%20my%20attention':'/new-request'}>{canReview?'Review requests':'New permission request'} <ArrowRight size={16}/></Link>}/>
   {!canViewAllRequests&&!canReview&&<RequesterOverview open={open} granted={granted} expiring={expiring} needsResponse={needsResponse}/>}
   {canReview&&!canViewAllRequests&&<ApproverOverview pending={pending} highRisk={highRisk} open={open} granted={granted}/>}
   {canViewAllRequests&&!canManageConnection&&<SecurityOverview pending={pending} highRisk={highRisk} expiring={expiring} failures={failures} granted={granted} connectionIssues={connectionIssues}/>}
