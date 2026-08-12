@@ -2,46 +2,33 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight,PlugZap } from 'lucide-react';
 import { api } from '../lib/api';
+import { can } from '../lib/authz';
+import { useAuthStore } from '../store/auth';
+import { AttentionCard, MyAccessCard, RequestMiniList } from '../components/requestJourney';
+import { expiringSoon, isGrantedRequest, isOpenRequest, needsRequesterResponse } from '../lib/requestPresentation';
 
 export default function Overview(){
+ const session=useAuthStore(state=>state.session),userId=session?.user?.id;
+ const canViewActivity=can(session,'ACTIVITY_VIEW'),canViewAllRequests=can(session,'REQUEST_VIEW_ALL'),canReview=can(session,'REQUEST_REVIEW'),canManageConnection=can(session,'CONNECTION_MANAGE'),canConnectionView=can(session,'CONNECTION_VIEW');
  const connection=useQuery({queryKey:['connection'],queryFn:api.connection});
- const requests=useQuery({queryKey:['requests'],queryFn:()=>api.requests()});
- const activity=useQuery({queryKey:['activity'],queryFn:api.activity});
- const list=requests.data?.data??[];
- const count=(status:string)=>list.filter(r=>r.status===status).length;
- const needs=list.filter(r=>['Pending approval','Provisioning failed'].includes(r.status)||r.status==='Provisioned'&&r.expiryDate&&Date.parse(r.expiryDate)<Date.now()+86400000);
- return <div className="page">
-  <div className="page-header">
-   <div><p className="eyebrow">Operational overview</p><h1>AWS permission requests</h1><p>Request, approve, preview, attach, and revoke IAM managed policies through a guarded backend workflow.</p></div>
-   <Link className="primary-action" to="/new-request">New permission request <ArrowRight size={16}/></Link>
-  </div>
-  <section className="overview-grid">
-   <div className="panel connection-panel">
-    <div className="panel-title"><PlugZap size={17}/>Connection</div>
-    <dl>
-     <div><dt>Status</dt><dd>{connection.data?.connected?'Connected':'Disconnected'}</dd></div>
-     <div><dt>Account ID</dt><dd>{connection.data?.accountId}</dd></div>
-     <div><dt>Principal ARN</dt><dd className="mono">{connection.data?.principalArn}</dd></div>
-     <div><dt>Region</dt><dd>{connection.data?.region}</dd></div>
-     <div><dt>Last checked</dt><dd>{fmt(connection.data?.lastChecked)}</dd></div>
-    </dl>
-   </div>
-   <div className="panel">
-    <div className="panel-title">Request summary</div>
-    <div className="summary-list">
-     {['Pending approval','Approved','Provisioned','Rejected'].map(status=><Link to={`/requests?status=${encodeURIComponent(status)}`} key={status}><span>{status}</span><strong>{count(status)}</strong></Link>)}
-    </div>
-   </div>
-   <div className="panel">
-    <div className="panel-title">Needs attention</div>
-    <div className="attention-list">{needs.length?needs.slice(0,5).map(r=><Link to={`/requests/${r.id}`} key={r.id}><strong>{r.id}</strong><span>{r.title}</span><em>{r.status}</em></Link>):<p className="muted">No pending approval, failed provisioning, or near-expiry items.</p>}</div>
-   </div>
-   <div className="panel wide">
-    <div className="panel-title">Recent activity</div>
-    <div className="activity-list">{(activity.data?.data??[]).slice(0,8).map(event=><div key={event.id}><time>{fmt(event.timestamp)}</time><strong>{event.action}</strong><span>{event.actor}{event.requestId?` · ${event.requestId}`:''}</span></div>)}</div>
-   </div>
-  </section>
+ const context=useQuery({queryKey:['auth-context'],queryFn:api.context});
+ const requests=useQuery({queryKey:['requests','overview'],queryFn:()=>api.requests()});
+ const activity=useQuery({queryKey:['activity'],queryFn:api.activity,enabled:canViewActivity});
+ const list=requests.data?.data??[],granted=list.filter(isGrantedRequest),open=list.filter(isOpenRequest),needsResponse=list.filter(request=>needsRequesterResponse(request,userId)),expiring=granted.filter(expiringSoon),pending=list.filter(request=>request.status==='Pending approval'),highRisk=pending.filter(request=>['High','Critical'].includes(request.priority)||request.scope.type==='ALL'),failures=list.filter(request=>request.status==='Provisioning failed'),pendingProvision=list.filter(request=>request.status==='Approved'),connectionIssues=(context.data?.accounts??[]).filter(account=>!['CONNECTED','DEGRADED'].includes(account.connectionStatus));
+ const title=canViewAllRequests?'AWS permission operations':canReview?'Approval workbench':'My AWS access requests';
+ return <div className="page role-overview">
+  <div className="page-header"><div><p className="eyebrow">Overview</p><h1>{title}</h1><p>{canViewAllRequests?'Track review queues, provisioning health, and AWS account connection posture.':canReview?'Start with requests that need your decision, then return to your own access when needed.':'Start here to request AWS access, track approvals, and see current grants.'}</p></div><Link className="primary-action" to={canReview?'/requests?filter=Needs%20my%20attention':'/new-request'}>{canReview?'Review requests':'New permission request'} <ArrowRight size={16}/></Link></div>
+  {!canViewAllRequests&&!canReview&&<RequesterOverview open={open} granted={granted} expiring={expiring} needsResponse={needsResponse}/>}
+  {canReview&&!canViewAllRequests&&<ApproverOverview pending={pending} highRisk={highRisk} open={open} granted={granted}/>}
+  {canViewAllRequests&&!canManageConnection&&<SecurityOverview pending={pending} highRisk={highRisk} expiring={expiring} failures={failures} granted={granted} connectionIssues={connectionIssues}/>}
+  {canManageConnection&&<AdminOverview pending={pending} pendingProvision={pendingProvision} failures={failures} granted={granted} connectionIssues={connectionIssues}/>}
+  {canConnectionView&&<section className="panel connection-panel"><div className="panel-title"><PlugZap size={17}/>AWS connection health</div><dl><div><dt>Status</dt><dd>{connection.data?.connected?'Connected':'Disconnected'}</dd></div><div><dt>Account ID</dt><dd>{connection.data?.accountId}</dd></div><div><dt>Region</dt><dd>{connection.data?.region}</dd></div><div><dt>Principal</dt><dd className="mono">{connection.data?.principalArn}</dd></div></dl></section>}
+  {canViewActivity&&<section className="panel"><div className="panel-title">Recent activity</div><div className="activity-list">{(activity.data?.data??[]).slice(0,8).map(event=><div key={event.id}><time>{fmt(event.timestamp)}</time><strong>{event.action}</strong><span>{event.actor}{event.requestId?` · ${event.requestId}`:''}</span></div>)}</div></section>}
  </div>;
 }
 
+function RequesterOverview({open,granted,expiring,needsResponse}:{open:any[];granted:any[];expiring:any[];needsResponse:any[]}){return <><section className="attention-grid"><AttentionCard label="Active AWS access" value={granted.length} to="/identities" description="View current grants"/><AttentionCard label="Expiring soon" value={expiring.length} to="/identities?filter=expiring" description="Temporary access ending soon"/><AttentionCard label="Open requests" value={open.length} to="/requests?filter=Open" description="Track approval progress"/><AttentionCard label="Needs my response" value={needsResponse.length} to="/requests?filter=Needs%20my%20response" description="More information requested"/></section><section className="panel"><div className="panel-title">My recent requests <Link to="/requests">View all requests</Link></div><RequestMiniList requests={open.slice(0,6)} empty="No open requests. Request AWS access when you need temporary or permanent permissions."/></section><section className="panel"><div className="panel-title">Current AWS access <Link to="/identities">View all AWS access</Link></div><div className="my-access-grid">{granted.slice(0,3).map(request=><MyAccessCard key={request.id} request={request}/>)}</div>{!granted.length&&<p className="muted">You do not currently have active AWS access in this account.</p>}</section></>}
+function ApproverOverview({pending,highRisk,open,granted}:{pending:any[];highRisk:any[];open:any[];granted:any[]}){return <><section className="attention-grid"><AttentionCard label="Awaiting your approval" value={pending.length} to="/requests?filter=Needs%20my%20attention" description="Review queue"/><AttentionCard label="High-risk requests" value={highRisk.length} to="/requests?filter=Needs%20my%20attention" description="Review carefully"/><AttentionCard label="My open requests" value={open.length} to="/requests?filter=My%20requests" description="Personal access requests"/></section><section className="panel"><div className="panel-title">Requests awaiting my approval</div><RequestMiniList requests={pending.slice(0,8)} empty="You are all caught up. No requests currently require your approval." showRequester/></section><section className="panel"><div className="panel-title">My current AWS access</div><div className="my-access-grid">{granted.slice(0,2).map(request=><MyAccessCard key={request.id} request={request}/>)}</div></section></>}
+function SecurityOverview({pending,highRisk,expiring,failures,granted,connectionIssues}:{pending:any[];highRisk:any[];expiring:any[];failures:any[];granted:any[];connectionIssues:any[]}){return <><section className="attention-grid"><AttentionCard label="Pending security reviews" value={pending.length} to="/requests?filter=Needs%20review"/><AttentionCard label="High-risk requests" value={highRisk.length} to="/requests?filter=Needs%20review"/><AttentionCard label="Expiring grants" value={expiring.length} to="/identities?filter=expiring"/><AttentionCard label="Provisioning failures" value={failures.length} to="/requests?filter=Provisioning"/></section><section className="panel"><div className="panel-title">Security review queue</div><RequestMiniList requests={highRisk.slice(0,8)} empty="No high-risk requests currently require review." showRequester/></section><section className="panel"><div className="panel-title">Recently provisioned access</div><RequestMiniList requests={granted.slice(0,6)} empty="No recently provisioned access found." showRequester/></section>{connectionIssues.length>0&&<section className="panel"><div className="panel-title">Connection issues</div><Link className="attention-row" to="/connection">{connectionIssues.length} AWS account connection issue{connectionIssues.length===1?'':'s'} require investigation.</Link></section>}</>}
+function AdminOverview({pending,pendingProvision,failures,granted,connectionIssues}:{pending:any[];pendingProvision:any[];failures:any[];granted:any[];connectionIssues:any[]}){return <><section className="attention-grid"><AttentionCard label="Requests requiring action" value={pending.length} to="/requests?filter=Needs%20review"/><AttentionCard label="Pending provisioning" value={pendingProvision.length} to="/requests?filter=Provisioning"/><AttentionCard label="Failed provisioning" value={failures.length} to="/requests?filter=Provisioning"/><AttentionCard label="Connection issues" value={connectionIssues.length} to="/connection"/></section><section className="panel"><div className="panel-title">Operational request queue</div><RequestMiniList requests={[...failures,...pendingProvision,...pending].slice(0,8)} empty="No stuck approval or provisioning work found." showRequester/></section><section className="panel"><div className="panel-title">Active temporary grants</div><RequestMiniList requests={granted.slice(0,6)} empty="No active grants found for this account." showRequester/></section></>}
 function fmt(value?:string){return value?new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)):'Not checked'}

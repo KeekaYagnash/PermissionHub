@@ -3,10 +3,10 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { Activity, Building2, FileKey2, GitPullRequestArrow, Grid3X3, Home, KeyRound, Laptop, LogOut, PlugZap, Settings, SunMoon, UserRoundCog, X } from 'lucide-react';
 import { useQuery,useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { isNavActive, navItems, type NavKey } from '../lib/navigation';
+import { isNavActive, navItems, visibleNavItems, type NavKey } from '../lib/navigation';
 import { useThemePreference } from '../lib/theme';
 import { useAuthStore } from '../store/auth';
-import { hasTenantRole,shouldAutoSelectAccount } from '../lib/auth';
+import { shouldAutoSelectAccount } from '../lib/auth';
 
 const icons:Record<NavKey,ComponentType<{size?:number}>>={
  overview:Home,
@@ -15,6 +15,7 @@ const icons:Record<NavKey,ComponentType<{size?:number}>>={
  permissions:KeyRound,
  identities:UserRoundCog,
  activity:Activity,
+ administration:Settings,
  connection:PlugZap
 };
 
@@ -52,8 +53,7 @@ function AppHeader({connection,context,drawerOpen,setDrawerOpen}:{connection:any
    <Brand/>
    <DesktopNavigation/>
    <div className="desktop-sidebar-footer">
-    {(import.meta.env.DEV||session?.awsConnectionMode!=='manual')&&hasTenantRole(session,'ORGANISATION_ADMIN')&&<NavLink to="/administration"><Settings size={16}/><span>Administration</span></NavLink>}
-    <NavLink to="/connection" aria-current={isNavActive(location.pathname,'connection')?'page':undefined} className={isNavActive(location.pathname,'connection')?'active':''}><PlugZap size={16}/><span>Connection</span></NavLink>
+    {visibleNavItems(session).filter(item=>['administration','connection'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}
     <ThemeControl/>
     <ConnectionStatus connection={connection}/><UserMenu compact/>
    </div>
@@ -70,12 +70,13 @@ function Brand(){return <Link to="/" className="brand" aria-label="PermissionHub
 
 function DesktopNavigation(){
  const location=useLocation();
- return <nav className="desktop-nav" aria-label="Primary navigation">{navItems.filter(item=>item.key!=='connection').map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} end={item.path==='/' ? true : undefined} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}</nav>;
+ const session=useAuthStore(state=>state.session);
+ return <nav className="desktop-nav" aria-label="Primary navigation">{visibleNavItems(session).filter(item=>!['administration','connection'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} end={item.path==='/' ? true : undefined} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}</nav>;
 }
 
 function MobileBottomNavigation({drawerOpen,setDrawerOpen,menuButtonRef}:{drawerOpen:boolean;setDrawerOpen:(open:boolean)=>void;menuButtonRef:RefObject<HTMLButtonElement|null>}){
  const location=useLocation();
- const visible=navItems.filter(item=>item.mobileVisible);
+ const session=useAuthStore(state=>state.session),visible=visibleNavItems(session,'mobile');
  return <nav className="mobile-bottom-nav" aria-label="Mobile primary navigation">
   {visible.slice(0,2).map(item=><MobileNavLink key={item.key} item={item} active={isNavActive(location.pathname,item.key)}/>)}
   <button ref={menuButtonRef} className={drawerOpen?'mobile-menu-button open':'mobile-menu-button'} aria-label="Open navigation menu" aria-expanded={drawerOpen} aria-controls="mobile-nav-drawer" onClick={()=>setDrawerOpen(true)}><Grid3X3 size={20}/><span>Menu</span></button>
@@ -92,6 +93,7 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
  const drawerRef=useRef<HTMLDivElement>(null);
  const closeRef=useRef<HTMLButtonElement>(null);
  const location=useLocation();
+ const session=useAuthStore(state=>state.session);
  useEffect(()=>{
   if(!open)return;
   const previousOverflow=document.body.style.overflow;
@@ -114,7 +116,7 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
   <button className="drawer-backdrop" aria-label="Close navigation menu" onClick={onClose}/>
   <aside id="mobile-nav-drawer" className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation" ref={drawerRef}>
    <div className="drawer-head"><Brand/><button ref={closeRef} className="icon-btn" onClick={onClose} aria-label="Close navigation menu"><X size={18}/></button></div>
-   <nav className="drawer-nav" aria-label="Navigation drawer">{navItems.filter(item=>item.drawerVisible).map(item=>{const Icon=icons[item.key];const active=isNavActive(location.pathname,item.key);return <NavLink key={item.key} to={item.path} aria-current={active?'page':undefined} className={active?'active':''}><Icon size={18}/><span><strong>{item.label}</strong><small>{item.description}</small></span></NavLink>})}</nav>
+   <nav className="drawer-nav" aria-label="Navigation drawer">{visibleNavItems(session,'drawer').map(item=>{const Icon=icons[item.key];const active=isNavActive(location.pathname,item.key);return <NavLink key={item.key} to={item.path} aria-current={active?'page':undefined} className={active?'active':''}><Icon size={18}/><span><strong>{item.label}</strong><small>{item.description}</small></span></NavLink>})}</nav>
    <section className="drawer-utilities" aria-label="Utilities"><h2>Active context</h2><ContextBar connection={connection} context={context} compact/><ThemeControl/><UserMenu/></section>
   </aside>
  </div>;

@@ -260,6 +260,22 @@ export default function Permissions() {
       priority: "low",
       render: (policy) => fmt(policy.updatedAt),
     },
+    {
+      key: "request",
+      header: "Action",
+      priority: "high",
+      render: (policy) => (
+        <button
+          className="table-action"
+          onClick={(event) => {
+            event.stopPropagation();
+            navigate(`/new-request?policyArn=${encodeURIComponent(policy.arn)}`);
+          }}
+        >
+          Request permission
+        </button>
+      ),
+    },
   ];
   return (
     <div className="page">

@@ -2,12 +2,13 @@ import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle, ChevronRight, Loader2, Search, X } from 'lucide-react';
 import { cn, statusTone } from '../lib/utils';
+import { statusPresentation } from '../lib/requestPresentation';
 
 export function PageHeader({title,description,eyebrow='Governance',actions}:{title:string;description:string;eyebrow?:string;actions?:ReactNode}){return <div className="page-header"><div><div className="breadcrumbs"><span>PermissionHub</span><ChevronRight size={12}/><span>{eyebrow}</span></div><h1>{title}</h1><p>{description}</p></div>{actions&&<div className="page-actions">{actions}</div>}</div>}
 export function Button({children,variant='primary',className='',...props}:{children:ReactNode;variant?:'primary'|'secondary'|'ghost'|'danger';className?:string}&React.ButtonHTMLAttributes<HTMLButtonElement>){return <button className={cn('btn',`btn-${variant}`,className)} {...props}>{children}</button>}
 export function Card({children,className='',delay=0}:{children:ReactNode;className?:string;delay?:number}){return <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay,duration:.28}} className={cn('card',className)}>{children}</motion.div>}
 export function Badge({children,tone}:{children:ReactNode;tone?:string}){return <span className={cn('badge',`badge-${tone??statusTone(String(children))}`)}><i/>{children}</span>}
-export function StatusBadge({status}:{status:string}){return <span className={`status ${status.toLowerCase().replaceAll(' ','-')}`}>{status}</span>}
+export function StatusBadge({status}:{status:string}){const value=statusPresentation(status as any);return <span className={`status ${value.tone} ${status.toLowerCase().replaceAll(' ','-')}`} title={value.description}>{value.label}</span>}
 export function Avatar({name,size='md'}:{name:string;size?:'sm'|'md'|'lg'}){return <span className={cn('avatar',`avatar-${size}`)}>{name.split(' ').map(x=>x[0]).slice(0,2).join('')}</span>}
 export function SearchBox({value,onChange,placeholder='Search…'}:{value:string;onChange:(v:string)=>void;placeholder?:string}){return <label className="search-box"><Search size={15}/><input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>{value&&<button onClick={()=>onChange('')} aria-label="Clear"><X size={13}/></button>}</label>}
 export function EmptyState({title,body}:{title:string;body:string}){return <div className="empty"><Search size={30}/><strong>{title}</strong><span>{body}</span></div>}

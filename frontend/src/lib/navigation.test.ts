@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { activeNavKey, isNavActive, navItems } from './navigation';
+import { activeNavKey, isNavActive, navItems, visibleNavItems } from './navigation';
+
+const session=(roles:string[])=>({authenticated:true,csrfToken:'csrf',authProvider:'development',devAuthAvailable:true,user:{id:'u',email:'u@example',displayName:'User',provider:'development',providerSubject:'u',activeTenantId:'t',permissions:[],memberships:roles.map((role,index)=>({id:`m${index}`,tenantId:'t',tenantName:'Tenant',tenantSlug:'tenant',role,status:'ACTIVE',scopes:[]}))}} as any);
 
 describe('navigation routing',()=>{
  it('matches nested request pages to Requests',()=>{
@@ -24,6 +26,14 @@ describe('navigation routing',()=>{
  it('uses one shared route configuration for mobile and drawer navigation',()=>{
   expect(navItems.filter(item=>item.mobileVisible).map(item=>item.key)).toEqual(['overview','requests','new-request','activity']);
   expect(navItems.every(item=>item.drawerVisible)).toBe(true);
+ });
+
+ it('hides activity administration and connection for requesters',()=>{
+  expect(visibleNavItems(session(['REQUESTER'])).map(item=>item.key)).toEqual(['overview','requests','new-request','permissions','identities']);
+ });
+
+ it('shows read-only reviewer navigation',()=>{
+  expect(visibleNavItems(session(['SECURITY_REVIEWER'])).map(item=>item.key)).toEqual(['overview','requests','new-request','permissions','identities','activity','administration','connection']);
  });
 });
 

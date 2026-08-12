@@ -1,7 +1,9 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
 import AuthGate from './components/AuthGate';
+import { useAuthStore } from './store/auth';
+import { can, type Capability } from './lib/authz';
 
 const Overview=lazy(()=>import('./pages/Overview'));
 const Requests=lazy(()=>import('./pages/Requests'));
@@ -29,15 +31,20 @@ export default function App(){
     <Route index element={<Overview/>}/>
     <Route path="requests" element={<Requests/>}/>
     <Route path="requests/:id" element={<RequestDetail/>}/>
-    <Route path="new-request" element={<NewRequest/>}/>
-    <Route path="permissions" element={<Permissions/>}/>
-    <Route path="identities" element={<Identities/>}/>
-    <Route path="activity" element={<Activity/>}/>
-    <Route path="connection" element={<Connection/>}/>
-    <Route path="administration" element={<Administration/>}/>
+    <Route path="new-request" element={<RequireCapability capability="REQUEST_CREATE"><NewRequest/></RequireCapability>}/>
+    <Route path="permissions" element={<RequireCapability capability="PERMISSION_CATALOGUE_VIEW"><Permissions/></RequireCapability>}/>
+    <Route path="identities" element={<RequireCapability capability="IDENTITY_VIEW_OWN"><Identities/></RequireCapability>}/>
+    <Route path="activity" element={<RequireCapability capability="ACTIVITY_VIEW"><Activity/></RequireCapability>}/>
+    <Route path="connection" element={<RequireCapability capability="CONNECTION_VIEW"><Connection/></RequireCapability>}/>
+    <Route path="administration" element={<RequireCapability capability="ADMINISTRATION_VIEW"><Administration/></RequireCapability>}/>
    </Route>
    </Route>
    <Route path="*" element={<Navigate to="/" replace/>}/>
   </Routes>
  </Suspense>;
+}
+
+function RequireCapability({capability,children}:{capability:Capability;children:ReactNode}){
+ const session=useAuthStore(state=>state.session);
+ return can(session,capability)?children:<Navigate to="/unauthorised" replace/>;
 }

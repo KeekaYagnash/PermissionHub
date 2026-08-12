@@ -1,6 +1,7 @@
 import type { NextFunction,Response } from 'express';
 import { env } from '../config/env.js';
 import type { AppRole,AuthenticatedRequest } from '../types.js';
+import type { NamedCapability } from '../services/authorization.service.js';
 import { ApiError } from '../utils/http.js';
 import { authorization } from '../services/authorization.service.js';
 import { identityDomain } from '../services/identity-domain.service.js';
@@ -16,9 +17,15 @@ export function authenticate(req:AuthenticatedRequest,_res:Response,next:NextFun
  if(membership)req.auth={sub:user.id,organizationId:membership.tenantId,role:membership.role,email:user.email,name:user.displayName};
  next();
 }
-export function isConnectionAdmin(req:AuthenticatedRequest){const user=req.sessionUser!,tenantId=req.tenantId??user.activeTenantId,membership=user.memberships.find(item=>item.tenantId===tenantId&&item.status==='ACTIVE');return Boolean(membership?.scopes.some(scope=>scope.canManageConfiguration&&scope.canView&&scope.scopeType==='TENANT'&&scope.scopeId===tenantId))}
+export function isConnectionAdmin(req:AuthenticatedRequest){return Boolean(req.sessionUser&&authorization.hasCapability(req.sessionUser,'CONNECTION_MANAGE'))}
 export const authorize=(...roles:AppRole[])=>(req:AuthenticatedRequest,_res:Response,next:NextFunction)=>req.auth&&(roles.includes(req.auth.role)||(roles.includes('ORGANISATION_ADMIN')&&(req.path.startsWith('/aws/accounts')||req.path.startsWith('/aws/local-credentials'))&&isConnectionAdmin(req)))?next():next(new ApiError(403,'You do not have permission to perform this action','FORBIDDEN'));
 export function requireConnectionAdmin(req:AuthenticatedRequest,_res:Response,next:NextFunction){return isConnectionAdmin(req)?next():next(new ApiError(403,'You are not authorised to administer AWS account connections.','AWS_CONNECTION_ADMIN_REQUIRED'))}
+export function requireNamedCapability(capability:NamedCapability,accountScoped=false){
+ return (req:AuthenticatedRequest,_res:Response,next:NextFunction)=>{
+  const accountId=accountScoped?req.awsAccountContext?.id:undefined;
+  return req.sessionUser&&authorization.hasCapability(req.sessionUser,capability,accountId)?next():next(new ApiError(403,'You do not have permission to perform this action.','CAPABILITY_FORBIDDEN',{capability}));
+ };
+}
 export function tenantScope(req:AuthenticatedRequest,_res:Response,next:NextFunction){
  const user=req.sessionUser;if(!user?.activeTenantId)return next(new ApiError(409,'Select a tenant before continuing.','TENANT_REQUIRED'));
  const requested=req.headers['x-tenant-id']?.toString()||req.headers['x-organization-id']?.toString();
@@ -37,6 +44,6 @@ export async function accountScope(req:AuthenticatedRequest,_res:Response,next:N
  }catch(error){next(error)}
 }
 export function requireCapability(capability:'request'|'approve'|'provision'|'revoke'|'manage'){
- return (req:AuthenticatedRequest,_res:Response,next:NextFunction)=>{const user=req.sessionUser!,account=req.awsAccountContext!;const allowed=capability==='request'?authorization.canRequestAccess(user,account.id):capability==='manage'?authorization.canManageAccountConfiguration(user,account.id):user.memberships.some(m=>m.tenantId===account.tenantId&&m.scopes.some(s=>s[`can${capability[0]!.toUpperCase()}${capability.slice(1)}` as keyof typeof s]===true));return allowed?next():next(new ApiError(403,`You cannot ${capability} in this AWS account.`,'SCOPE_FORBIDDEN'))};
+ return (req:AuthenticatedRequest,_res:Response,next:NextFunction)=>{const user=req.sessionUser!,account=req.awsAccountContext!,map={request:'REQUEST_CREATE',approve:'REQUEST_APPROVE',provision:'PROVISION_EXECUTE',revoke:'GRANT_REVOKE',manage:'CONNECTION_MANAGE'} as const;return authorization.hasCapability(user,map[capability],account.id)?next():next(new ApiError(403,`You cannot ${capability} in this AWS account.`,'SCOPE_FORBIDDEN'))};
 }
 export function csrfProtection(req:AuthenticatedRequest,_res:Response,next:NextFunction){if(['GET','HEAD','OPTIONS'].includes(req.method))return next();if(!safeEqualToken(req.headers['x-csrf-token']?.toString(),req.session.csrfToken))return next(new ApiError(403,'CSRF validation failed. Refresh the page and try again.','CSRF_INVALID'));next()}
