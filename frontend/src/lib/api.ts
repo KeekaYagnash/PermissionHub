@@ -24,6 +24,7 @@ export const api={
  connections:()=>http.get('/aws/accounts').then(unwrap<AwsAccountContext[]>),
  createAwsAccount:(input:unknown)=>http.post('/aws/accounts',input).then(unwrap<any>),
  validateLocalCredentials:()=>http.post('/aws/local-credentials/validate').then(unwrap<any>),
+ validateAccessKeys:(input:unknown)=>http.post('/aws/access-keys/validate',input).then(unwrap<any>),
  validateAwsAccount:(accountId:string)=>http.post(`/aws/accounts/${encodeURIComponent(accountId)}/validate`).then(unwrap<any>),
  updateAwsAccount:(accountId:string,input:unknown)=>http.patch(`/aws/accounts/${encodeURIComponent(accountId)}`,input).then(unwrap<AwsAccountContext>),
  repairAwsAccount:(accountId:string)=>http.post(`/aws/accounts/${encodeURIComponent(accountId)}/repair-connection`,{confirm:true}).then(unwrap<AwsAccountContext>),

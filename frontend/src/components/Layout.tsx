@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type RefObject } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Activity, Building2, FileKey2, GitPullRequestArrow, Grid3X3, Home, KeyRound, Laptop, LogOut, PlugZap, Settings, SunMoon, UserRoundCog, X } from 'lucide-react';
+import { Activity, FileKey2, GitPullRequestArrow, Grid3X3, Home, KeyRound, Laptop, LogOut, PlugZap, Settings, SunMoon, UserRoundCog, X } from 'lucide-react';
 import { useQuery,useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { isNavActive, navItems, visibleNavItems, type NavKey } from '../lib/navigation';
@@ -38,14 +38,14 @@ export default function Layout(){
  },[]);
  return <div className="app">
   {session?.developmentAuthenticationActive&&<div className="development-auth-banner" role="status">Development authentication is active</div>}
-  <AppHeader connection={data} context={context.data} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen}/>
+  <AppHeader connection={data} context={context.data} contextError={Boolean(context.error)} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen}/>
   <main id="main-content"><Outlet key={activeAwsAccountRecordId??'no-aws-account'}/></main>
   <MobileBottomNavigation drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} menuButtonRef={menuButtonRef}/>
   <MobileNavigationDrawer open={drawerOpen} onClose={()=>setDrawerOpen(false)} connection={data} context={context.data} returnFocusRef={menuButtonRef}/>
  </div>;
 }
 
-function AppHeader({connection,context,drawerOpen,setDrawerOpen}:{connection:any;context:any;drawerOpen:boolean;setDrawerOpen:(open:boolean)=>void}){
+function AppHeader({connection,context,contextError,drawerOpen,setDrawerOpen}:{connection:any;context:any;contextError:boolean;drawerOpen:boolean;setDrawerOpen:(open:boolean)=>void}){
  const location=useLocation();
  const session=useAuthStore(state=>state.session);
  return <>
@@ -55,10 +55,10 @@ function AppHeader({connection,context,drawerOpen,setDrawerOpen}:{connection:any
    <div className="desktop-sidebar-footer">
     {visibleNavItems(session).filter(item=>['administration','connection'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}
     <ThemeControl/>
-    <ConnectionStatus connection={connection}/><UserMenu compact/>
+    <UserMenu compact/>
    </div>
   </aside>
-  <header className="desktop-account-header desktop-shell"><ContextBar connection={connection} context={context}/></header>
+  <header className="desktop-account-header desktop-shell"><ContextBar connection={connection} context={context} contextError={contextError}/></header>
   <header className="mobile-header">
    <Brand/>
    <div className="mobile-header-actions"><ConnectionDot connection={connection}/><ThemeControl compact/><button className="mobile-header-menu" aria-label="Open navigation menu" aria-expanded={drawerOpen} aria-controls="mobile-nav-drawer" onClick={()=>setDrawerOpen(true)}><Grid3X3 size={18}/></button></div>
@@ -130,7 +130,6 @@ function ThemeControl({compact=false}:{compact?:boolean}){
  </button>;
 }
 
-function ConnectionStatus({connection}:{connection:any}){return <div className={connection?.connected?'connection-pill connected':'connection-pill mock'}><i/>{connection?.connected?'Connected':'Disconnected'}</div>}
 function ConnectionDot({connection}:{connection:any}){return <span className={connection?.connected?'connection-dot connected':'connection-dot mock'} aria-label={connection?.connected?'AWS connected':'AWS disconnected'}/>}
-function ContextBar({connection,context,compact=false}:{connection:any;context:any;compact?:boolean}){const session=useAuthStore(state=>state.session),setSession=useAuthStore(state=>state.setSession),queryClient=useQueryClient(),activeRecordId=session?.user?.activeAwsAccountRecordId??session?.user?.activeAccountId;const active=context?.accounts?.find((account:any)=>account.accountRecordId===activeRecordId);async function changeAccount(accountRecordId:string){const next=await api.selectAccount(accountRecordId);setSession(next);queryClient.clear()}async function changeTenant(tenantId:string){const next=await api.selectTenant(tenantId);setSession(next);queryClient.clear()}return <div className={compact?'context-bar compact':'context-bar'}><Building2 size={15}/>{context?.tenants?.length>1?<select aria-label="Active tenant" value={session?.user?.activeTenantId??''} onChange={event=>void changeTenant(event.target.value)}>{context.tenants.map((item:any)=><option value={item.id} key={item.id}>{item.name}</option>)}</select>:<strong>{context?.tenants?.[0]?.name??'Tenant'}</strong>}<select aria-label="Active AWS account" value={activeRecordId??''} onChange={event=>void changeAccount(event.target.value)}><option value="" disabled>Select AWS account</option>{context?.accounts?.map((account:any)=><option value={account.accountRecordId} key={account.accountRecordId}>{account.accountName} · {account.awsAccountNumber}</option>)}</select>{active&&<><span className={`account-type ${active.accountType.toLowerCase()}`}>{active.accountType.replaceAll('_',' ')}</span><span>{active.region}</span></>}<ConnectionStatus connection={connection}/></div>}
+function ContextBar({connection,context,compact=false,contextError=false}:{connection:any;context:any;compact?:boolean;contextError?:boolean}){const session=useAuthStore(state=>state.session),setSession=useAuthStore(state=>state.setSession),queryClient=useQueryClient(),activeRecordId=session?.user?.activeAwsAccountRecordId??session?.user?.activeAccountId;const active=context?.accounts?.find((account:any)=>account.accountRecordId===activeRecordId);async function changeAccount(accountRecordId:string){const next=await api.selectAccount(accountRecordId);setSession(next);queryClient.clear()}async function changeTenant(tenantId:string){const next=await api.selectTenant(tenantId);setSession(next);queryClient.clear()}if(contextError&&!context)return <div className={compact?'context-bar compact':'context-bar'}><ConnectionDot connection={connection}/><span className="connection-context-warning">Account context unavailable</span>{activeRecordId&&<span className="muted">Selection retained</span>}</div>;return <div className={compact?'context-bar compact':'context-bar'}><ConnectionDot connection={connection}/>{context?.tenants?.length>1&&<select aria-label="Active tenant" value={session?.user?.activeTenantId??''} onChange={event=>void changeTenant(event.target.value)}>{context.tenants.map((item:any)=><option value={item.id} key={item.id}>{item.name}</option>)}</select>}<select aria-label="Active AWS account" value={activeRecordId??''} onChange={event=>void changeAccount(event.target.value)}><option value="" disabled>Select AWS account</option>{context?.accounts?.map((account:any)=><option value={account.accountRecordId} key={account.accountRecordId}>{account.accountName} · {account.awsAccountNumber}</option>)}</select>{active&&<><span className={`account-type ${active.accountType.toLowerCase()}`}>{active.accountType.replaceAll('_',' ')}</span><span>{active.region}</span></>}</div>}
 function UserMenu({compact=false}:{compact?:boolean}){const session=useAuthStore(state=>state.session),clear=useAuthStore(state=>state.clear),navigate=useNavigate();async function logout(){try{await api.logout()}finally{clear();navigate('/login',{replace:true})}}return <div className={compact?'user-menu compact':'user-menu'}><span><strong>{session?.user?.displayName}</strong><small>{session?.user?.email}</small></span><button onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={15}/></button></div>}

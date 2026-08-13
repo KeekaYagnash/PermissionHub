@@ -51,6 +51,7 @@ enum AccountType {
 
 enum ConnectionType {
   LOCAL_DEFAULT_CREDENTIALS
+  ACCESS_KEYS
   DEFAULT_CHAIN
   ASSUME_ROLE
   EXTERNAL_ROLE
@@ -260,6 +261,11 @@ model AwsAccountConnection {
   readRoleArn                   String?
   provisionRoleArn              String?
   externalIdSecretReference     String?
+  accessKeyIdEncrypted          String?
+  secretAccessKeyEncrypted      String?
+  sessionTokenEncrypted         String?
+  accessKeyIdMasked             String?
+  credentialUpdatedAt           DateTime?
   organisationDiscoveryRoleArn  String?
   defaultRegion                 String
   organisationsRegion           String      @default("us-east-1")

@@ -28,6 +28,7 @@ const schema=z.object({
  AWS_DISCOVERY_CACHE_TTL_SECONDS:z.coerce.number().int().min(30).max(86400).default(300),
  AWS_SECRETS_MANAGER_PREFIX:z.string().default('/permissionhub/connections'),
  AWS_DEV_SECRET_PREFIX:z.string().default('PERMISSIONHUB_CONNECTION_SECRET_'),
+ PERMISSIONHUB_CREDENTIAL_ENCRYPTION_KEY:z.string().optional(),
  IDENTITY_CENTER_INSTANCE_ARN:z.string().optional(),
  IDENTITY_STORE_ID:z.string().optional(),
  AWS_ACCOUNT_ID:z.string().default('000000000000'),
@@ -54,6 +55,7 @@ if(env.NODE_ENV==='production'&&env.ENABLE_DEV_AUTH)throw new Error('ENABLE_DEV_
 if(env.NODE_ENV==='production'&&env.ALLOW_LOCAL_PROVISIONING)throw new Error('ALLOW_LOCAL_PROVISIONING must never be enabled in production.');
 if(env.NODE_ENV==='production'&&env.AWS_CONNECTION_MODE==='manual'&&env.ENABLE_AWS_DEMO_DATA)throw new Error('AWS demo data must not be enabled in production manual mode.');
 if(env.NODE_ENV==='production'&&env.SESSION_SECRET.startsWith('development-only'))throw new Error('SESSION_SECRET must be configured in production.');
+if(env.NODE_ENV==='production'&&!env.PERMISSIONHUB_CREDENTIAL_ENCRYPTION_KEY)throw new Error('PERMISSIONHUB_CREDENTIAL_ENCRYPTION_KEY must be configured before storing access-key connections in production.');
 export const liveProvisioningEnabled=env.AWS_PROVISIONING_MODE==='live'&&env.ENABLE_LIVE_PROVISIONING&&env.CROSS_ACCOUNT_PROVISIONING_ENABLED&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS';
 export const isLocalProvisioningEnabled=()=>env.NODE_ENV==='development'&&env.ALLOW_LOCAL_PROVISIONING;
 export const liveTestAllowedPrincipals=env.AWS_LIVE_TEST_ALLOWED_PRINCIPALS.split(',').map(value=>value.trim()).filter(Boolean);

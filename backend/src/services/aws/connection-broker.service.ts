@@ -13,6 +13,7 @@ import { ApiError } from '../../utils/http.js';
 import { authorization } from '../authorization.service.js';
 import { identityDomain } from '../identity-domain.service.js';
 import { securityAudit } from '../security-audit.service.js';
+import { decryptCredential } from '../credential-encryption.service.js';
 import { secretResolver,type SecretResolver } from './secret-resolver.service.js';
 
 export type ConnectionMode='READ'|'PROVISION';
@@ -43,6 +44,15 @@ export class AwsConnectionBroker {
  private readonly now:()=>number;
  constructor(deps:BrokerDeps={}){this.stsFactory=deps.stsFactory??((region,credentials)=>new STSClient({region,credentials}));this.secrets=deps.secretResolver??secretResolver;this.now=deps.now??Date.now}
  async validateLocalCredentialSource(region=env.AWS_REGION){try{const response=await this.stsFactory(region).send(new GetCallerIdentityCommand({}));return {success:true,accountId:response.Account,principalArn:response.Arn,region,credentialSource:'AWS SDK default provider chain',checkedAt:new Date(this.now()).toISOString()}}catch(error){const safe=sanitiseAwsConnectionError(error);throw new ApiError(safe.status,safe.message,safe.code)}}
+ async validateStaticCredentials(input:{region:string;expectedAccountId?:string;accessKeyId:string;secretAccessKey:string;sessionToken?:string}){
+  const credentials=this.staticCredentialsFromInput(input);
+  try{
+   const response=await this.stsFactory(input.region,credentials).send(new GetCallerIdentityCommand({}));
+   if(input.expectedAccountId&&response.Account!==input.expectedAccountId)throw new ApiError(409,`AWS returned account ${response.Account??'unknown'}, not configured account ${input.expectedAccountId}.`,'AWS_ACCOUNT_MISMATCH');
+   const capabilities=await this.readCapabilityChecks(input.region,credentials);
+   return {success:true,accountId:response.Account,principalArn:response.Arn,region:input.region,credentialSource:'Access keys',checkedAt:new Date(this.now()).toISOString(),capabilities};
+  }catch(error){const safe=sanitiseAwsConnectionError(error);throw new ApiError(safe.status,safe.message,safe.code)}
+ }
 
  async validateAccountConnection(actor:SessionUser,accountId:string,mode:ConnectionMode='READ',validationOnly=false){
   const context=this.authorisedAccount(actor,accountId,mode);
@@ -66,9 +76,7 @@ export class AwsConnectionBroker {
   const context=this.authorisedAccount(actor,accountId,'READ');
   const credentials=await this.credentialsFor(context,'READ',actor);
   await this.validateIdentity(context,credentials,'READ');
-  const iam=new IAMClient({region:context.region,credentials});
-  const capability=async(command:ListUsersCommand|ListRolesCommand|ListPoliciesCommand)=>{try{await iam.send(command as never);return {available:true}}catch(error){const safe=sanitiseAwsConnectionError(error);return {available:false,errorCode:safe.code,message:safe.message}}};
-  const [users,roles,policies]=await Promise.all([capability(new ListUsersCommand({MaxItems:1})),capability(new ListRolesCommand({MaxItems:1})),capability(new ListPoliciesCommand({Scope:'AWS',MaxItems:1}))]);
+  const {users,roles,policies}=await this.readCapabilityChecks(context.region,credentials);
   this.audit(context,actor,'AWS_DISCOVERY_PERFORMED','SUCCESS',{capabilities:{users:users.available,roles:roles.available,policies:policies.available}});
   return {accountValidated:true,iamUsersReadable:users.available,iamRolesReadable:roles.available,policiesReadable:policies.available,policyValidationAvailable:false,provisionRoleConfigured:Boolean(context.provisionRoleArn),details:{users,roles,policies}};
  }
@@ -117,12 +125,14 @@ export class AwsConnectionBroker {
   }
   const local=['DEFAULT_CHAIN','LOCAL_DEVELOPMENT','LOCAL_DEFAULT_CREDENTIALS'].includes(context.connectionType);
   if(local&&(mode==='READ'||!context.provisionRoleArn))return this.defaultCredentials(context,mode);
+  const sourceCredentials:AwsCredentialIdentity|undefined=context.connectionType==='ACCESS_KEYS'?await this.storedStaticCredentials(context):undefined;
+  if(context.connectionType==='ACCESS_KEYS'&&(mode==='READ'||!context.provisionRoleArn))return sourceCredentials!;
   const cacheKey=`${context.tenantId}:${context.accountId}:${context.region}:${context.connectionType}:${mode}`;
   const cached=this.credentials.get(cacheKey);if(useCache&&cached&&cached.expiresAt-this.now()>60_000)return cached.credentials;
   const secret=context.externalIdSecretReference?await this.secrets.getSecret(context.externalIdSecretReference):undefined;
   const input=buildAssumeRoleInput(context,mode,actor,secret,requestId,this.now());
   try{
-   const response=await this.stsFactory(context.region).send(new AssumeRoleCommand(input));
+   const response=await this.stsFactory(context.region,sourceCredentials).send(new AssumeRoleCommand(input));
    const value=response.Credentials;if(!value?.AccessKeyId||!value.SecretAccessKey)throw new Error('STS returned no temporary credentials.');
    const credentials:AwsCredentialIdentity={accessKeyId:value.AccessKeyId,secretAccessKey:value.SecretAccessKey,sessionToken:value.SessionToken,expiration:value.Expiration};
    await this.validateIdentity(context,credentials,mode);
@@ -136,6 +146,19 @@ export class AwsConnectionBroker {
   if(identity.Account!==context.accountId)throw new ApiError(409,`PermissionHub backend credentials belong to account ${identity.Account??'unknown'}, not configured account ${context.accountId}.`,'AWS_ACCOUNT_MISMATCH');
   // Undefined credentials tells SDK v3 to use its secure default provider chain.
   return undefined as unknown as AwsCredentialIdentity;
+ }
+ private async storedStaticCredentials(context:AwsAccountContext){
+  if(env.NODE_ENV==='test'&&(context as any).accessKeyId&&(context as any).secretAccessKey)return this.staticCredentialsFromInput(context as any);
+  const row=await prisma.awsAccountConnection.findFirst({where:{tenantId:context.tenantId,awsAccountId:context.id},select:{accessKeyIdEncrypted:true,secretAccessKeyEncrypted:true,sessionTokenEncrypted:true}});
+  if(!row?.accessKeyIdEncrypted||!row.secretAccessKeyEncrypted)throw new ApiError(422,'Access-key credentials are not configured for this AWS account.','AWS_STATIC_CREDENTIALS_REQUIRED');
+  return {accessKeyId:decryptCredential(row.accessKeyIdEncrypted),secretAccessKey:decryptCredential(row.secretAccessKeyEncrypted),sessionToken:row.sessionTokenEncrypted?decryptCredential(row.sessionTokenEncrypted):undefined};
+ }
+ private staticCredentialsFromInput(input:{accessKeyId:string;secretAccessKey:string;sessionToken?:string}){return {accessKeyId:input.accessKeyId.trim(),secretAccessKey:input.secretAccessKey.trim(),sessionToken:input.sessionToken?.trim()||undefined}}
+ private async readCapabilityChecks(region:string,credentials:AwsCredentialIdentity|undefined){
+  const iam=new IAMClient({region,credentials});
+  const capability=async(command:ListUsersCommand|ListRolesCommand|ListPoliciesCommand)=>{try{await iam.send(command as never);return {available:true}}catch(error){const safe=sanitiseAwsConnectionError(error);return {available:false,errorCode:safe.code,message:safe.message}}};
+  const [users,roles,policies]=await Promise.all([capability(new ListUsersCommand({MaxItems:1})),capability(new ListRolesCommand({MaxItems:1})),capability(new ListPoliciesCommand({Scope:'AWS',MaxItems:1}))]);
+  return {users,roles,policies};
  }
  private async validateIdentity(context:AwsAccountContext,credentials:AwsCredentialIdentity|undefined,mode:ConnectionMode){
   const response=await this.stsFactory(context.region,credentials).send(new GetCallerIdentityCommand({}));
@@ -151,7 +174,7 @@ export class AwsConnectionBroker {
 
 export function sanitiseAwsConnectionError(error:unknown){
  const value=error as {name?:string;Code?:string;code?:string;message?:string;$metadata?:{httpStatusCode?:number}};const code=value.code??value.Code??value.name??'AWS_CONNECTION_FAILED';
- const messages:Record<string,string>={AccessDenied:'PermissionHub cannot assume the configured role or the role lacks a required read permission.',AccessDeniedException:'PermissionHub cannot assume the configured role or the role lacks a required read permission.',InvalidClientTokenId:'The backend AWS credential source is invalid.',ExpiredToken:'The backend AWS session has expired. Refresh the AWS profile or workload credentials.',Throttling:'AWS throttled the connection request. Retry shortly.',ThrottlingException:'AWS throttled the connection request. Retry shortly.',RegionDisabled:'The configured AWS region is disabled for this account.',NoSuchEntity:'The configured PermissionHub role does not exist in the target account.'};
+ const messages:Record<string,string>={AccessDenied:'AWS accepted the credential source, but denied a required read or role-assumption permission.',AccessDeniedException:'AWS accepted the credential source, but denied a required read or role-assumption permission.',InvalidClientTokenId:'AWS rejected the supplied credential source. Check that the access key, secret key and optional session token are correct.',SignatureDoesNotMatch:'AWS rejected the supplied credential signature. Check the secret access key and region.',ExpiredToken:'The AWS session token has expired. Refresh the temporary credentials and validate again.',UnrecognizedClientException:'AWS rejected the supplied credential source. Check the access key, secret key and session token.',Throttling:'AWS throttled the connection request. Retry shortly.',ThrottlingException:'AWS throttled the connection request. Retry shortly.',RegionDisabled:'The configured AWS region is disabled for this account.',NoSuchEntity:'The configured PermissionHub role does not exist in the target account.'};
  let message=messages[code]??'PermissionHub could not validate the AWS account connection.';
  if(code==='AWS_ACCOUNT_MISMATCH'||code==='AWS_ROLE_MISMATCH')message=value.message??message;
  return {code,status:value.$metadata?.httpStatusCode&&value.$metadata.httpStatusCode<500?value.$metadata.httpStatusCode:code.includes('Mismatch')?409:502,message};
