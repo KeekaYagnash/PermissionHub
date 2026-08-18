@@ -5,7 +5,10 @@ import { api } from "../lib/api";
 import { fuzzyPolicies } from "../lib/iam";
 import { mergePolicies } from "../lib/policyCatalogue";
 import {
+  Badge,
+  Button,
   LoadingSkeleton,
+  Modal,
   PageHeader,
   ResponsiveTable,
   RiskBadge,
@@ -42,7 +45,7 @@ export default function Permissions() {
     [debouncedSearch, setDebouncedSearch] = useState("");
   const [service, setService] = useState(""),
     [accessLevel, setAccessLevel] = useState("");
-  const [selected, setSelected] = useState<string>(),
+  const [selected, setSelected] = useState<IamPolicySummary>(),
     navigate = useNavigate();
   const [rows, setRows] = useState<IamPolicySummary[]>([]),
     [isComplete, setIsComplete] = useState(false),
@@ -56,9 +59,9 @@ export default function Permissions() {
   const startedRef = useRef<number>(performance.now());
   const cacheKey = `${activeAccountId ?? "no-account"}:${scope}`;
   const detail = useQuery({
-    queryKey: ["policy", selected],
-    queryFn: () => api.policy(selected!),
-    enabled: Boolean(selected),
+    queryKey: ["policy", activeAccountId, selected?.arn],
+    queryFn: () => api.policy(selected!.arn),
+    enabled: Boolean(selected?.arn),
     staleTime: 10 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
   });
@@ -210,9 +213,9 @@ export default function Permissions() {
     },
     {
       key: "type",
-      header: "Type",
+      header: "Source",
       priority: "medium",
-      render: (policy) => policy.type.replace("_", " "),
+      render: (policy) => policy.type === "AWS_MANAGED" ? "AWS managed" : "Customer",
     },
     {
       key: "services",
@@ -226,7 +229,7 @@ export default function Permissions() {
     },
     {
       key: "access",
-      header: "Access levels",
+      header: "Access",
       priority: "medium",
       render: (policy) => (
         <span className="truncate-cell">
@@ -254,7 +257,7 @@ export default function Permissions() {
     },
     {
       key: "updated",
-      header: "Last updated",
+      header: "Updated",
       priority: "low",
       render: (policy) => fmt(policy.updatedAt),
     },
@@ -352,84 +355,93 @@ export default function Permissions() {
           </button>
         </p>
       )}
-      <section className="split">
-        {loadingInitial && !rows.length ? (
-          <LoadingSkeleton rows={6} />
-        ) : (
-          <ResponsiveTable
-            rows={displayed}
-            columns={columns}
-            getRowKey={(policy) => policy.arn}
-            selectedKey={selected}
-            onRowClick={(policy) => setSelected(policy.arn)}
-            emptyTitle="No policies found"
-            emptyBody="Try a different search, service, or access-level filter."
-            rowActionLabel="Inspect policy"
-          />
-        )}
-        <aside className="panel policy-detail">
-          {detail.isLoading ? (
-            <>
-              <h2>Loading policy details</h2>
-              <LoadingSkeleton rows={4} />
-            </>
-          ) : detail.data ? (
-            <>
-              <h2>{detail.data.policyName}</h2>
-              <p>{detail.data.description}</p>
-              <button
-                onClick={() =>
-                  navigate(
-                    `/new-request?policyArn=${encodeURIComponent(detail.data.arn)}`,
-                  )
-                }
-              >
-                Request this policy
-              </button>
-              <dl>
-                <div>
-                  <dt>ARN</dt>
-                  <dd className="mono">{detail.data.arn}</dd>
-                </div>
-                <div>
-                  <dt>Current version</dt>
-                  <dd>{detail.data.currentVersion}</dd>
-                </div>
-                <div>
-                  <dt>Attached users</dt>
-                  <dd>{detail.data.attachedUsers.join(", ") || "None"}</dd>
-                </div>
-                <div>
-                  <dt>Attached roles</dt>
-                  <dd>{detail.data.attachedRoles.join(", ") || "None"}</dd>
-                </div>
-              </dl>
-              <h3>Risk observations</h3>
-              <div className="chips">
-                {detail.data.observations.map((x) => (
-                  <span key={x}>{x}</span>
-                ))}
-              </div>
-              <h3>Allowed actions</h3>
-              <div className="code-list">
-                {detail.data.actions.map((a) => (
-                  <code key={a}>{a}</code>
-                ))}
-              </div>
-              <TechnicalDetails title="Policy JSON" summary={`${detail.data.statements.length} statement${detail.data.statements.length===1?'':'s'}`}>
-                <pre>{JSON.stringify(detail.data.document, null, 2)}</pre>
-              </TechnicalDetails>
-            </>
-          ) : (
-            <p className="muted">
-              Select a policy to inspect statements, actions, resource scope,
-              attachments, and detailed risk observations.
-            </p>
-          )}
-        </aside>
-      </section>
+      {loadingInitial && !rows.length ? (
+        <LoadingSkeleton rows={6} />
+      ) : (
+        <ResponsiveTable
+          rows={displayed}
+          columns={columns}
+          getRowKey={(policy) => policy.arn}
+          selectedKey={selected?.arn}
+          onRowClick={setSelected}
+          emptyTitle="No policies found"
+          emptyBody="Try a different search, service, or access-level filter."
+          rowActionLabel="Inspect policy"
+        />
+      )}
+      <PolicyDetailsModal
+        policy={selected}
+        detail={detail}
+        onClose={() => setSelected(undefined)}
+        onRequest={(arn) => navigate(`/new-request?policyArn=${encodeURIComponent(arn)}`)}
+      />
     </div>
   );
+}
+
+function PolicyDetailsModal({policy,detail,onClose,onRequest}:{policy?:IamPolicySummary;detail:ReturnType<typeof useQuery<any>>;onClose:()=>void;onRequest:(arn:string)=>void}) {
+  const resolved = detail.data?.arn === policy?.arn ? detail.data : undefined;
+  const loading = Boolean(policy) && !resolved && detail.isFetching;
+  return <Modal open={Boolean(policy)} onClose={onClose} title={policy?.policyName ?? 'Policy details'} subtitle={policy?.arn} eyebrow="Policy details" closeLabel="Close policy details" wide>
+    {!policy ? <LoadingSkeleton rows={4}/> : <div className="entity-detail">
+      <div className="entity-detail-title">
+        <div>
+          <h2>{policy.policyName}</h2>
+          <p className="mono wrap-cell">{policy.arn}</p>
+        </div>
+        <div className="entity-badges"><Badge tone="info">{policy.type==='AWS_MANAGED'?'AWS managed':'Customer managed'}</Badge><RiskBadge risk={policy.risk?.level}/></div>
+      </div>
+      {loading ? <LoadingSkeleton rows={5}/> : detail.error && !resolved ? <div className="error-panel"><strong>Unable to load policy details</strong><span>{readDetailError(detail.error)}</span><Button variant="secondary" onClick={()=>detail.refetch()}>Retry</Button></div> : <PolicyDetailContent data={resolved ?? policy} onClose={onClose} onRequest={onRequest}/>}
+    </div>}
+  </Modal>
+}
+
+function PolicyDetailContent({data,onClose,onRequest}:{data:IamPolicySummary|any;onClose:()=>void;onRequest:(arn:string)=>void}) {
+  return <>
+      <section className="entity-section">
+        <h3>Overview</h3>
+        <dl className="detail-grid">
+          <div><dt>Policy name</dt><dd>{data.policyName}</dd></div>
+          <div><dt>Policy source</dt><dd>{data.type==='AWS_MANAGED'?'AWS managed':'Customer managed'}</dd></div>
+          <div><dt>Default version</dt><dd>{data.currentVersion}</dd></div>
+          <div><dt>Path</dt><dd>{data.path ?? 'Unavailable'}</dd></div>
+          <div><dt>Created</dt><dd>{fmt(data.createdAt)}</dd></div>
+          <div><dt>Updated</dt><dd>{fmt(data.updatedAt)}</dd></div>
+          <div><dt>Attached</dt><dd>{data.attachmentCount} entities</dd></div>
+          <div><dt>Boundary usage</dt><dd>{data.permissionsBoundaryUsageCount ?? 0}</dd></div>
+        </dl>
+      </section>
+      <section className="entity-section">
+        <h3>Access summary</h3>
+        <dl className="detail-grid">
+          <div><dt>Services</dt><dd>{data.services?.join(', ') || 'Analysing'}</dd></div>
+          <div><dt>Access levels</dt><dd>{data.accessLevels?.join(', ') || 'Analysing'}</dd></div>
+          <div><dt>Risk</dt><dd><RiskBadge risk={data.risk?.level}/></dd></div>
+          <div><dt>Statements</dt><dd>{'statements' in data ? data.statements.length : 'Open detail unavailable'}</dd></div>
+          <div><dt>Actions</dt><dd>{'actions' in data ? data.actions.length : 'Open detail unavailable'}</dd></div>
+          <div><dt>Resources</dt><dd>{'resources' in data ? data.resources.join(', ') || 'None reported' : 'Open detail unavailable'}</dd></div>
+        </dl>
+        {'observations' in data && data.observations.length > 0 && <div className="chips">{data.observations.map((item:string)=><span key={item}>{item}</span>)}</div>}
+      </section>
+      {'statements' in data && <TechnicalDetails title="Policy statements" summary={`${data.statements.length} statement${data.statements.length===1?'':'s'}`}>
+        <div className="statement-list">{data.statements.map((statement:unknown,index:number)=><article key={index}><strong>Statement {index+1}</strong><pre>{JSON.stringify(statement,null,2)}</pre></article>)}</div>
+      </TechnicalDetails>}
+      {'actions' in data && <TechnicalDetails title="Allowed actions" summary={`${data.actions.length} action${data.actions.length===1?'':'s'}`}>
+        <div className="code-list">{data.actions.map((action:string)=><code key={action}>{action}</code>)}</div>
+      </TechnicalDetails>}
+      {'attachedUsers' in data && <section className="entity-section">
+        <h3>Attached entities</h3>
+        <dl className="detail-grid">
+          <div><dt>Users</dt><dd>{data.attachedUsers.join(', ') || 'None'}</dd></div>
+          <div><dt>Roles</dt><dd>{data.attachedRoles.join(', ') || 'None'}</dd></div>
+          <div><dt>Groups</dt><dd>{data.attachedGroups.join(', ') || 'None'}</dd></div>
+        </dl>
+      </section>}
+      {'document' in data && <TechnicalDetails title="Policy JSON" summary="Raw IAM policy document">
+        <pre>{JSON.stringify(data.document, null, 2)}</pre>
+      </TechnicalDetails>}
+      <div className="modal-actions"><Button variant="secondary" onClick={onClose}>Close</Button><Button onClick={()=>onRequest(data.arn)}>Request permission</Button></div>
+    </>
 }
 
 function fmt(value: string) {
@@ -437,3 +449,4 @@ function fmt(value: string) {
     new Date(value),
   );
 }
+function readDetailError(error:unknown){return (error as any)?.response?.data?.error?.message??(error as Error)?.message??'The detail request failed.'}

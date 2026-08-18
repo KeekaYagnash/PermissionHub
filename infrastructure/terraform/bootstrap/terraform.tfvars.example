@@ -1,0 +1,7 @@
+aws_region = "af-south-1"
+state_bucket_name = "permissionhub-terraform-state-example"
+lock_table_name = "permissionhub-terraform-locks"
+tags = {
+  Application = "PermissionHub"
+  ManagedBy   = "Terraform"
+}

@@ -33,6 +33,26 @@ describe('safe provisioning plan',()=>{
   expect(plan.plannedOperations[1]).toMatchObject({targetName:'maya.chen',targetArn:'arn:aws:iam::143671530412:user/maya.chen'});
   expect(plan.plannedOperations.every(item=>item.executed===false)).toBe(true);
  });
+ it('describes CreateGroup, CreatePolicy, AttachGroupPolicy and AddUserToGroup for group creation',()=>{
+  const groupRequest=request({
+   targetType:'GROUP',
+   targetName:'DR_DevOps_Test',
+   targetArn:'arn:aws:iam::143671530412:group/DR_DevOps_Test',
+   group:{mode:'CREATE',name:'DR_DevOps_Test'},
+   members:[{userName:'maya.chen',userArn:'arn:aws:iam::143671530412:user/maya.chen',operation:'ADD'}],
+   items:[{mode:'SPECIFIC_ACTIONS',generatedPolicyName:'PH-PR-1008-1',actions:['lambda:InvokeFunction'],generatedPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:['lambda:InvokeFunction'],Resource:'*'}]}}]
+  });
+  const plan=buildProvisioningPlan(groupRequest,account);
+  expect(plan.valid).toBe(true);
+  expect(plan.targetPrincipalType).toBe('GROUP');
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateGroup','CreatePolicy','AttachGroupPolicy','AddUserToGroup']);
+  expect(plan.plannedOperations[0]).toMatchObject({targetName:'DR_DevOps_Test',targetArn:'arn:aws:iam::143671530412:group/DR_DevOps_Test'});
+  expect(plan.plannedOperations[2]).toMatchObject({targetName:'DR_DevOps_Test',targetArn:'arn:aws:iam::143671530412:group/DR_DevOps_Test'});
+  expect(plan.plannedOperations[3]).toMatchObject({groupName:'DR_DevOps_Test',userName:'maya.chen'});
+ });
+ it('requires group metadata and at least one requested group member',()=>{
+  expect(buildProvisioningPlan(request({targetType:'GROUP',targetName:'DR_DevOps_Test',targetArn:'arn:aws:iam::143671530412:group/DR_DevOps_Test'}),account)).toMatchObject({valid:false,errors:expect.arrayContaining([expect.objectContaining({field:'group'}),expect.objectContaining({field:'members'})])});
+ });
  it('blocks an incomplete generated policy plan',()=>expect(buildProvisioningPlan(request({items:[{mode:'SPECIFIC_ACTIONS',actions:['s3:ListBucket']}]}),account)).toMatchObject({valid:false,errors:expect.arrayContaining([expect.objectContaining({field:'items.0.generatedPolicyDocument'})])}));
  it('reports concrete live-readiness blockers',()=>expect(reviewCapabilities({request:request(),account,approvalAllowed:false,provisionPermission:false,currentUserRoles:['ORGANISATION_ADMIN'],assignedApproverMatch:false})).toMatchObject({requestId:'PR-1008',blockingReasons:expect.arrayContaining(['CURRENT_USER_NOT_ASSIGNED_APPROVER','ACCOUNT_SCOPED_PROVISIONER_REQUIRED','PROVISIONING_DISABLED','PROVISION_ROLE_NOT_CONFIGURED']),requiredApproverRoles:['ACCOUNT_APPROVER'],currentUserRoles:['ORGANISATION_ADMIN'],checklist:expect.arrayContaining([expect.objectContaining({key:'approvalEligibility',passed:false}),expect.objectContaining({key:'planValidation',passed:true})])}));
  it('bypasses only enterprise authorization blockers in development local mode',()=>{

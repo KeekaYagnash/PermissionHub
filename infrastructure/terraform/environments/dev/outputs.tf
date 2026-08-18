@@ -1,0 +1,22 @@
+output "api_gateway_id" { value = module.api_gateway.api_id }
+output "api_gateway_endpoint" { value = module.api_gateway.api_endpoint }
+output "api_stage" { value = module.api_gateway.stage_name }
+output "api_lambda_name" { value = module.api_lambda.function_name }
+output "provisioning_lambda_name" { value = module.provisioning_lambda.function_name }
+output "expiry_lambda_name" { value = module.expiry_lambda.function_name }
+output "migration_lambda_name" { value = module.migration_lambda.function_name }
+output "cognito_user_pool_id" { value = module.cognito.user_pool_id }
+output "cognito_user_pool_arn" { value = module.cognito.user_pool_arn }
+output "cognito_app_client_id" { value = module.cognito.app_client_id }
+output "cognito_issuer_url" { value = module.cognito.issuer_url }
+output "cognito_domain" { value = module.cognito.domain }
+output "rds_endpoint" { value = module.rds.endpoint }
+output "rds_proxy_endpoint" { value = module.rds_proxy.endpoint }
+output "database_secret_arn" { value = module.rds.secret_arn }
+output "app_secret_arn" { value = module.secrets.app_secret_arn }
+output "provisioning_queue_url" { value = module.queues.queue_url }
+output "provisioning_dlq_url" { value = module.queues.dlq_url }
+output "vpc_id" { value = module.networking.vpc_id }
+output "private_app_subnet_ids" { value = module.networking.private_app_subnet_ids }
+output "lambda_security_group_id" { value = module.security.lambda_security_group_id }
+output "interface_vpc_endpoint_ids" { value = { for service, endpoint in aws_vpc_endpoint.interface : service => endpoint.id } }

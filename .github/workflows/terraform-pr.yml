@@ -1,0 +1,96 @@
+name: PermissionHub PR validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: read
+
+jobs:
+  application-and-terraform:
+    runs-on: ubuntu-latest
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_frontend_url: ${{ vars.TF_VAR_FRONTEND_URL || 'http://localhost:5173' }}
+      TF_VAR_lambda_artifact_bucket: ${{ vars.LAMBDA_ARTIFACT_BUCKET || 'permissionhub-lambda-artifacts-placeholder' }}
+      TF_VAR_api_lambda_artifact_key: permissionhub-api-${{ github.event.pull_request.head.sha }}.zip
+      TF_VAR_provisioning_lambda_artifact_key: permissionhub-provisioning-${{ github.event.pull_request.head.sha }}.zip
+      TF_VAR_expiry_lambda_artifact_key: permissionhub-expiry-${{ github.event.pull_request.head.sha }}.zip
+      TF_VAR_migration_lambda_artifact_key: permissionhub-db-migration-${{ github.event.pull_request.head.sha }}.zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Backend typecheck
+        run: npm run typecheck --workspace backend
+
+      - name: Backend tests
+        run: npm test --workspace backend
+
+      - name: Backend build
+        run: npm run build --workspace backend
+
+      - name: Frontend typecheck
+        run: npm run typecheck --workspace frontend
+
+      - name: Frontend tests
+        run: npm test --workspace frontend
+
+      - name: Terraform setup
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive infrastructure/terraform
+
+      - name: Terraform init without backend
+        working-directory: infrastructure/terraform/environments/dev
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        working-directory: infrastructure/terraform/environments/dev
+        run: terraform validate
+
+      - name: Configure AWS credentials for plan
+        if: ${{ vars.AWS_ROLE_TO_ASSUME != '' && vars.AWS_REGION != '' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Terraform plan
+        if: ${{ vars.AWS_ROLE_TO_ASSUME != '' && vars.AWS_REGION != '' && github.event.pull_request.head.repo.full_name == github.repository }}
+        working-directory: infrastructure/terraform/environments/dev
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="key=permissionhub/dev/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ vars.TERRAFORM_LOCK_TABLE }}" \
+            -backend-config="encrypt=true" \
+            -reconfigure
+          terraform plan -no-color -var-file=terraform.tfvars.example \
+            -var="frontend_url=${TF_VAR_frontend_url}" \
+            -var="lambda_artifact_bucket=${TF_VAR_lambda_artifact_bucket}" \
+            -var="api_lambda_artifact_key=${TF_VAR_api_lambda_artifact_key}" \
+            -var="provisioning_lambda_artifact_key=${TF_VAR_provisioning_lambda_artifact_key}" \
+            -var="expiry_lambda_artifact_key=${TF_VAR_expiry_lambda_artifact_key}" \
+            -var="migration_lambda_artifact_key=${TF_VAR_migration_lambda_artifact_key}" \
+            -out=tfplan
+
+      - name: Upload Terraform plan
+        if: ${{ vars.AWS_ROLE_TO_ASSUME != '' && vars.AWS_REGION != '' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: permissionhub-dev-serverless-tfplan
+          path: infrastructure/terraform/environments/dev/tfplan

@@ -46,6 +46,14 @@ async function authenticatedAgent(userId='user_org_admin_dev'){
 }
 
 describe('safe request review HTTP workflow',()=>{
+ it('serves the canonical IAM groups discovery route',async()=>{
+  const listGroups=vi.spyOn(IamIdentityService.prototype,'listGroups').mockResolvedValue([{id:'group_DR_DevOps',type:'GROUP',name:'DR_DevOps',arn:'arn:aws:iam::143671530412:group/DR_DevOps',path:'/',createdAt:new Date().toISOString(),attachedPolicies:[],inlinePolicies:[],userCount:0}]);
+  const {agent}=await authenticatedAgent();
+  const response=await agent.get('/api/aws/identities/groups?pageSize=100').expect(200);
+  expect(response.body.data).toEqual(expect.arrayContaining([expect.objectContaining({type:'GROUP',name:'DR_DevOps'})]));
+  expect(listGroups).toHaveBeenCalledWith(undefined,100);
+ });
+
  it('approves with a blank optional comment while provisioning is disabled',async()=>{
   (env as {AWS_PROVISIONING_MODE:'disabled'}).AWS_PROVISIONING_MODE='disabled';
   const item=pending('PR-TEST-DISABLED');requests.unshift(item);

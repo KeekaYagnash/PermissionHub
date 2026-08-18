@@ -26,20 +26,25 @@ export const mockIdentities:IamIdentity[]=[
  ['ROLE','billing-exporter','/automation/',undefined,3600,['CloudWatchReadOnlyAccess'],[]],
  ['ROLE','security-auditor','/security/',undefined,43200,['SecurityAudit'],[]],
  ['ROLE','developer-sandbox-role','/sandbox/',undefined,3600,['PowerUserAccess'],[]],
- ['ROLE','deployment-observer','/platform/',undefined,3600,['ViewOnlyAccess'],[]]
+ ['ROLE','deployment-observer','/platform/',undefined,3600,['ViewOnlyAccess'],[]],
+ ['GROUP','DR_DevOps','/',undefined,undefined,['CloudWatchReadOnlyAccess','ViewOnlyAccess'],[]],
+ ['GROUP','Finance_ReadOnly','/',undefined,undefined,['AmazonS3ReadOnlyAccess'],[]],
+ ['GROUP','Platform_Engineering','/',undefined,undefined,['ReadOnlyAccess','AWSLambda_ReadOnlyAccess'],[]]
 ].map((row,index)=>({
  id:`identity_${index+1}`,
- type:row[0] as 'USER'|'ROLE',
+ type:row[0] as 'USER'|'ROLE'|'GROUP',
  name:row[1] as string,
- arn:`arn:aws:iam::000000000000:${row[0]==='USER'?'user':'role'}${row[2]}${row[1]}`,
+ arn:`arn:aws:iam::000000000000:${row[0]==='USER'?'user':row[0]==='ROLE'?'role':'group'}${row[2]}${row[1]}`,
  path:row[2] as string,
  createdAt:new Date(now-(index+12)*86400000).toISOString(),
  description:row[0]==='ROLE'?`${row[1]} role used for sandbox permission-request testing`:`${row[1]} IAM user in the sandbox account`,
- passwordEnabled:row[3] as boolean|undefined,
+ passwordEnabled:row[0]==='USER'?row[3] as boolean|undefined:undefined,
  maxSessionDuration:row[4] as number|undefined,
  attachedPolicies:(row[5] as string[]).map(name=>({policyName:name,policyArn:`arn:aws:iam::aws:policy/${name}`})),
  inlinePolicies:row[6] as string[],
- serviceLinked:String(row[2]).startsWith('/aws-service-role/'),
+ serviceLinked:row[0]==='ROLE'&&String(row[2]).startsWith('/aws-service-role/'),
+ users:row[0]==='GROUP'?['maya.chen','daniel.okafor','liam.wilson'].map(name=>({userName:name,arn:`arn:aws:iam::000000000000:user/${name}`})):undefined,
+ userCount:row[0]==='GROUP'?3:undefined,
  tags:{Owner:String(row[1]).split('.')[0]??'platform',Environment:'Sandbox'},
  trustPolicy:row[0]==='ROLE'?{Version:'2012-10-17',Statement:[{Effect:'Allow',Principal:{AWS:'arn:aws:iam::000000000000:root'},Action:'sts:AssumeRole'}]}:undefined
 }));

@@ -12,6 +12,10 @@ import {
  ListUserPoliciesCommand,
  ListAttachedRolePoliciesCommand,
  ListRolePoliciesCommand,
+ ListGroupsCommand,
+ GetGroupCommand,
+ ListAttachedGroupPoliciesCommand,
+ ListGroupPoliciesCommand,
  ListEntitiesForPolicyCommand,
  SimulatePrincipalPolicyCommand,
  SimulateCustomPolicyCommand,
@@ -19,6 +23,12 @@ import {
  DetachUserPolicyCommand,
  AttachRolePolicyCommand,
  DetachRolePolicyCommand,
+ AttachGroupPolicyCommand,
+ DetachGroupPolicyCommand,
+ CreateGroupCommand,
+ DeleteGroupCommand,
+ AddUserToGroupCommand,
+ RemoveUserFromGroupCommand,
  CreatePolicyCommand,
  type Policy
 } from '@aws-sdk/client-iam';
@@ -79,8 +89,11 @@ export class IamIdentityService{
  async getUser(userName:string){if(!(await liveAvailable(this.context)))return mockIdentities.find(i=>i.type==='USER'&&i.name===userName);const user=await this.iam.send(new GetUserCommand({UserName:userName}));return this.toUser(userName,user.User?.Arn??'',user.User?.Path??'/',user.User?.CreateDate)}
  async listRoles(search='',includeServiceLinked=false,limit=100):Promise<IamIdentity[]>{if(!(await liveAvailable(this.context)))return filterIdentities(mockIdentities.filter(i=>i.type==='ROLE'&&(includeServiceLinked||!i.serviceLinked)),search);const roles=await collectLimited(marker=>this.iam.send(new ListRolesCommand({Marker:marker,MaxItems:limit})),r=>r.Roles??[],r=>r.Marker,limit);const visible=(includeServiceLinked?roles:roles.filter(role=>!(role.Path??'').startsWith('/aws-service-role/'))).slice(0,limit);const detailed=await Promise.all(visible.map(role=>this.toRole(role.RoleName??'',role.Arn??'',role.Path??'/',role.CreateDate,role.MaxSessionDuration,role.Description,role.AssumeRolePolicyDocument)));return filterIdentities(detailed,search)}
  async getRole(roleName:string){if(!(await liveAvailable(this.context)))return mockIdentities.find(i=>i.type==='ROLE'&&i.name===roleName);const role=await this.iam.send(new GetRoleCommand({RoleName:roleName}));return this.toRole(roleName,role.Role?.Arn??'',role.Role?.Path??'/',role.Role?.CreateDate,role.Role?.MaxSessionDuration)}
+ async listGroups(search='',limit=100):Promise<IamIdentity[]>{if(!(await liveAvailable(this.context)))return filterIdentities(mockIdentities.filter(i=>i.type==='GROUP'),search);const groups=await collectLimited(marker=>this.iam.send(new ListGroupsCommand({Marker:marker,MaxItems:limit})),r=>r.Groups??[],r=>r.Marker,limit);const detailed=await Promise.all(groups.map(group=>this.toGroup(group.GroupName??'',group.Arn??'',group.Path??'/',group.CreateDate,undefined,false)));return filterIdentities(detailed,search)}
+ async getGroup(groupName:string){if(!(await liveAvailable(this.context)))return mockIdentities.find(i=>i.type==='GROUP'&&i.name===groupName);const group=await this.iam.send(new GetGroupCommand({GroupName:groupName}));return this.toGroup(groupName,group.Group?.Arn??'',group.Group?.Path??'/',group.Group?.CreateDate,group.Users?.map(user=>({userName:user.UserName??'',arn:user.Arn})).filter(user=>user.userName),true)}
  private async toUser(name:string,arn:string,path:string,created?:Date):Promise<IamIdentity>{const attached=await collect(marker=>this.iam.send(new ListAttachedUserPoliciesCommand({UserName:name,Marker:marker})),r=>r.AttachedPolicies??[],r=>r.Marker);const inline=await collect(marker=>this.iam.send(new ListUserPoliciesCommand({UserName:name,Marker:marker})),r=>r.PolicyNames??[],r=>r.Marker);return {id:`user_${name}`,type:'USER',name,arn,path,createdAt:(created??new Date()).toISOString(),passwordEnabled:undefined,attachedPolicies:attached.map(p=>({policyName:p.PolicyName??'',policyArn:p.PolicyArn??''})),inlinePolicies:inline}}
  private async toRole(name:string,arn:string,path:string,created?:Date,maxSessionDuration?:number,description?:string,trustPolicy?:unknown):Promise<IamIdentity>{const [attached,inline]=await Promise.all([collect(marker=>this.iam.send(new ListAttachedRolePoliciesCommand({RoleName:name,Marker:marker})),r=>r.AttachedPolicies??[],r=>r.Marker).catch(()=>[]),collect(marker=>this.iam.send(new ListRolePoliciesCommand({RoleName:name,Marker:marker})),r=>r.PolicyNames??[],r=>r.Marker).catch(()=>[])]);return {id:`role_${name}`,type:'ROLE',name,arn,path,createdAt:(created??new Date()).toISOString(),description,maxSessionDuration,attachedPolicies:attached.map(p=>({policyName:p.PolicyName??'',policyArn:p.PolicyArn??''})),inlinePolicies:inline,serviceLinked:path.startsWith('/aws-service-role/'),trustPolicy}}
+ private async toGroup(name:string,arn:string,path:string,created?:Date,users?:{userName:string;arn?:string}[],includeDetails=false):Promise<IamIdentity>{const [attached,inline]=await Promise.all([includeDetails?collect(marker=>this.iam.send(new ListAttachedGroupPoliciesCommand({GroupName:name,Marker:marker})),r=>r.AttachedPolicies??[],r=>r.Marker).catch(()=>[]):Promise.resolve([]),includeDetails?collect(marker=>this.iam.send(new ListGroupPoliciesCommand({GroupName:name,Marker:marker})),r=>r.PolicyNames??[],r=>r.Marker).catch(()=>[]):Promise.resolve([])]);return {id:`group_${name}`,type:'GROUP',name,arn,path,createdAt:(created??new Date()).toISOString(),description:`IAM user group ${name}`,attachedPolicies:attached.map(p=>({policyName:p.PolicyName??'',policyArn:p.PolicyArn??''})),inlinePolicies:inline,users,userCount:users?.length??0}}
 }
 
 export class IamPolicyService{
@@ -202,26 +215,53 @@ export class IamProvisioningService{
  private iam:IAMClient;constructor(private context?:AwsAccountContext,private actor?:SessionUser,private requestId?:string){this.iam=context?awsConnectionBroker.getIamClient(context,isLocalProvisioningEnabled()?'read':'provision',actor,requestId):new IAMClient(cfg)}
  async attach(input:{targetType:TargetType;targetName:string;policyArn:string}){
   this.assertAllowed(input.policyArn,'attach');
-  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Provisioning is disabled; no AWS change was made.'};
-  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,message:'Dry-run mode does not attach policies.'};
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:attachOperation(input.targetType),changed:false,message:'Provisioning is disabled; no AWS change was made.'};
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:attachOperation(input.targetType),changed:false,message:'Dry-run mode does not attach policies.'};
   if(!isLocalProvisioningEnabled()&&!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
-  const listed=input.targetType==='USER'?await this.iam.send(new ListAttachedUserPoliciesCommand({UserName:input.targetName})):await this.iam.send(new ListAttachedRolePoliciesCommand({RoleName:input.targetName}));
-  if(listed.AttachedPolicies?.some(policy=>policy.PolicyArn===input.policyArn))return {mode:'LIVE',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:false,idempotent:true,message:'The approved policy was already attached.'};
-  const response=input.targetType==='USER'?await this.iam.send(new AttachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new AttachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn}));
-  const verified=input.targetType==='USER'?await this.iam.send(new ListAttachedUserPoliciesCommand({UserName:input.targetName})):await this.iam.send(new ListAttachedRolePoliciesCommand({RoleName:input.targetName}));
+  const listed=await this.listAttached(input.targetType,input.targetName);
+  if(listed.AttachedPolicies?.some(policy=>policy.PolicyArn===input.policyArn))return {mode:'LIVE',operation:attachOperation(input.targetType),changed:false,idempotent:true,message:'The approved policy was already attached.'};
+  const response=input.targetType==='USER'?await this.iam.send(new AttachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):input.targetType==='ROLE'?await this.iam.send(new AttachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new AttachGroupPolicyCommand({GroupName:input.targetName,PolicyArn:input.policyArn}));
+  const verified=await this.listAttached(input.targetType,input.targetName);
   if(!verified.AttachedPolicies?.some(policy=>policy.PolicyArn===input.policyArn))throw new Error('AWS did not report the approved policy attachment after provisioning.');
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);cache.delete(`policy-detail:${this.contextKey()}:${input.policyArn}`);
-  return {mode:isLocalProvisioningEnabled()?'local':'LIVE',operation:input.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy',changed:true,awsRequestId:response.$metadata.requestId};
+  return {mode:isLocalProvisioningEnabled()?'local':'LIVE',operation:attachOperation(input.targetType),changed:true,awsRequestId:response.$metadata.requestId};
  }
  async detach(input:{targetType:TargetType;targetName:string;policyArn:string}){
   this.assertAllowed(input.policyArn,'detach');
   if(isLocalProvisioningEnabled())throw new Error('Development-only local provisioning does not permit policy detachment.');
-  if(env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:false,message:'Provisioning is disabled; no AWS change was made.'};
-  if(env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:false,message:'Dry-run mode does not detach policies.'};
+  if(env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:detachOperation(input.targetType),changed:false,message:'Provisioning is disabled; no AWS change was made.'};
+  if(env.AWS_PROVISIONING_MODE==='dry-run')return {mode:'dry-run',operation:detachOperation(input.targetType),changed:false,message:'Dry-run mode does not detach policies.'};
   if(!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
-  const response=input.targetType==='USER'?await this.iam.send(new DetachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new DetachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn}));
+  const response=input.targetType==='USER'?await this.iam.send(new DetachUserPolicyCommand({UserName:input.targetName,PolicyArn:input.policyArn})):input.targetType==='ROLE'?await this.iam.send(new DetachRolePolicyCommand({RoleName:input.targetName,PolicyArn:input.policyArn})):await this.iam.send(new DetachGroupPolicyCommand({GroupName:input.targetName,PolicyArn:input.policyArn}));
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);cache.delete(`policy-detail:${this.contextKey()}:${input.policyArn}`);
-  return {mode:'LIVE',operation:input.targetType==='USER'?'DetachUserPolicy':'DetachRolePolicy',changed:true,awsRequestId:response.$metadata.requestId};
+  return {mode:'LIVE',operation:detachOperation(input.targetType),changed:true,awsRequestId:response.$metadata.requestId};
+ }
+ async createGroup(groupName:string,path='/permissionhub/'){
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,changed:false,groupName,path,message:'Group creation skipped outside live mode.'};
+  if(!isLocalProvisioningEnabled()&&!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
+  try{const existing=await this.iam.send(new GetGroupCommand({GroupName:groupName}));if(existing.Group?.Arn)throw new Error(`GROUP_NAME_CONFLICT: ${groupName}`)}catch(error:any){if(error?.name!=='NoSuchEntity'&&error?.Code!=='NoSuchEntity')throw error}
+  const response=await this.iam.send(new CreateGroupCommand({GroupName:groupName,Path:path}));
+  return {mode:isLocalProvisioningEnabled()?'local':'LIVE',operation:'CreateGroup',changed:true,groupName,groupArn:response.Group?.Arn,awsRequestId:response.$metadata.requestId};
+ }
+ async addUserToGroup(groupName:string,userName:string){
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,operation:'AddUserToGroup',changed:false,groupName,userName,message:'Group membership update skipped outside live mode.'};
+  if(!isLocalProvisioningEnabled()&&!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
+  const current=await this.iam.send(new GetGroupCommand({GroupName:groupName}));
+  if((current.Users??[]).some(user=>user.UserName===userName))return {mode:isLocalProvisioningEnabled()?'local':'LIVE',operation:'AddUserToGroup',changed:false,idempotent:true,groupName,userName,message:'User is already a member of the group.'};
+  const response=await this.iam.send(new AddUserToGroupCommand({GroupName:groupName,UserName:userName}));
+  return {mode:isLocalProvisioningEnabled()?'local':'LIVE',operation:'AddUserToGroup',changed:true,groupName,userName,awsRequestId:response.$metadata.requestId};
+ }
+ async removeUserFromGroup(groupName:string,userName:string){
+  if(isLocalProvisioningEnabled())throw new Error('Development-only local provisioning does not permit group membership removal.');
+  if(env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,operation:'RemoveUserFromGroup',changed:false,groupName,userName,message:'Group membership removal skipped outside live mode.'};
+  const response=await this.iam.send(new RemoveUserFromGroupCommand({GroupName:groupName,UserName:userName}));
+  return {mode:'LIVE',operation:'RemoveUserFromGroup',changed:true,groupName,userName,awsRequestId:response.$metadata.requestId};
+ }
+ async deleteGroup(groupName:string){
+  if(isLocalProvisioningEnabled())throw new Error('Development-only local provisioning does not permit group deletion.');
+  if(env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,operation:'DeleteGroup',changed:false,groupName,message:'Group deletion skipped outside live mode.'};
+  const response=await this.iam.send(new DeleteGroupCommand({GroupName:groupName}));
+  return {mode:'LIVE',operation:'DeleteGroup',changed:true,groupName,awsRequestId:response.$metadata.requestId};
  }
  async createCustomerPolicy(name:string,document:Record<string,unknown>,path='/permissionhub/',requestId=this.requestId){
   const accountId=this.context?.accountId??env.AWS_ACCOUNT_ID,policyArn=`arn:aws:iam::${accountId}:policy/${path.replace(/^\/+|\/+$/g,'')}/${name}`;
@@ -236,8 +276,14 @@ export class IamProvisioningService{
   if(policyArn.endsWith('/AdministratorAccess'))throw new Error('AdministratorAccess provisioning is explicitly blocked.');
   if(!['attach','detach'].includes(operation))throw new Error('Unsupported provisioning operation.');
  }
+ private listAttached(targetType:TargetType,targetName:string){
+  return targetType==='USER'?this.iam.send(new ListAttachedUserPoliciesCommand({UserName:targetName})):targetType==='ROLE'?this.iam.send(new ListAttachedRolePoliciesCommand({RoleName:targetName})):this.iam.send(new ListAttachedGroupPoliciesCommand({GroupName:targetName}));
+ }
  private contextKey(){return this.context?`${this.context.tenantId}:${this.context.accountId}:${this.context.region}:${this.context.connectionType}`:'default'}
 }
+
+function attachOperation(targetType:TargetType){return targetType==='USER'?'AttachUserPolicy':targetType==='ROLE'?'AttachRolePolicy':'AttachGroupPolicy'}
+function detachOperation(targetType:TargetType){return targetType==='USER'?'DetachUserPolicy':targetType==='ROLE'?'DetachRolePolicy':'DetachGroupPolicy'}
 
 function stableJson(value:unknown):string{if(Array.isArray(value))return `[${value.map(stableJson).join(',')}]`;if(value&&typeof value==='object')return `{${Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>`${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;return JSON.stringify(value)}
 

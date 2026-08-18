@@ -6,8 +6,8 @@ import {ApiError} from '../utils/http.js';
 export const reviewActions=['APPROVE','APPROVE_AND_PROVISION','REJECT','REQUEST_INFORMATION'] as const;
 export type ReviewAction=typeof reviewActions[number];
 export type AwsProvisioningMode='disabled'|'dry-run'|'live'|'local';
-export interface PlannedOperation{service:'iam';operation:'CreatePolicy'|'AttachUserPolicy'|'AttachRolePolicy';executed:false;policyArn?:string;policyName?:string;policyPath?:'/permissionhub/';policyDocument?:Record<string,unknown>;targetName?:string;targetArn?:string}
-export interface ProvisioningPlan{valid:boolean;policyMode:'MANAGED_POLICY'|'GENERATED_CUSTOMER_POLICY'|'MIXED';targetAccount:string;targetPrincipal:string;targetPrincipalType:'USER'|'ROLE';generatedPolicyNames:string[];plannedOperations:PlannedOperation[];validationResults:{check:string;valid:boolean;message:string}[];errors:{field:string;message:string}[]}
+export interface PlannedOperation{service:'iam';operation:'CreatePolicy'|'AttachUserPolicy'|'AttachRolePolicy'|'CreateGroup'|'AttachGroupPolicy'|'AddUserToGroup';executed:false;policyArn?:string;policyName?:string;policyPath?:'/permissionhub/';policyDocument?:Record<string,unknown>;targetName?:string;targetArn?:string;groupName?:string;userName?:string}
+export interface ProvisioningPlan{valid:boolean;policyMode:'MANAGED_POLICY'|'GENERATED_CUSTOMER_POLICY'|'MIXED';targetAccount:string;targetPrincipal:string;targetPrincipalType:'USER'|'ROLE'|'GROUP';generatedPolicyNames:string[];plannedOperations:PlannedOperation[];validationResults:{check:string;valid:boolean;message:string}[];errors:{field:string;message:string}[]}
 
 const optionalComment=z.preprocess(value=>{
  if(value===undefined||value===null)return undefined;
@@ -36,14 +36,20 @@ export function effectiveApprovalStages(request:PermissionRequest){return isLoca
 
 export function buildProvisioningPlan(request:PermissionRequest,account:AwsAccountContext):ProvisioningPlan{
  const errors:{field:string;message:string}[]=[],operations:PlannedOperation[]=[],generatedPolicyNames:string[]=[];
- if(!['USER','ROLE'].includes(request.targetType))errors.push({field:'targetType',message:'The target principal type is not supported for IAM provisioning.'});
+ if(!['USER','ROLE','GROUP'].includes(request.targetType))errors.push({field:'targetType',message:'The target principal type is not supported for IAM provisioning.'});
  if(!request.targetName.trim())errors.push({field:'targetName',message:'The target principal name is missing.'});
  if(!request.targetArn.startsWith('arn:aws:iam::'))errors.push({field:'targetArn',message:'The target principal ARN is invalid.'});
  if(!request.targetArn.includes(`::${account.accountId}:`))errors.push({field:'targetArn',message:'The target principal belongs to a different AWS account.'});
+ if(request.targetType==='GROUP'){
+  if(!request.group)errors.push({field:'group',message:'Group create/update details are required.'});
+  else if(request.group.name!==request.targetName)errors.push({field:'group.name',message:'Group name must match the target name.'});
+  if(!request.members?.some(member=>(member.operation??'ADD')==='ADD'))errors.push({field:'members',message:'Select at least one IAM user to add to the group.'});
+  if(request.group?.mode==='CREATE')operations.push({service:'iam',operation:'CreateGroup',executed:false,targetName:request.targetName,targetArn:request.targetArn,groupName:request.targetName});
+ }
  if(!request.scope?.type)errors.push({field:'scope',message:'The resource scope is missing.'});
  if(request.awsAccountId&&request.awsAccountId!==account.id&&request.awsAccountId!==account.accountId)errors.push({field:'awsAccountId',message:'The active AWS account does not match the request account.'});
  request.items.forEach((item,index)=>{
-  const attachOperation=request.targetType==='USER'?'AttachUserPolicy':'AttachRolePolicy';
+  const attachOperation=request.targetType==='USER'?'AttachUserPolicy':request.targetType==='ROLE'?'AttachRolePolicy':'AttachGroupPolicy';
   if(item.mode==='MANAGED_POLICY'){
    if(!item.policyArn)errors.push({field:`items.${index}.policyArn`,message:'Managed-policy attachment requires a policy ARN.'});
    else if(item.policyArn.endsWith('/AdministratorAccess'))errors.push({field:`items.${index}.policyArn`,message:'AdministratorAccess provisioning is blocked.'});
@@ -55,6 +61,7 @@ export function buildProvisioningPlan(request:PermissionRequest,account:AwsAccou
    operations.push({service:'iam',operation:'CreatePolicy',executed:false,policyName:name,policyPath:'/permissionhub/',policyDocument:item.generatedPolicyDocument},{service:'iam',operation:attachOperation,executed:false,policyName:name,targetName:request.targetName,targetArn:request.targetArn});
   }
  });
+ if(request.targetType==='GROUP')for(const member of request.members??[])if((member.operation??'ADD')==='ADD')operations.push({service:'iam',operation:'AddUserToGroup',executed:false,targetName:request.targetName,targetArn:request.targetArn,groupName:request.targetName,userName:member.userName});
  if(!request.items.length)errors.push({field:'items',message:'The request does not contain any permission items.'});
  const modes=new Set(request.items.map(item=>item.mode)),policyMode=modes.size>1?'MIXED':modes.has('SPECIFIC_ACTIONS')?'GENERATED_CUSTOMER_POLICY':'MANAGED_POLICY';
  return {valid:errors.length===0,policyMode,targetAccount:account.accountId,targetPrincipal:request.targetArn,targetPrincipalType:request.targetType,generatedPolicyNames,plannedOperations:operations,errors,validationResults:[

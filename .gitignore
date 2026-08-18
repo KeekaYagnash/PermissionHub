@@ -18,3 +18,8 @@ frontend/.vite/
 .aws/config
 **/.aws/credentials
 **/.aws/config
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan*

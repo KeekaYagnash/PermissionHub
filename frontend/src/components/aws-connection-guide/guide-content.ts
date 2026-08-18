@@ -33,8 +33,9 @@ const provisioningPolicy={
  Version:'2012-10-17',
  Statement:[
   {Sid:'ManagePermissionHubPolicies',Effect:'Allow',Action:['iam:CreatePolicy','iam:CreatePolicyVersion','iam:SetDefaultPolicyVersion','iam:DeletePolicyVersion','iam:TagPolicy'],Resource:'arn:aws:iam::*:policy/permissionhub/*'},
-  {Sid:'AttachAndDetachApprovedPolicies',Effect:'Allow',Action:['iam:AttachUserPolicy','iam:DetachUserPolicy','iam:AttachRolePolicy','iam:DetachRolePolicy'],Resource:['arn:aws:iam::*:user/*','arn:aws:iam::*:role/*']},
-  {Sid:'ManageApprovedInlinePolicies',Effect:'Allow',Action:['iam:PutUserPolicy','iam:DeleteUserPolicy','iam:PutRolePolicy','iam:DeleteRolePolicy'],Resource:['arn:aws:iam::*:user/*','arn:aws:iam::*:role/*']},
+  {Sid:'AttachAndDetachApprovedPolicies',Effect:'Allow',Action:['iam:AttachUserPolicy','iam:DetachUserPolicy','iam:AttachRolePolicy','iam:DetachRolePolicy','iam:AttachGroupPolicy','iam:DetachGroupPolicy'],Resource:['arn:aws:iam::*:user/*','arn:aws:iam::*:role/*','arn:aws:iam::*:group/*']},
+  {Sid:'ManagePermissionHubGroups',Effect:'Allow',Action:['iam:CreateGroup','iam:AddUserToGroup','iam:RemoveUserFromGroup'],Resource:'arn:aws:iam::*:group/permissionhub/*'},
+  {Sid:'ManageApprovedInlinePolicies',Effect:'Allow',Action:['iam:PutUserPolicy','iam:DeleteUserPolicy','iam:PutRolePolicy','iam:DeleteRolePolicy','iam:PutGroupPolicy','iam:DeleteGroupPolicy'],Resource:['arn:aws:iam::*:user/*','arn:aws:iam::*:role/*','arn:aws:iam::*:group/*']},
  ],
 };
 
