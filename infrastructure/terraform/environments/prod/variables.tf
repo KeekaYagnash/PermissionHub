@@ -12,6 +12,10 @@ variable "availability_zones" { type = list(string) }
 variable "public_subnet_cidrs" { type = list(string) }
 variable "private_app_subnet_cidrs" { type = list(string) }
 variable "private_db_subnet_cidrs" { type = list(string) }
+variable "enable_rds_proxy" {
+  type    = bool
+  default = true
+}
 variable "interface_endpoint_services" {
   type    = list(string)
   default = ["secretsmanager", "sts", "logs", "sqs"]

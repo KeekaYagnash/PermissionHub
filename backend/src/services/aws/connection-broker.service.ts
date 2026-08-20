@@ -120,7 +120,7 @@ export class AwsConnectionBroker {
  private clientConfig(context:AwsAccountContext,mode:ConnectionMode,actor?:SessionUser,requestId?:string,region=context.region){const local=['DEFAULT_CHAIN','LOCAL_DEVELOPMENT','LOCAL_DEFAULT_CREDENTIALS'].includes(context.connectionType);return local&&mode==='READ'?{region}:{region,credentials:()=>this.credentialsFor(context,mode,actor,requestId)} as const}
  private async credentialsFor(context:AwsAccountContext,mode:ConnectionMode,actor?:SessionUser,requestId?:string,useCache=true,validationOnly=false):Promise<AwsCredentialIdentity>{
   if(mode==='PROVISION'&&!validationOnly){
-   if(!env.CROSS_ACCOUNT_PROVISIONING_ENABLED)throw new ApiError(403,'Cross-account provisioning is disabled.','CROSS_ACCOUNT_PROVISIONING_DISABLED');
+   if(context.connectionType!=='ACCESS_KEYS'&&!env.CROSS_ACCOUNT_PROVISIONING_ENABLED)throw new ApiError(403,'Cross-account provisioning is disabled.','CROSS_ACCOUNT_PROVISIONING_DISABLED');
    if(!context.provisioningEnabled)throw new ApiError(403,'Provisioning is disabled for this AWS account.','ACCOUNT_PROVISIONING_DISABLED');
   }
   const local=['DEFAULT_CHAIN','LOCAL_DEVELOPMENT','LOCAL_DEFAULT_CREDENTIALS'].includes(context.connectionType);

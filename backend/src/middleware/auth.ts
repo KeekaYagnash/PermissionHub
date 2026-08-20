@@ -4,19 +4,22 @@ import type { AppRole,AuthenticatedRequest } from '../types.js';
 import type { NamedCapability } from '../services/authorization.service.js';
 import { ApiError } from '../utils/http.js';
 import { authorization } from '../services/authorization.service.js';
-import { identityDomain } from '../services/identity-domain.service.js';
+import { hydrateSessionPreferences,identityDomain,loadDevelopmentRoleGrants,persistSessionUser } from '../services/identity-domain.service.js';
 import { awsAccountRepository } from '../services/aws-account.repository.js';
 import { safeEqualToken } from '../services/auth-provider.service.js';
 
-export function authenticate(req:AuthenticatedRequest,_res:Response,next:NextFunction){
+export async function authenticate(req:AuthenticatedRequest,_res:Response,next:NextFunction){
+ try{
  if(!env.AUTH_ENABLED&&!env.ENABLE_DEV_AUTH)return next(new ApiError(503,'Authentication is disabled without a configured development identity.','AUTH_CONFIGURATION_REQUIRED'));
  if(!req.session.user&&!env.AUTH_ENABLED&&env.NODE_ENV!=='production'&&env.DEV_AUTH_USER_ID){const selected=identityDomain.findDevelopmentUser(env.DEV_AUTH_USER_ID);if(selected)req.session.user=identityDomain.sessionUser(selected,'development')}
  if(!req.session.user){const user=cognitoUser(req);if(user)req.session.user=user}
+ if(req.session.user){await persistSessionUser(req.session.user);await hydrateSessionPreferences(req.session.user);await loadDevelopmentRoleGrants(req.session.user);req.session.user=req.session.user}
  const user=req.session.user;if(!user)return next(new ApiError(401,'Authentication required','UNAUTHENTICATED'));
  req.sessionUser=user;
  const membership=user.memberships.find(item=>item.tenantId===user.activeTenantId&&item.status==='ACTIVE');
  if(membership)req.auth={sub:user.id,organizationId:membership.tenantId,role:membership.role,email:user.email,name:user.displayName};
  next();
+ }catch(error){next(error)}
 }
 export function isConnectionAdmin(req:AuthenticatedRequest){return Boolean(req.sessionUser&&authorization.hasCapability(req.sessionUser,'CONNECTION_MANAGE'))}
 export const authorize=(...roles:AppRole[])=>(req:AuthenticatedRequest,_res:Response,next:NextFunction)=>req.auth&&(roles.includes(req.auth.role)||(roles.includes('ORGANISATION_ADMIN')&&(req.path.startsWith('/aws/accounts')||req.path.startsWith('/aws/local-credentials'))&&isConnectionAdmin(req)))?next():next(new ApiError(403,'You do not have permission to perform this action','FORBIDDEN'));

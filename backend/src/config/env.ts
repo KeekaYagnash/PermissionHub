@@ -63,6 +63,6 @@ if(env.NODE_ENV==='production'&&env.ALLOW_LOCAL_PROVISIONING)throw new Error('AL
 if(env.NODE_ENV==='production'&&env.AWS_CONNECTION_MODE==='manual'&&env.ENABLE_AWS_DEMO_DATA)throw new Error('AWS demo data must not be enabled in production manual mode.');
 if(env.NODE_ENV==='production'&&env.SESSION_SECRET.startsWith('development-only'))throw new Error('SESSION_SECRET must be configured in production.');
 if(env.NODE_ENV==='production'&&!env.PERMISSIONHUB_CREDENTIAL_ENCRYPTION_KEY)throw new Error('PERMISSIONHUB_CREDENTIAL_ENCRYPTION_KEY must be configured before storing access-key connections in production.');
-export const liveProvisioningEnabled=env.AWS_PROVISIONING_MODE==='live'&&env.ENABLE_LIVE_PROVISIONING&&env.CROSS_ACCOUNT_PROVISIONING_ENABLED&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS';
+export const liveProvisioningEnabled=env.AWS_PROVISIONING_MODE==='live'&&env.ENABLE_LIVE_PROVISIONING&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS';
 export const isLocalProvisioningEnabled=()=>env.NODE_ENV==='development'&&env.ALLOW_LOCAL_PROVISIONING;
 export const liveTestAllowedPrincipals=env.AWS_LIVE_TEST_ALLOWED_PRINCIPALS.split(',').map(value=>value.trim()).filter(Boolean);

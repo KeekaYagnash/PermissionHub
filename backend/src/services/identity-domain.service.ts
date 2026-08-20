@@ -73,7 +73,40 @@ export async function persistDevelopmentIdentity(user:SessionUser){
    await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()},update:{email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()}});
    await tx.tenantMembership.upsert({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}},create:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'},update:{role:membership.role,status:'ACTIVE'}});
    for(const item of membership.scopes){const scope={scopeType:item.scopeType,scopeId:item.scopeId,includeDescendants:item.includeDescendants,canView:item.canView,canRequest:item.canRequest,canApprove:item.canApprove,canProvision:item.canProvision,canRevoke:item.canRevoke,canManageConfiguration:item.canManageConfiguration};await tx.adminScope.upsert({where:{tenantMembershipId_scopeType_scopeId:{tenantMembershipId:membership.id,scopeType:item.scopeType,scopeId:item.scopeId}},create:{tenantMembershipId:membership.id,...scope},update:scope})}
-  })}catch{}
+ })}catch{}
+}
+
+export async function persistSessionUser(user:SessionUser){
+ if(process.env.VITEST)return user;
+ const membership=user.activeTenantId?user.memberships.find(item=>item.tenantId===user.activeTenantId):user.memberships[0];
+ if(!membership)return user;
+ try{
+  await prisma.$transaction(async tx=>{
+   await tx.tenant.upsert({where:{id:membership.tenantId},create:{id:membership.tenantId,name:membership.tenantName,slug:membership.tenantSlug,status:'ACTIVE'},update:{name:membership.tenantName,status:'ACTIVE'}});
+   await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()},update:{email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()}});
+   await tx.tenantMembership.upsert({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}},create:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'},update:{role:membership.role,status:'ACTIVE'}});
+  });
+ }catch{}
+ return user;
+}
+
+export async function hydrateSessionPreferences(user:SessionUser){
+ if(process.env.VITEST)return user;
+ try{
+  const rows=await prisma.$queryRawUnsafe<Array<{activeTenantId:string|null;activeAwsAccountRecordId:string|null}>>('SELECT "activeTenantId", "activeAwsAccountRecordId" FROM "User" WHERE id = $1 LIMIT 1',user.id);
+  const preference=rows[0];if(!preference)return user;
+  if(preference.activeTenantId&&user.memberships.some(item=>item.tenantId===preference.activeTenantId&&item.status==='ACTIVE'))user.activeTenantId=preference.activeTenantId;
+  if(preference.activeAwsAccountRecordId)user.activeAwsAccountRecordId=user.activeAccountId=preference.activeAwsAccountRecordId;
+ }catch{}
+ return user;
+}
+
+export async function saveSessionPreferences(user:SessionUser){
+ if(process.env.VITEST)return;
+ try{
+  await persistSessionUser(user);
+  await prisma.$executeRawUnsafe('UPDATE "User" SET "activeTenantId" = $1, "activeAwsAccountRecordId" = $2, "updatedAt" = NOW() WHERE id = $3',user.activeTenantId??null,user.activeAwsAccountRecordId??user.activeAccountId??null,user.id);
+ }catch{}
 }
 
 export async function loadDevelopmentRoleGrants(user:SessionUser){

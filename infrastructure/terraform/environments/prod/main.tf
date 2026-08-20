@@ -20,7 +20,7 @@ locals {
     CROSS_ACCOUNT_PROVISIONING_ENABLED     = "false"
     ENABLE_LIVE_PROVISIONING               = "false"
     EXPIRY_REVOCATION_MODE                 = var.enable_expiry_worker ? "worker" : "disabled"
-    DATABASE_HOST                          = module.rds_proxy.endpoint
+    DATABASE_HOST                          = var.enable_rds_proxy ? module.rds_proxy[0].endpoint : module.rds.address
     DATABASE_PORT                          = "5432"
     DATABASE_NAME                          = "permissionhub"
     DATABASE_SECRET_ARN                    = module.rds.secret_arn
@@ -47,10 +47,11 @@ module "networking" {
 }
 
 module "security" {
-  source = "../../modules/security"
-  name   = local.name
-  vpc_id = module.networking.vpc_id
-  tags   = local.tags
+  source           = "../../modules/security"
+  name             = local.name
+  vpc_id           = module.networking.vpc_id
+  enable_rds_proxy = var.enable_rds_proxy
+  tags             = local.tags
 }
 
 resource "aws_vpc_endpoint" "interface" {
@@ -79,6 +80,7 @@ module "rds" {
 }
 
 module "rds_proxy" {
+  count                   = var.enable_rds_proxy ? 1 : 0
   source                  = "../../modules/rds_proxy"
   name                    = local.name
   vpc_subnet_ids          = module.networking.private_db_subnet_ids

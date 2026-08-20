@@ -80,7 +80,7 @@ export function validateGeneratedPolicyDocument(document:Record<string,unknown>|
 }
 
 export function reviewCapabilities(input:{request:PermissionRequest;account:AwsAccountContext;approvalAllowed:boolean;provisionPermission:boolean;canReview?:boolean;currentUserRoles?:AppRole[];selfApprovalBlocked?:boolean;assignedApproverMatch?:boolean}){
- const mode=provisioningMode(),local=mode==='local',plan=buildProvisioningPlan(input.request,input.account),requiredApproverRoles=effectiveApprovalStages(input.request),currentUserRoles=input.currentUserRoles??[],provisionRoleValidated=input.account.provisionRoleStatus==='VALIDATED',safeTarget=liveTestAllowedPrincipals.length===0||liveTestAllowedPrincipals.includes(input.request.targetArn),expiryConfigured=!input.request.expiryDate||env.EXPIRY_REVOCATION_MODE==='worker'||(input.account.accountType!=='PRODUCTION'&&env.EXPIRY_REVOCATION_MODE==='manual'),liveFlagsReady=liveProvisioningEnabled&&Boolean(input.account.provisioningEnabled),connected=input.account.connectionStatus==='CONNECTED',effectiveProvisionPermission=local||input.provisionPermission,effectiveApprovalAllowed=local?Boolean(input.canReview):input.approvalAllowed,blockingReasons:string[]=[];
+ const mode=provisioningMode(),local=mode==='local',plan=buildProvisioningPlan(input.request,input.account),requiredApproverRoles=effectiveApprovalStages(input.request),currentUserRoles=input.currentUserRoles??[],accessKeyProvisioning=input.account.connectionType==='ACCESS_KEYS',provisionRoleValidated=accessKeyProvisioning||input.account.provisionRoleStatus==='VALIDATED',safeTarget=liveTestAllowedPrincipals.length===0||liveTestAllowedPrincipals.includes(input.request.targetArn),expiryConfigured=!input.request.expiryDate||env.EXPIRY_REVOCATION_MODE==='worker'||(input.account.accountType!=='PRODUCTION'&&env.EXPIRY_REVOCATION_MODE==='manual'),liveFlagsReady=liveProvisioningEnabled&&Boolean(input.account.provisioningEnabled),connected=input.account.connectionStatus==='CONNECTED',effectiveProvisionPermission=local||input.provisionPermission,effectiveApprovalAllowed=local?Boolean(input.canReview):input.approvalAllowed,blockingReasons:string[]=[];
  if(!local&&input.selfApprovalBlocked)blockingReasons.push('SELF_APPROVAL_BLOCKED');
  if(!local&&input.assignedApproverMatch===false)blockingReasons.push('CURRENT_USER_NOT_ASSIGNED_APPROVER');
  if(!local&&!input.approvalAllowed&&!input.selfApprovalBlocked&&input.assignedApproverMatch!==false)blockingReasons.push('CURRENT_USER_NOT_ELIGIBLE_APPROVER');
@@ -88,7 +88,7 @@ export function reviewCapabilities(input:{request:PermissionRequest;account:AwsA
  if(mode==='disabled')blockingReasons.push('PROVISIONING_DISABLED');
  if(mode==='dry-run')blockingReasons.push('PROVISIONING_MODE_DRY_RUN');
  if(mode==='live'&&!liveFlagsReady)blockingReasons.push('LIVE_PROVISIONING_FLAGS_INCOMPLETE');
- if(!local){if(!input.account.provisionRoleArn)blockingReasons.push('PROVISION_ROLE_NOT_CONFIGURED');else if(!provisionRoleValidated)blockingReasons.push('PROVISION_ROLE_NOT_VALIDATED')}
+ if(!local&&!accessKeyProvisioning){if(!input.account.provisionRoleArn)blockingReasons.push('PROVISION_ROLE_NOT_CONFIGURED');else if(!provisionRoleValidated)blockingReasons.push('PROVISION_ROLE_NOT_VALIDATED')}
  if(!plan.valid)blockingReasons.push('PROVISIONING_PLAN_INVALID');
  if(!safeTarget)blockingReasons.push('LIVE_TEST_TARGET_NOT_ALLOWED');
  if(!local&&!expiryConfigured)blockingReasons.push('EXPIRY_REVOCATION_NOT_CONFIGURED');

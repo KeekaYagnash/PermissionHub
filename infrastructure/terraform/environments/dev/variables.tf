@@ -16,6 +16,10 @@ variable "enable_nat_gateway" {
   type    = bool
   default = true
 }
+variable "enable_rds_proxy" {
+  type    = bool
+  default = false
+}
 variable "interface_endpoint_services" {
   type    = list(string)
   default = ["secretsmanager", "sts", "logs", "sqs"]
