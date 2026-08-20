@@ -11,6 +11,7 @@ import { safeEqualToken } from '../services/auth-provider.service.js';
 export function authenticate(req:AuthenticatedRequest,_res:Response,next:NextFunction){
  if(!env.AUTH_ENABLED&&!env.ENABLE_DEV_AUTH)return next(new ApiError(503,'Authentication is disabled without a configured development identity.','AUTH_CONFIGURATION_REQUIRED'));
  if(!req.session.user&&!env.AUTH_ENABLED&&env.NODE_ENV!=='production'&&env.DEV_AUTH_USER_ID){const selected=identityDomain.findDevelopmentUser(env.DEV_AUTH_USER_ID);if(selected)req.session.user=identityDomain.sessionUser(selected,'development')}
+ if(!req.session.user){const user=cognitoUser(req);if(user)req.session.user=user}
  const user=req.session.user;if(!user)return next(new ApiError(401,'Authentication required','UNAUTHENTICATED'));
  req.sessionUser=user;
  const membership=user.memberships.find(item=>item.tenantId===user.activeTenantId&&item.status==='ACTIVE');
@@ -46,4 +47,13 @@ export async function accountScope(req:AuthenticatedRequest,_res:Response,next:N
 export function requireCapability(capability:'request'|'approve'|'provision'|'revoke'|'manage'){
  return (req:AuthenticatedRequest,_res:Response,next:NextFunction)=>{const user=req.sessionUser!,account=req.awsAccountContext!,map={request:'REQUEST_CREATE',approve:'REQUEST_APPROVE',provision:'PROVISION_EXECUTE',revoke:'GRANT_REVOKE',manage:'CONNECTION_MANAGE'} as const;return authorization.hasCapability(user,map[capability],account.id)?next():next(new ApiError(403,`You cannot ${capability} in this AWS account.`,'SCOPE_FORBIDDEN'))};
 }
-export function csrfProtection(req:AuthenticatedRequest,_res:Response,next:NextFunction){if(['GET','HEAD','OPTIONS'].includes(req.method))return next();if(!safeEqualToken(req.headers['x-csrf-token']?.toString(),req.session.csrfToken))return next(new ApiError(403,'CSRF validation failed. Refresh the page and try again.','CSRF_INVALID'));next()}
+export function csrfProtection(req:AuthenticatedRequest,_res:Response,next:NextFunction){if(!env.CSRF_ENABLED||req.sessionUser?.provider==='cognito'||['GET','HEAD','OPTIONS'].includes(req.method))return next();if(!safeEqualToken(req.headers['x-csrf-token']?.toString(),req.session.csrfToken))return next(new ApiError(403,'CSRF validation failed. Refresh the page and try again.','CSRF_INVALID'));next()}
+
+function cognitoUser(req:AuthenticatedRequest){
+ const event=(req as any).apiGateway?.event;
+ const claims=event?.requestContext?.authorizer?.jwt?.claims;
+ if(!claims?.sub)return undefined;
+ const rawGroups=claims['cognito:groups'];
+ const groups=Array.isArray(rawGroups)?rawGroups:typeof rawGroups==='string'?rawGroups.split(',').map(item=>item.trim()).filter(Boolean):[];
+ return identityDomain.sessionUserFromCognito({sub:String(claims.sub),email:claims.email?String(claims.email):undefined,name:claims.name?String(claims.name):undefined,groups});
+}

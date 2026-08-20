@@ -10,10 +10,12 @@ locals {
   lambda_common_environment = {
     NODE_ENV                               = "production"
     AWS_REGION                             = var.aws_region
-    FRONTEND_URL                           = var.frontend_url
+    FRONTEND_URL                           = module.frontend_hosting.frontend_url
     AWS_CONNECTION_MODE                    = "manual"
     ENABLE_AWS_DEMO_DATA                   = "false"
     AUTH_ENABLED                           = "true"
+    SESSION_STORE                          = "memory"
+    CSRF_ENABLED                           = "false"
     AWS_PROVISIONING_MODE                  = "disabled"
     CROSS_ACCOUNT_PROVISIONING_ENABLED     = "false"
     ENABLE_LIVE_PROVISIONING               = "false"
@@ -27,7 +29,7 @@ locals {
     COGNITO_USER_POOL_ID                   = module.cognito.user_pool_id
     COGNITO_APP_CLIENT_ID                  = module.cognito.app_client_id
     COGNITO_ISSUER_URL                     = module.cognito.issuer_url
-    PERMISSIONHUB_RUNTIME_ADAPTATION_STATE = "lambda-infrastructure-ready-application-adaptation-pending"
+    PERMISSIONHUB_RUNTIME_ADAPTATION_STATE = "demo-ready-lambda"
   }
 }
 
@@ -96,8 +98,8 @@ module "cognito" {
   source                = "../../modules/cognito"
   name                  = local.name
   environment           = var.environment
-  callback_urls         = var.callback_urls
-  logout_urls           = var.logout_urls
+  callback_urls         = distinct(concat(var.callback_urls, ["${module.frontend_hosting.frontend_url}/auth/callback"]))
+  logout_urls           = distinct(concat(var.logout_urls, ["${module.frontend_hosting.frontend_url}/login"]))
   enable_cognito_domain = var.enable_cognito_domain
   cognito_domain_prefix = var.cognito_domain_prefix
   deletion_protection   = "ACTIVE"
@@ -114,45 +116,47 @@ module "queues" {
 }
 
 module "api_lambda" {
-  source                 = "../../modules/lambda_api"
-  name                   = "${local.name}-api"
-  runtime                = var.lambda_runtime
-  handler                = var.api_lambda_handler
-  artifact_s3_bucket     = var.lambda_artifact_bucket
-  artifact_s3_key        = var.api_lambda_artifact_key
-  memory_size            = var.api_lambda_memory_size
-  timeout                = var.api_lambda_timeout
-  reserved_concurrency   = var.api_lambda_reserved_concurrency
-  subnet_ids             = module.networking.private_app_subnet_ids
-  security_group_id      = module.security.lambda_security_group_id
-  environment_variables  = local.lambda_common_environment
-  app_secret_arn         = module.secrets.app_secret_arn
-  database_secret_arn    = module.rds.secret_arn
-  provisioning_queue_arn = module.queues.queue_arn
-  assumable_role_arns    = var.assumable_role_arns
-  log_retention_days     = var.log_retention_days
-  tags                   = local.tags
+  source                      = "../../modules/lambda_api"
+  name                        = "${local.name}-api"
+  runtime                     = var.lambda_runtime
+  handler                     = var.api_lambda_handler
+  artifact_s3_bucket          = var.lambda_artifact_bucket
+  artifact_s3_key             = var.api_lambda_artifact_key
+  memory_size                 = var.api_lambda_memory_size
+  timeout                     = var.api_lambda_timeout
+  reserved_concurrency        = var.api_lambda_reserved_concurrency
+  subnet_ids                  = module.networking.private_app_subnet_ids
+  security_group_id           = module.security.lambda_security_group_id
+  environment_variables       = local.lambda_common_environment
+  app_secret_arn              = module.secrets.app_secret_arn
+  database_secret_arn         = module.rds.secret_arn
+  provisioning_queue_arn      = module.queues.queue_arn
+  assumable_role_arns         = var.assumable_role_arns
+  enable_demo_iam_permissions = var.enable_demo_iam_permissions
+  log_retention_days          = var.log_retention_days
+  tags                        = local.tags
 }
 
 module "provisioning_lambda" {
-  source                = "../../modules/lambda_provisioning"
-  name                  = "${local.name}-provisioning"
-  runtime               = var.lambda_runtime
-  handler               = var.provisioning_lambda_handler
-  artifact_s3_bucket    = var.lambda_artifact_bucket
-  artifact_s3_key       = var.provisioning_lambda_artifact_key
-  memory_size           = var.provisioning_lambda_memory_size
-  timeout               = var.provisioning_lambda_timeout
-  reserved_concurrency  = var.provisioning_reserved_concurrency
-  subnet_ids            = module.networking.private_app_subnet_ids
-  security_group_id     = module.security.lambda_security_group_id
-  environment_variables = local.lambda_common_environment
-  app_secret_arn        = module.secrets.app_secret_arn
-  database_secret_arn   = module.rds.secret_arn
-  queue_arn             = module.queues.queue_arn
-  assumable_role_arns   = var.assumable_role_arns
-  log_retention_days    = var.log_retention_days
-  tags                  = local.tags
+  source                      = "../../modules/lambda_provisioning"
+  name                        = "${local.name}-provisioning"
+  runtime                     = var.lambda_runtime
+  handler                     = var.provisioning_lambda_handler
+  artifact_s3_bucket          = var.lambda_artifact_bucket
+  artifact_s3_key             = var.provisioning_lambda_artifact_key
+  memory_size                 = var.provisioning_lambda_memory_size
+  timeout                     = var.provisioning_lambda_timeout
+  reserved_concurrency        = var.provisioning_reserved_concurrency
+  subnet_ids                  = module.networking.private_app_subnet_ids
+  security_group_id           = module.security.lambda_security_group_id
+  environment_variables       = local.lambda_common_environment
+  app_secret_arn              = module.secrets.app_secret_arn
+  database_secret_arn         = module.rds.secret_arn
+  queue_arn                   = module.queues.queue_arn
+  assumable_role_arns         = var.assumable_role_arns
+  enable_demo_iam_permissions = var.enable_demo_iam_permissions
+  log_retention_days          = var.log_retention_days
+  tags                        = local.tags
 }
 
 module "expiry_lambda" {
@@ -203,11 +207,17 @@ module "api_gateway" {
   lambda_function_name  = module.api_lambda.function_name
   cognito_issuer_url    = module.cognito.issuer_url
   cognito_app_client_id = module.cognito.app_client_id
-  allowed_origins       = var.allowed_origins
+  allowed_origins       = distinct(concat(var.allowed_origins, [module.frontend_hosting.frontend_url]))
   allowed_methods       = var.allowed_methods
   allowed_headers       = var.allowed_headers
   log_retention_days    = var.log_retention_days
   tags                  = local.tags
+}
+
+module "frontend_hosting" {
+  source = "../../modules/frontend_hosting"
+  name   = local.name
+  tags   = local.tags
 }
 
 module "monitoring" {

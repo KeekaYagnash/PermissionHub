@@ -20,3 +20,7 @@ output "vpc_id" { value = module.networking.vpc_id }
 output "private_app_subnet_ids" { value = module.networking.private_app_subnet_ids }
 output "lambda_security_group_id" { value = module.security.lambda_security_group_id }
 output "interface_vpc_endpoint_ids" { value = { for service, endpoint in aws_vpc_endpoint.interface : service => endpoint.id } }
+output "frontend_bucket_name" { value = module.frontend_hosting.bucket_name }
+output "frontend_cloudfront_distribution_id" { value = module.frontend_hosting.cloudfront_distribution_id }
+output "frontend_cloudfront_domain_name" { value = module.frontend_hosting.cloudfront_domain_name }
+output "frontend_url" { value = module.frontend_hosting.frontend_url }

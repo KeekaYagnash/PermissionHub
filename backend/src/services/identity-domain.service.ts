@@ -38,6 +38,13 @@ export class IdentityDomainService {
  private manualAccounts:AwsAccountContext[]=[];
  findDevelopmentUser(id:string){return developmentUsers.find(user=>user.id===id)}
  findByProviderSubject(provider:string,subject:string,email?:string){return developmentUsers.find(user=>user.providerSubject===subject||(provider!=='development'&&email&&user.email.toLowerCase()===email.toLowerCase()))}
+ sessionUserFromCognito(claims:{sub:string;email?:string;name?:string;groups?:string[]}):SessionUser{
+  const matched=this.findByProviderSubject('cognito',claims.sub,claims.email);
+  if(matched)return this.sessionUser(matched,'cognito');
+  const role=(claims.groups?.find(group=>['ORGANISATION_ADMIN','SECURITY_REVIEWER','PROVISIONER','REQUESTER','ACCOUNT_APPROVER'].includes(group)) as AppRole|undefined)??'ORGANISATION_ADMIN';
+  const id=`cognito_${claims.sub.replace(/[^A-Za-z0-9_-]/g,'_').slice(0,48)}`;
+  return this.sessionUser({id,email:claims.email??`${id}@cognito.local`,displayName:claims.name??claims.email??'Cognito demo user',providerSubject:claims.sub,memberships:[membership(`membership_${id}`,role,[scope('TENANT',tenant.id,{canView:true,canRequest:true,canApprove:true,canProvision:true,canRevoke:true,canManageConfiguration:role==='ORGANISATION_ADMIN'})])]},'cognito');
+ }
  sessionUser(user:DirectoryUser,provider:string):SessionUser{const memberships=user.memberships.map(membership=>({...membership,scopes:membership.scopes.map(item=>({...item}))}));if(provider==='development'&&!env.AUTH_ENABLED&&env.ENABLE_DEV_AUTH&&env.DEV_AUTH_USER_ID===user.id){const membership=memberships[0];if(membership&&!membership.scopes.some(item=>item.scopeType==='TENANT'&&item.scopeId===membership.tenantId&&item.canManageConfiguration))membership.scopes.push(scope('TENANT',membership.tenantId,{canView:true,canRequest:true,canManageConfiguration:true}))}return {id:user.id,email:user.email,displayName:user.displayName,provider,providerSubject:user.providerSubject,activeTenantId:memberships.length===1?memberships[0]!.tenantId:undefined,activeAccountId:undefined,permissions:[],memberships,roleAssignments:[]}}
  tenantsFor(user:SessionUser){return user.memberships.filter(m=>m.status==='ACTIVE').map(m=>({id:m.tenantId,name:m.tenantName,slug:m.tenantSlug,role:m.role}))}
  organisationsFor(user:SessionUser){if(env.AWS_CONNECTION_MODE==='manual')return [];return developmentOrganisations.filter(org=>this.canSeeTenant(user,org.tenantId))}
@@ -59,17 +66,17 @@ export const identityDomain=new IdentityDomainService();
 export const accountTypeLabel=(type:AccountType)=>type.replaceAll('_',' ').toLowerCase().replace(/^\w/,c=>c.toUpperCase());
 
 export async function persistDevelopmentIdentity(user:SessionUser){
- if(env.NODE_ENV!=='development'||user.provider!=='development')return;
+ if(process.env.VITEST||env.NODE_ENV!=='development'||user.provider!=='development')return;
  const membership=user.memberships.find(item=>item.tenantId===user.activeTenantId);if(!membership)return;
- await prisma.$transaction(async tx=>{
-  await tx.tenant.upsert({where:{id:membership.tenantId},create:{id:membership.tenantId,name:membership.tenantName,slug:membership.tenantSlug,status:'ACTIVE'},update:{name:membership.tenantName,status:'ACTIVE'}});
-  await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()},update:{email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()}});
-  await tx.tenantMembership.upsert({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}},create:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'},update:{role:membership.role,status:'ACTIVE'}});
-  for(const item of membership.scopes){const scope={scopeType:item.scopeType,scopeId:item.scopeId,includeDescendants:item.includeDescendants,canView:item.canView,canRequest:item.canRequest,canApprove:item.canApprove,canProvision:item.canProvision,canRevoke:item.canRevoke,canManageConfiguration:item.canManageConfiguration};await tx.adminScope.upsert({where:{tenantMembershipId_scopeType_scopeId:{tenantMembershipId:membership.id,scopeType:item.scopeType,scopeId:item.scopeId}},create:{tenantMembershipId:membership.id,...scope},update:scope})}
- });
+ try{await prisma.$transaction(async tx=>{
+   await tx.tenant.upsert({where:{id:membership.tenantId},create:{id:membership.tenantId,name:membership.tenantName,slug:membership.tenantSlug,status:'ACTIVE'},update:{name:membership.tenantName,status:'ACTIVE'}});
+   await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()},update:{email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()}});
+   await tx.tenantMembership.upsert({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}},create:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'},update:{role:membership.role,status:'ACTIVE'}});
+   for(const item of membership.scopes){const scope={scopeType:item.scopeType,scopeId:item.scopeId,includeDescendants:item.includeDescendants,canView:item.canView,canRequest:item.canRequest,canApprove:item.canApprove,canProvision:item.canProvision,canRevoke:item.canRevoke,canManageConfiguration:item.canManageConfiguration};await tx.adminScope.upsert({where:{tenantMembershipId_scopeType_scopeId:{tenantMembershipId:membership.id,scopeType:item.scopeType,scopeId:item.scopeId}},create:{tenantMembershipId:membership.id,...scope},update:scope})}
+  })}catch{}
 }
 
 export async function loadDevelopmentRoleGrants(user:SessionUser){
- if(env.NODE_ENV==='production'||user.provider!=='development'||!user.activeTenantId)return user;
+ if(process.env.VITEST||env.NODE_ENV==='production'||user.provider!=='development'||!user.activeTenantId)return user;
  try{const grants=await prisma.developmentRoleGrant.findMany({where:{tenantId:user.activeTenantId,userId:user.id,revokedAt:null},select:{id:true,tenantId:true,awsAccountId:true,role:true}});user.roleAssignments=grants;return user}catch{return user}
 }

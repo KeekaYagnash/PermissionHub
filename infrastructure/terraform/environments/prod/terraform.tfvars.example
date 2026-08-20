@@ -23,3 +23,4 @@ migration_lambda_artifact_key = "permissionhub-db-migration-replace-with-git-sha
 
 enable_expiry_worker = false
 assumable_role_arns = []
+enable_demo_iam_permissions = false

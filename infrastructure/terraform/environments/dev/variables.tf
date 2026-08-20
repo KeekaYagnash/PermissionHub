@@ -133,6 +133,10 @@ variable "assumable_role_arns" {
   type    = list(string)
   default = []
 }
+variable "enable_demo_iam_permissions" {
+  type    = bool
+  default = true
+}
 variable "additional_tags" {
   type    = map(string)
   default = {}

@@ -48,7 +48,22 @@ resource "aws_iam_role_policy" "runtime" {
         Action   = ["sts:GetCallerIdentity"]
         Resource = "*"
       }
-      ], length(var.assumable_role_arns) > 0 ? [{
+      ], var.enable_demo_iam_permissions ? [{
+        Effect = "Allow"
+        Action = [
+          "access-analyzer:ValidatePolicy",
+          "iam:Get*",
+          "iam:List*",
+          "iam:SimulatePrincipalPolicy",
+          "iam:SimulateCustomPolicy",
+          "iam:CreatePolicy",
+          "iam:AttachUserPolicy",
+          "iam:AttachRolePolicy",
+          "iam:DetachUserPolicy",
+          "iam:DetachRolePolicy"
+        ]
+        Resource = "*"
+        }] : [], length(var.assumable_role_arns) > 0 ? [{
         Effect   = "Allow"
         Action   = ["sts:AssumeRole", "sts:TagSession", "sts:SetSourceIdentity"]
         Resource = var.assumable_role_arns

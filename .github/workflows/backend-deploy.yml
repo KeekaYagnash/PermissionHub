@@ -38,17 +38,16 @@ jobs:
       - name: Backend build
         run: npm run build --workspace backend
 
-      - name: Package placeholder Lambda artifacts
+      - name: Build Lambda bundles
+        run: npm run build:lambda --workspace backend
+
+      - name: Package Lambda artifacts
         run: |
-          mkdir -p artifacts/api artifacts/provisioning artifacts/expiry artifacts/migration
-          cp -R backend/dist backend/prisma backend/package.json artifacts/api/
-          cp -R backend/dist backend/prisma backend/package.json artifacts/provisioning/
-          cp -R backend/dist backend/prisma backend/package.json artifacts/expiry/
-          cp -R backend/dist backend/prisma backend/package.json artifacts/migration/
-          (cd artifacts/api && zip -qr "../permissionhub-api-${{ github.sha }}.zip" .)
-          (cd artifacts/provisioning && zip -qr "../permissionhub-provisioning-${{ github.sha }}.zip" .)
-          (cd artifacts/expiry && zip -qr "../permissionhub-expiry-${{ github.sha }}.zip" .)
-          (cd artifacts/migration && zip -qr "../permissionhub-db-migration-${{ github.sha }}.zip" .)
+          mkdir -p artifacts
+          (cd backend/lambda-dist && zip -qr "../../artifacts/permissionhub-api-${{ github.sha }}.zip" .)
+          cp "artifacts/permissionhub-api-${{ github.sha }}.zip" "artifacts/permissionhub-provisioning-${{ github.sha }}.zip"
+          cp "artifacts/permissionhub-api-${{ github.sha }}.zip" "artifacts/permissionhub-expiry-${{ github.sha }}.zip"
+          cp "artifacts/permissionhub-api-${{ github.sha }}.zip" "artifacts/permissionhub-db-migration-${{ github.sha }}.zip"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -95,12 +94,46 @@ jobs:
         working-directory: infrastructure/terraform/environments/dev
         run: terraform apply -auto-approve tfplan
 
-      - name: Deployment migration placeholder
+      - name: Run database migrations
+        working-directory: infrastructure/terraform/environments/dev
         run: |
-          echo "Database migrations will be run by a dedicated deployment-only migration Lambda in a later application adaptation task."
+          MIGRATION_LAMBDA="$(terraform output -raw migration_lambda_name)"
+          RESPONSE="$(aws lambda invoke --function-name "${MIGRATION_LAMBDA}" /tmp/permissionhub-migration.json --output json)"
+          echo "${RESPONSE}"
+          cat /tmp/permissionhub-migration.json
+          if echo "${RESPONSE}" | grep -q '"FunctionError"'; then
+            exit 1
+          fi
+
+      - name: Build frontend for deployed infrastructure
+        working-directory: infrastructure/terraform/environments/dev
+        run: |
+          FRONTEND_URL="$(terraform output -raw frontend_url)"
+          API_ENDPOINT="$(terraform output -raw api_gateway_endpoint)"
+          COGNITO_DOMAIN="$(terraform output -raw cognito_domain)"
+          COGNITO_CLIENT_ID="$(terraform output -raw cognito_app_client_id)"
+          cd ../../../..
+          VITE_AUTH_MODE=cognito \
+          VITE_API_BASE_URL="${API_ENDPOINT}/api" \
+          VITE_COGNITO_DOMAIN="${COGNITO_DOMAIN}.auth.${{ vars.AWS_REGION }}.amazoncognito.com" \
+          VITE_COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID}" \
+          VITE_COGNITO_REDIRECT_URI="${FRONTEND_URL}/auth/callback" \
+          VITE_COGNITO_LOGOUT_URI="${FRONTEND_URL}/login" \
+          npm run build --workspace frontend
+
+      - name: Upload frontend to S3
+        working-directory: infrastructure/terraform/environments/dev
+        run: |
+          FRONTEND_BUCKET="$(terraform output -raw frontend_bucket_name)"
+          DISTRIBUTION_ID="$(terraform output -raw frontend_cloudfront_distribution_id)"
+          cd ../../../..
+          aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}" --delete
+          aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --paths "/*"
 
       - name: API health check
         working-directory: infrastructure/terraform/environments/dev
         run: |
+          FRONTEND_URL="$(terraform output -raw frontend_url)"
           API_ENDPOINT="$(terraform output -raw api_gateway_endpoint)"
           curl --fail --retry 12 --retry-delay 10 "${API_ENDPOINT}/health"
+          curl --fail --retry 12 --retry-delay 10 "${FRONTEND_URL}/"

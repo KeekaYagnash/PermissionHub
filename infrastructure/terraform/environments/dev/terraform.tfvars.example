@@ -13,8 +13,8 @@ frontend_url = "http://localhost:5173"
 allowed_origins = ["http://localhost:5173"]
 callback_urls = ["http://localhost:5173"]
 logout_urls = ["http://localhost:5173/login"]
-enable_cognito_domain = false
-cognito_domain_prefix = ""
+enable_cognito_domain = true
+cognito_domain_prefix = "permissionhub-demo-dev-replace-me"
 
 lambda_artifact_bucket = "permissionhub-lambda-artifacts-example"
 api_lambda_artifact_key = "permissionhub-api-replace-with-git-sha.zip"
@@ -24,3 +24,4 @@ migration_lambda_artifact_key = "permissionhub-db-migration-replace-with-git-sha
 
 enable_expiry_worker = false
 assumable_role_arns = []
+enable_demo_iam_permissions = true

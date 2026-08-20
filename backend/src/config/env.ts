@@ -13,6 +13,8 @@ const schema=z.object({
  ENABLE_AWS_DEMO_DATA:z.string().optional().transform(value=>value==='true').default(false),
  MULTI_TENANT_ENABLED:z.string().transform(v=>v==='true').default(true),
  SESSION_SECRET:z.string().min(32).default('development-only-session-secret-change-me'),
+ SESSION_STORE:z.enum(['memory','redis']).default('memory'),
+ CSRF_ENABLED:z.string().optional().transform(value=>value===undefined?true:value==='true'),
  SESSION_COOKIE_NAME:z.string().default('permissionhub.sid'),
  SESSION_MAX_AGE_MINUTES:z.coerce.number().int().min(5).max(1440).default(480),
  FRONTEND_URL:z.string().default('http://localhost:5173'),
@@ -48,6 +50,11 @@ const schema=z.object({
  ,AWS_LIVE_TEST_ALLOWED_PRINCIPALS:z.string().default('')
  ,EXPIRY_REVOCATION_MODE:z.enum(['disabled','manual','worker']).default('disabled')
  ,AWS_ROLE_SESSION_DURATION_SECONDS:z.coerce.number().int().min(900).max(3600).optional()
+ ,APP_SECRET_ARN:z.string().optional()
+ ,DATABASE_SECRET_ARN:z.string().optional()
+ ,DATABASE_HOST:z.string().optional()
+ ,DATABASE_PORT:z.string().default('5432')
+ ,DATABASE_NAME:z.string().optional()
 });
 export const env=schema.parse(process.env);
 process.env.DATABASE_URL=env.DATABASE_URL;

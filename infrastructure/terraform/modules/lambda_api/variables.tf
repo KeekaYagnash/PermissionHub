@@ -19,6 +19,10 @@ variable "assumable_role_arns" {
   type    = list(string)
   default = []
 }
+variable "enable_demo_iam_permissions" {
+  type    = bool
+  default = false
+}
 variable "log_retention_days" { type = number }
 variable "tags" {
   type    = map(string)

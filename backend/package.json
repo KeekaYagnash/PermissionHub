@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "build:lambda": "node scripts/build-lambda.mjs",
     "start": "node dist/src/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -13,12 +14,12 @@
     "prisma:migrate": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts",
     "aws:whoami": "tsx src/scripts/aws-whoami.ts",
-    "aws:validate-account": "tsx src/scripts/aws-validate-account.ts"
-    ,"aws:clear-demo-data": "tsx src/scripts/aws-clear-demo-data.ts"
-    ,"aws:inspect-account": "tsx src/scripts/aws-inspect-account.ts"
-    ,"aws:repair-account": "tsx src/scripts/aws-repair-account.ts"
-    ,"dev:grant-request-access": "tsx src/scripts/development-request-access.ts"
-    ,"dev:revoke-request-access": "tsx src/scripts/development-request-access.ts --revoke"
+    "aws:validate-account": "tsx src/scripts/aws-validate-account.ts",
+    "aws:clear-demo-data": "tsx src/scripts/aws-clear-demo-data.ts",
+    "aws:inspect-account": "tsx src/scripts/aws-inspect-account.ts",
+    "aws:repair-account": "tsx src/scripts/aws-repair-account.ts",
+    "dev:grant-request-access": "tsx src/scripts/development-request-access.ts",
+    "dev:revoke-request-access": "tsx src/scripts/development-request-access.ts --revoke"
   },
   "dependencies": {
     "@aws-sdk/client-accessanalyzer": "^3.1101.0",
@@ -48,17 +49,16 @@
     "@smithy/types": "^4.16.1",
     "bcryptjs": "^3.0.2",
     "compression": "^1.8.1",
-    "connect-redis": "^10.0.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.0",
     "express": "^5.1.0",
     "express-rate-limit": "^8.0.1",
     "express-session": "^1.19.0",
     "helmet": "^8.1.0",
-    "ioredis": "^5.6.1",
     "jsonwebtoken": "^9.0.2",
     "pino": "^9.7.0",
     "pino-http": "^10.5.0",
+    "serverless-http": "^4.0.0",
     "swagger-ui-express": "^5.0.1",
     "uuid": "^11.1.0",
     "zod": "^4.0.5"
@@ -72,6 +72,7 @@
     "@types/node": "^24.0.15",
     "@types/supertest": "^7.2.1",
     "@types/swagger-ui-express": "^4.1.8",
+    "esbuild": "^0.28.2",
     "prisma": "^6.12.0",
     "supertest": "^7.2.2",
     "tsx": "^4.20.3",

@@ -1,11 +1,12 @@
 import axios from 'axios';
 import type { AppContext,AuditEvent,AuthSession,AwsAccountContext,AwsResource,ConnectionStatus,IamIdentity,IamPolicyDetail,IamPolicySummary,Page,PermissionRequest } from '../types';
 import {buildReviewPayload,type LiveConfirmation,type ReviewAction} from './review';
+import { getAccessToken } from './cognito';
 
-export const http=axios.create({baseURL:'/api',withCredentials:true});
+export const http=axios.create({baseURL:import.meta.env.VITE_API_BASE_URL||'/api',withCredentials:true});
 let csrfToken='';
 export const setCsrfToken=(token:string)=>{csrfToken=token};
-http.interceptors.request.use(config=>{if(config.method&&!['get','head','options'].includes(config.method.toLowerCase())&&csrfToken)config.headers['X-CSRF-Token']=csrfToken;return config});
+http.interceptors.request.use(config=>{const token=getAccessToken();if(token)config.headers.Authorization=`Bearer ${token}`;if(config.method&&!['get','head','options'].includes(config.method.toLowerCase())&&csrfToken)config.headers['X-CSRF-Token']=csrfToken;return config});
 http.interceptors.response.use(response=>response,error=>{if(error?.response?.status===401&&!String(error?.config?.url??'').includes('/auth/session')&&!location.pathname.startsWith('/login'))location.assign('/session-expired');return Promise.reject(error)});
 const unwrap=<T>(value:{data:{data:T}})=>value.data.data;
 const unwrapPage=<T>(value:{data:Page<T>})=>value.data;
