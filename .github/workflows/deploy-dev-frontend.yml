@@ -1,0 +1,141 @@
+name: PermissionHub dev frontend
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Terraform environment to read outputs from"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+  TF_WORKING_DIR: infrastructure/terraform/environments/${{ inputs.environment }}
+
+jobs:
+  build-or-deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'dev' && 'development' || inputs.environment }}
+
+    steps:
+      - name: Checkout demo_ready_2
+        uses: actions/checkout@v4
+        with:
+          ref: demo_ready_2
+
+      - name: Show deployment ref
+        run: |
+          echo "Checked out branch: $(git branch --show-current || true)"
+          echo "Commit: $(git rev-parse HEAD)"
+
+      - name: Validate required GitHub configuration
+        shell: bash
+        run: |
+          missing=0
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION TF_STATE_BUCKET TF_LOCK_TABLE; do
+            value="$(printenv "$name" || true)"
+            if [ -z "$value" ]; then
+              echo "::error::Missing required GitHub Secret or Variable: $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_LOCK_TABLE: ${{ vars.TF_LOCK_TABLE }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'af-south-1' }}
+
+      - name: Show AWS deployment identity
+        run: aws sts get-caller-identity
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Frontend typecheck
+        run: npm run typecheck --workspace frontend
+
+      - name: Frontend tests
+        run: npm test --workspace frontend
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=permissionhub/${{ inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION || 'af-south-1' }}" \
+            -backend-config="dynamodb_table=${{ vars.TF_LOCK_TABLE }}" \
+            -backend-config="encrypt=true" \
+            -reconfigure
+
+      - name: Read backend and frontend outputs
+        id: terraform_outputs
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_endpoint="$(terraform output -raw api_gateway_endpoint)"
+          cognito_domain_prefix="$(terraform output -raw cognito_domain)"
+          cognito_client_id="$(terraform output -raw cognito_app_client_id)"
+          frontend_url="$(terraform output -raw frontend_url)"
+          frontend_bucket="$(terraform output -raw frontend_bucket_name)"
+          distribution_id="$(terraform output -raw frontend_cloudfront_distribution_id)"
+
+          if [ -z "$api_endpoint" ] || [ -z "$cognito_domain_prefix" ] || [ -z "$cognito_client_id" ] || [ -z "$frontend_url" ] || [ -z "$frontend_bucket" ] || [ -z "$distribution_id" ]; then
+            echo "::error::Required Terraform outputs are missing. Run the backend/Terraform workflow with apply=true first."
+            exit 1
+          fi
+
+          cognito_domain="${cognito_domain_prefix}.auth.${AWS_REGION}.amazoncognito.com"
+          {
+            echo "api_endpoint=$api_endpoint"
+            echo "cognito_domain=$cognito_domain"
+            echo "cognito_client_id=$cognito_client_id"
+            echo "frontend_url=$frontend_url"
+            echo "frontend_bucket=$frontend_bucket"
+            echo "distribution_id=$distribution_id"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build frontend for deployed backend
+        run: npm run build --workspace frontend
+        env:
+          VITE_AUTH_MODE: cognito
+          VITE_API_BASE_URL: ${{ steps.terraform_outputs.outputs.api_endpoint }}/api
+          VITE_COGNITO_DOMAIN: ${{ steps.terraform_outputs.outputs.cognito_domain }}
+          VITE_COGNITO_CLIENT_ID: ${{ steps.terraform_outputs.outputs.cognito_client_id }}
+          VITE_COGNITO_REDIRECT_URI: ${{ steps.terraform_outputs.outputs.frontend_url }}/auth/callback
+          VITE_COGNITO_LOGOUT_URI: ${{ steps.terraform_outputs.outputs.frontend_url }}/login
+
+      - name: Upload frontend to S3
+        run: aws s3 sync frontend/dist "s3://${{ steps.terraform_outputs.outputs.frontend_bucket }}" --delete
+
+      - name: Invalidate CloudFront
+        run: aws cloudfront create-invalidation --distribution-id "${{ steps.terraform_outputs.outputs.distribution_id }}" --paths "/*"

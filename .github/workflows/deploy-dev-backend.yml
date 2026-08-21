@@ -1,0 +1,197 @@
+name: PermissionHub dev backend / Terraform
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Terraform environment to deploy"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+      apply:
+        description: "Apply the saved Terraform plan and run migrations"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+  TF_WORKING_DIR: infrastructure/terraform/environments/${{ inputs.environment }}
+  TF_VAR_lambda_artifact_bucket: ${{ vars.LAMBDA_ARTIFACT_BUCKET }}
+  TF_VAR_cognito_domain_prefix: ${{ vars.COGNITO_DOMAIN_PREFIX }}
+  TF_VAR_enable_cognito_domain: "true"
+  TF_VAR_enable_nat_gateway: "false"
+  TF_VAR_enable_rds_proxy: "false"
+  TF_VAR_enable_expiry_worker: "false"
+  TF_VAR_api_lambda_artifact_key: permissionhub-api-${{ github.sha }}.zip
+  TF_VAR_provisioning_lambda_artifact_key: permissionhub-provisioning-${{ github.sha }}.zip
+  TF_VAR_expiry_lambda_artifact_key: permissionhub-expiry-${{ github.sha }}.zip
+  TF_VAR_migration_lambda_artifact_key: permissionhub-db-migration-${{ github.sha }}.zip
+
+jobs:
+  plan-or-apply:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'dev' && 'development' || inputs.environment }}
+
+    steps:
+      - name: Checkout demo_ready_2
+        uses: actions/checkout@v4
+        with:
+          ref: demo_ready_2
+
+      - name: Show deployment ref
+        run: |
+          echo "Checked out branch: $(git branch --show-current || true)"
+          echo "Commit: $(git rev-parse HEAD)"
+
+      - name: Validate required GitHub configuration
+        shell: bash
+        run: |
+          missing=0
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION TF_STATE_BUCKET TF_LOCK_TABLE LAMBDA_ARTIFACT_BUCKET COGNITO_DOMAIN_PREFIX; do
+            value="$(printenv "$name" || true)"
+            if [ -z "$value" ]; then
+              echo "::error::Missing required GitHub Secret or Variable: $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_LOCK_TABLE: ${{ vars.TF_LOCK_TABLE }}
+          LAMBDA_ARTIFACT_BUCKET: ${{ vars.LAMBDA_ARTIFACT_BUCKET }}
+          COGNITO_DOMAIN_PREFIX: ${{ vars.COGNITO_DOMAIN_PREFIX }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'af-south-1' }}
+
+      - name: Show AWS deployment identity
+        run: aws sts get-caller-identity
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Backend typecheck
+        run: npm run typecheck --workspace backend
+
+      - name: Backend tests
+        run: npm test --workspace backend
+
+      - name: Backend build
+        run: npm run build --workspace backend
+
+      - name: Build Lambda bundles
+        run: npm run build:lambda --workspace backend
+
+      - name: Package Lambda artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          (cd backend/lambda-dist && zip -qr "../../artifacts/${TF_VAR_api_lambda_artifact_key}" .)
+          cp "artifacts/${TF_VAR_api_lambda_artifact_key}" "artifacts/${TF_VAR_provisioning_lambda_artifact_key}"
+          cp "artifacts/${TF_VAR_api_lambda_artifact_key}" "artifacts/${TF_VAR_expiry_lambda_artifact_key}"
+          cp "artifacts/${TF_VAR_api_lambda_artifact_key}" "artifacts/${TF_VAR_migration_lambda_artifact_key}"
+          ls -lh artifacts
+
+      - name: Verify Lambda artifact bucket exists
+        run: aws s3api head-bucket --bucket "${{ vars.LAMBDA_ARTIFACT_BUCKET }}"
+
+      - name: Upload Lambda artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3 cp "artifacts/${TF_VAR_api_lambda_artifact_key}" "s3://${TF_VAR_lambda_artifact_bucket}/${TF_VAR_api_lambda_artifact_key}"
+          aws s3 cp "artifacts/${TF_VAR_provisioning_lambda_artifact_key}" "s3://${TF_VAR_lambda_artifact_bucket}/${TF_VAR_provisioning_lambda_artifact_key}"
+          aws s3 cp "artifacts/${TF_VAR_expiry_lambda_artifact_key}" "s3://${TF_VAR_lambda_artifact_bucket}/${TF_VAR_expiry_lambda_artifact_key}"
+          aws s3 cp "artifacts/${TF_VAR_migration_lambda_artifact_key}" "s3://${TF_VAR_lambda_artifact_bucket}/${TF_VAR_migration_lambda_artifact_key}"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=permissionhub/${{ inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION || 'af-south-1' }}" \
+            -backend-config="dynamodb_table=${{ vars.TF_LOCK_TABLE }}" \
+            -backend-config="encrypt=true" \
+            -reconfigure
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform plan -no-color -var-file=terraform.tfvars.example \
+            -var="lambda_artifact_bucket=${TF_VAR_lambda_artifact_bucket}" \
+            -var="cognito_domain_prefix=${TF_VAR_cognito_domain_prefix}" \
+            -var="enable_cognito_domain=${TF_VAR_enable_cognito_domain}" \
+            -var="enable_nat_gateway=${TF_VAR_enable_nat_gateway}" \
+            -var="enable_rds_proxy=${TF_VAR_enable_rds_proxy}" \
+            -var="enable_expiry_worker=${TF_VAR_enable_expiry_worker}" \
+            -var="api_lambda_artifact_key=${TF_VAR_api_lambda_artifact_key}" \
+            -var="provisioning_lambda_artifact_key=${TF_VAR_provisioning_lambda_artifact_key}" \
+            -var="expiry_lambda_artifact_key=${TF_VAR_expiry_lambda_artifact_key}" \
+            -var="migration_lambda_artifact_key=${TF_VAR_migration_lambda_artifact_key}" \
+            -out=tfplan
+
+      - name: Stop after plan
+        if: ${{ !inputs.apply }}
+        run: echo "apply=false. Terraform plan completed; no AWS resources were changed by Terraform."
+
+      - name: Terraform apply saved plan
+        if: ${{ inputs.apply }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: Run database migrations
+        if: ${{ inputs.apply }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration_lambda="$(terraform output -raw migration_lambda_name)"
+          aws lambda invoke --function-name "$migration_lambda" /tmp/permissionhub-migration.json --output json > /tmp/permissionhub-migration-invoke.json
+          cat /tmp/permissionhub-migration-invoke.json
+          cat /tmp/permissionhub-migration.json
+          if grep -q '"FunctionError"' /tmp/permissionhub-migration-invoke.json; then
+            exit 1
+          fi
+
+      - name: Print frontend deployment outputs
+        if: ${{ inputs.apply }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "api_gateway_endpoint=$(terraform output -raw api_gateway_endpoint)"
+          echo "cognito_domain=$(terraform output -raw cognito_domain)"
+          echo "cognito_app_client_id=$(terraform output -raw cognito_app_client_id)"
+          echo "frontend_url=$(terraform output -raw frontend_url)"
+          echo "frontend_bucket_name=$(terraform output -raw frontend_bucket_name)"
+          echo "frontend_cloudfront_distribution_id=$(terraform output -raw frontend_cloudfront_distribution_id)"
