@@ -33,6 +33,79 @@ describe('safe provisioning plan',()=>{
   expect(plan.plannedOperations[1]).toMatchObject({targetName:'maya.chen',targetArn:'arn:aws:iam::143671530412:user/maya.chen'});
   expect(plan.plannedOperations.every(item=>item.executed===false)).toBe(true);
  });
+ it('plans AttachUserPolicy once per selected IAM user for direct multi-user access',()=>{
+  const plan=buildProvisioningPlan(request({members:[{userName:'maya.chen',userArn:'arn:aws:iam::143671530412:user/maya.chen'},{userName:'yagnash.dev',userArn:'arn:aws:iam::143671530412:user/yagnash.dev'}],items:[{mode:'MANAGED_POLICY',policyName:'AmazonS3ReadOnlyAccess',policyArn:'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess'}]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['AttachUserPolicy','AttachUserPolicy']);
+  expect(plan.plannedOperations.map(item=>item.targetName)).toEqual(['maya.chen','yagnash.dev']);
+ });
+ it('plans CreateUser before direct policy attachment for new IAM users',()=>{
+  const plan=buildProvisioningPlan(request({targetName:'yagi.demo',targetArn:'arn:aws:iam::143671530412:user/permissionhub/yagi.demo',members:[{userName:'yagi.demo',userArn:'arn:aws:iam::143671530412:user/permissionhub/yagi.demo',createUser:true}],items:[{mode:'MANAGED_POLICY',policyName:'AmazonS3ReadOnlyAccess',policyArn:'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess'}]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateUser','AttachUserPolicy']);
+  expect(plan.plannedOperations[0]).toMatchObject({userName:'yagi.demo'});
+ });
+ it('allows a create-users-only request without policy items',()=>{
+  const plan=buildProvisioningPlan(request({targetName:'new.one',targetArn:'arn:aws:iam::143671530412:user/permissionhub/new.one',members:[{userName:'new.one',userArn:'arn:aws:iam::143671530412:user/permissionhub/new.one',createUser:true}],items:[]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateUser']);
+ });
+ it('plans one CreateUser per username for create-multiple-users-only requests',()=>{
+  const plan=buildProvisioningPlan(request({targetName:'new.one',targetArn:'arn:aws:iam::143671530412:user/permissionhub/new.one',members:[{userName:'new.one',userArn:'arn:aws:iam::143671530412:user/permissionhub/new.one',createUser:true},{userName:'new.two',userArn:'arn:aws:iam::143671530412:user/permissionhub/new.two',createUser:true}],items:[]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateUser','CreateUser']);
+ });
+ it('plans CreateUser and AttachUserPolicy for each new user in a direct managed-policy request',()=>{
+  const plan=buildProvisioningPlan(request({targetName:'new.one',targetArn:'arn:aws:iam::143671530412:user/permissionhub/new.one',members:[{userName:'new.one',userArn:'arn:aws:iam::143671530412:user/permissionhub/new.one',createUser:true},{userName:'new.two',userArn:'arn:aws:iam::143671530412:user/permissionhub/new.two',createUser:true}],items:[{mode:'MANAGED_POLICY',policyName:'AmazonS3ReadOnlyAccess',policyArn:'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess'}]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateUser','CreateUser','AttachUserPolicy','AttachUserPolicy']);
+ });
+ it('plans CreateUser, CreatePolicy and AttachUserPolicy for a new user with custom policy',()=>{
+  const plan=buildProvisioningPlan(request({targetName:'new.one',targetArn:'arn:aws:iam::143671530412:user/permissionhub/new.one',members:[{userName:'new.one',userArn:'arn:aws:iam::143671530412:user/permissionhub/new.one',createUser:true}],items:[{mode:'SPECIFIC_ACTIONS',generatedPolicyName:'PH-PR-1008-1',actions:['lambda:InvokeFunction'],generatedPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:['lambda:InvokeFunction'],Resource:'*'}]}}]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateUser','CreatePolicy','AttachUserPolicy']);
+ });
+ it('plans CreateRole then AttachRolePolicy for a new role with a managed policy',()=>{
+  const plan=buildProvisioningPlan(request({targetType:'ROLE',targetName:'FinanceReportingRole',targetArn:'arn:aws:iam::143671530412:role/permissionhub/FinanceReportingRole',role:{mode:'CREATE',name:'FinanceReportingRole',path:'/permissionhub/',trustedPrincipalType:'SERVICE',trustedPrincipal:'lambda.amazonaws.com',trustPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Principal:{Service:'lambda.amazonaws.com'},Action:'sts:AssumeRole'}]}},items:[{mode:'MANAGED_POLICY',policyName:'AmazonS3ReadOnlyAccess',policyArn:'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess'}],duration:'Permanent',expiryDate:undefined}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateRole','AttachRolePolicy']);
+ });
+ it('plans CreateRole, CreatePolicy and AttachRolePolicy for a new role with custom policy',()=>{
+  const plan=buildProvisioningPlan(request({targetType:'ROLE',targetName:'FinanceReportingRole',targetArn:'arn:aws:iam::143671530412:role/permissionhub/FinanceReportingRole',role:{mode:'CREATE',name:'FinanceReportingRole',path:'/permissionhub/',trustedPrincipalType:'AWS',trustedPrincipal:'arn:aws:iam::143671530412:root',trustPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Principal:{AWS:'arn:aws:iam::143671530412:root'},Action:'sts:AssumeRole'}]}},items:[{mode:'SPECIFIC_ACTIONS',generatedPolicyName:'PH-PR-1008-1',actions:['s3:ListBucket'],generatedPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:['s3:ListBucket'],Resource:'*'}]}}],duration:'Permanent',expiryDate:undefined}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateRole','CreatePolicy','AttachRolePolicy']);
+ });
+ it('plans AttachRolePolicy for an existing role add-permission update',()=>{
+  const plan=buildProvisioningPlan(request({targetType:'ROLE',targetName:'DeploymentRole',targetArn:'arn:aws:iam::143671530412:role/DeploymentRole',role:{mode:'UPDATE',name:'DeploymentRole',updateAction:'ADD_PERMISSIONS'},items:[{mode:'MANAGED_POLICY',policyName:'AWSCloudHSMReadOnlyAccess',policyArn:'arn:aws:iam::aws:policy/AWSCloudHSMReadOnlyAccess'}],duration:'Permanent',expiryDate:undefined}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['AttachRolePolicy']);
+ });
+ it('plans DetachRolePolicy for an existing role remove-permission update',()=>{
+  const plan=buildProvisioningPlan(request({targetType:'ROLE',targetName:'DeploymentRole',targetArn:'arn:aws:iam::143671530412:role/DeploymentRole',role:{mode:'UPDATE',name:'DeploymentRole',updateAction:'REMOVE_PERMISSIONS'},items:[{mode:'MANAGED_POLICY',operation:'DETACH',policyName:'AmazonS3ReadOnlyAccess',policyArn:'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess'}],duration:'Permanent',expiryDate:undefined}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['DetachRolePolicy']);
+ });
+ it('plans UpdateAssumeRolePolicy for a trust relationship update',()=>{
+  const plan=buildProvisioningPlan(request({targetType:'ROLE',targetName:'DeploymentRole',targetArn:'arn:aws:iam::143671530412:role/DeploymentRole',role:{mode:'UPDATE',name:'DeploymentRole',updateAction:'UPDATE_TRUST',trustedPrincipalType:'SERVICE',trustedPrincipal:'ecs-tasks.amazonaws.com',trustPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Principal:{Service:'ecs-tasks.amazonaws.com'},Action:'sts:AssumeRole'}]}},items:[],duration:'Permanent',expiryDate:undefined}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['UpdateAssumeRolePolicy']);
+ });
+ it('allows an existing-group membership-only plan without policy items',()=>{
+  const plan=buildProvisioningPlan(request({targetType:'GROUP',targetName:'Finance-ReadOnly',targetArn:'arn:aws:iam::143671530412:group/Finance-ReadOnly',group:{mode:'EXISTING',name:'Finance-ReadOnly'},members:[{userName:'maya.chen',userArn:'arn:aws:iam::143671530412:user/maya.chen'}],items:[]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['AddUserToGroup']);
+  expect(plan.plannedOperations[0]).toMatchObject({groupName:'Finance-ReadOnly',userName:'maya.chen'});
+ });
+ it('plans CreateUser before existing group membership for a new IAM user',()=>{
+  const plan=buildProvisioningPlan(request({targetType:'GROUP',targetName:'Finance-ReadOnly',targetArn:'arn:aws:iam::143671530412:group/Finance-ReadOnly',group:{mode:'EXISTING',name:'Finance-ReadOnly'},members:[{userName:'new.reader',userArn:'arn:aws:iam::143671530412:user/permissionhub/new.reader',createUser:true}],items:[]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateUser','AddUserToGroup']);
+ });
+ it('plans multiple CreateUser operations before existing group membership additions',()=>{
+  const plan=buildProvisioningPlan(request({targetType:'GROUP',targetName:'YagiPermsTest',targetArn:'arn:aws:iam::143671530412:group/YagiPermsTest',group:{mode:'EXISTING',name:'YagiPermsTest'},members:[{userName:'new.one',userArn:'arn:aws:iam::143671530412:user/permissionhub/new.one',createUser:true},{userName:'new.two',userArn:'arn:aws:iam::143671530412:user/permissionhub/new.two',createUser:true}],items:[]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateUser','CreateUser','AddUserToGroup','AddUserToGroup']);
+ });
  it('describes CreateGroup, CreatePolicy, AttachGroupPolicy and AddUserToGroup for group creation',()=>{
   const groupRequest=request({
    targetType:'GROUP',
@@ -48,8 +121,21 @@ describe('safe provisioning plan',()=>{
   expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateGroup','CreatePolicy','AttachGroupPolicy','AddUserToGroup']);
   expect(plan.plannedOperations[0]).toMatchObject({targetName:'DR_DevOps_Test',targetArn:'arn:aws:iam::143671530412:group/DR_DevOps_Test'});
   expect(plan.plannedOperations[2]).toMatchObject({targetName:'DR_DevOps_Test',targetArn:'arn:aws:iam::143671530412:group/DR_DevOps_Test'});
-  expect(plan.plannedOperations[3]).toMatchObject({groupName:'DR_DevOps_Test',userName:'maya.chen'});
+ expect(plan.plannedOperations[3]).toMatchObject({groupName:'DR_DevOps_Test',userName:'maya.chen'});
  });
+ it('plans CreateGroup, AttachGroupPolicy, CreateUser and AddUserToGroup for new groups with new users and managed policy',()=>{
+  const groupRequest=request({targetType:'GROUP',targetName:'Finance-Testers',targetArn:'arn:aws:iam::143671530412:group/permissionhub/Finance-Testers',group:{mode:'CREATE',name:'Finance-Testers'},members:[{userName:'demo.one',userArn:'arn:aws:iam::143671530412:user/permissionhub/demo.one',createUser:true,operation:'ADD'}],items:[{mode:'MANAGED_POLICY',policyName:'AWSCloudHSMReadOnlyAccess',policyArn:'arn:aws:iam::aws:policy/AWSCloudHSMReadOnlyAccess'}]});
+  const plan=buildProvisioningPlan(groupRequest,account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateGroup','AttachGroupPolicy','CreateUser','AddUserToGroup']);
+ });
+ it('plans CreateGroup, CreatePolicy, AttachGroupPolicy, CreateUser and AddUserToGroup for new groups with new users and custom policy',()=>{
+  const groupRequest=request({targetType:'GROUP',targetName:'Finance-Testers',targetArn:'arn:aws:iam::143671530412:group/permissionhub/Finance-Testers',group:{mode:'CREATE',name:'Finance-Testers'},members:[{userName:'demo.one',userArn:'arn:aws:iam::143671530412:user/permissionhub/demo.one',createUser:true,operation:'ADD'}],items:[{mode:'SPECIFIC_ACTIONS',generatedPolicyName:'PH-PR-1008-1',actions:['s3:GetObject'],generatedPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:['s3:GetObject'],Resource:'*'}]}}]});
+  const plan=buildProvisioningPlan(groupRequest,account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateGroup','CreatePolicy','AttachGroupPolicy','CreateUser','AddUserToGroup']);
+ });
+ it('rejects duplicate new IAM users in a single plan',()=>expect(buildProvisioningPlan(request({members:[{userName:'dupe.user',createUser:true},{userName:'Dupe.User',createUser:true}]}),account)).toMatchObject({valid:false,errors:expect.arrayContaining([expect.objectContaining({field:'members'})])}));
  it('requires group metadata and at least one requested group member',()=>{
   expect(buildProvisioningPlan(request({targetType:'GROUP',targetName:'DR_DevOps_Test',targetArn:'arn:aws:iam::143671530412:group/DR_DevOps_Test'}),account)).toMatchObject({valid:false,errors:expect.arrayContaining([expect.objectContaining({field:'group'}),expect.objectContaining({field:'members'})])});
  });

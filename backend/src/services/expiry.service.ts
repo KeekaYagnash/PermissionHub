@@ -12,7 +12,10 @@ export class PermissionGrantExpiryService{
  async revokeExpired(actor='Expiry worker',now=new Date()){
   const expired=this.findExpired(now),results=[];
   for(const grant of expired){
-   const response=await this.provisioning.detach({targetType:grant.targetType,targetName:grant.targetName,policyArn:grant.policyArn});
+   const membershipOnly=grant.targetType==='GROUP'&&grant.policyArn.startsWith('GROUP_MEMBERSHIP:');
+   const memberResults=[];
+   if(grant.targetType==='GROUP')for(const userName of grant.groupMembersAdded??[])memberResults.push(await this.provisioning.removeUserFromGroup(grant.targetName,userName));
+   const response=membershipOnly?{operation:'RemoveUserFromGroup',changed:memberResults.some(item=>(item as {changed?:boolean}).changed),members:memberResults}:await this.provisioning.detach({targetType:grant.targetType,targetName:grant.targetName,policyArn:grant.policyArn});
    grant.revokedAt=new Date().toISOString();
    grant.revocationResponse=response;
    auditEvents.unshift(this.audit(actor,grant,response));
@@ -22,6 +25,7 @@ export class PermissionGrantExpiryService{
  }
 
  private audit(actor:string,grant:PermissionGrant,response:unknown):AuditEvent{
-  return {id:`evt_expiry_${Date.now()}_${grant.id}`,timestamp:new Date().toISOString(),actor,requestId:grant.requestId,targetArn:grant.targetArn,policyArn:grant.policyArn,action:'Policy detached',previousState:{attachedAt:grant.attachedAt,expiresAt:grant.expiresAt},newState:{revokedAt:grant.revokedAt},result:'SUCCESS',awsRequestId:(response as any)?.awsRequestId};
+  const membershipOnly=grant.targetType==='GROUP'&&grant.policyArn.startsWith('GROUP_MEMBERSHIP:');
+  return {id:`evt_expiry_${Date.now()}_${grant.id}`,timestamp:new Date().toISOString(),actor,requestId:grant.requestId,targetArn:grant.targetArn,policyArn:grant.policyArn,action:membershipOnly?'Group members removed':'Policy detached',previousState:{attachedAt:grant.attachedAt,expiresAt:grant.expiresAt},newState:{revokedAt:grant.revokedAt},result:'SUCCESS',awsRequestId:(response as any)?.awsRequestId};
  }
 }

@@ -83,6 +83,8 @@ export function validatePolicyJson(text:string){
   if(!statement.Resource&&!statement.NotResource)errors.push(`${label}: Resource or NotResource is required.`);
   const actions=asArray(statement.Action??statement.NotAction).map(String);
   const resources=asArray(statement.Resource??statement.NotResource).map(String);
+  if((statement.Action!==undefined||statement.NotAction!==undefined)&&!actions.length)errors.push(`${label}: Action or NotAction must include at least one value.`);
+  if((statement.Resource!==undefined||statement.NotResource!==undefined)&&!resources.length)errors.push(`${label}: Resource or NotResource must include at least one value.`);
   if(actions.some(action=>action==='*'||action.endsWith(':*')))warnings.push(`${label}: wildcard action detected.`);
   if(resources.includes('*'))warnings.push(`${label}: wildcard resource detected.`);
   if(actions.some(action=>['iam:PassRole','iam:CreateAccessKey','iam:AttachUserPolicy','iam:AttachRolePolicy'].includes(action)))warnings.push(`${label}: privilege-escalation-sensitive IAM action detected.`);

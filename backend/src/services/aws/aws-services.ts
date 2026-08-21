@@ -5,6 +5,8 @@ import {
  GetUserCommand,
  ListRolesCommand,
  GetRoleCommand,
+ CreateRoleCommand,
+ UpdateAssumeRolePolicyCommand,
  ListPoliciesCommand,
  GetPolicyCommand,
  GetPolicyVersionCommand,
@@ -27,6 +29,7 @@ import {
  DetachGroupPolicyCommand,
  CreateGroupCommand,
  DeleteGroupCommand,
+ CreateUserCommand,
  AddUserToGroupCommand,
  RemoveUserFromGroupCommand,
  CreatePolicyCommand,
@@ -213,6 +216,28 @@ export class IamPolicyValidationService{
 
 export class IamProvisioningService{
  private iam:IAMClient;constructor(private context?:AwsAccountContext,private actor?:SessionUser,private requestId?:string){this.iam=context?awsConnectionBroker.getIamClient(context,isLocalProvisioningEnabled()?'read':'provision',actor,requestId):new IAMClient(cfg)}
+ async createRole(input:{roleName:string;assumeRolePolicyDocument:Record<string,unknown>;description?:string;path?:string;tags?:Record<string,string>}){
+  const path=input.path??'/permissionhub/';
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,operation:'CreateRole',changed:false,roleName:input.roleName,path,message:'Role creation skipped outside live mode.'};
+  if(!isLocalProvisioningEnabled()&&!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
+  try{const existing=await this.iam.send(new GetRoleCommand({RoleName:input.roleName}));if(existing.Role?.Arn)throw new Error(`ROLE_NAME_CONFLICT: ${input.roleName}`)}catch(error:any){if(error?.name!=='NoSuchEntity'&&error?.Code!=='NoSuchEntity')throw error}
+  const tags=[{Key:'ManagedBy',Value:'PermissionHub'},...(this.requestId?[{Key:'PermissionHubRequestId',Value:this.requestId}]:[]),...Object.entries(input.tags??{}).map(([Key,Value])=>({Key,Value}))];
+  const response=await this.iam.send(new CreateRoleCommand({RoleName:input.roleName,AssumeRolePolicyDocument:JSON.stringify(input.assumeRolePolicyDocument),Description:input.description,Path:path,Tags:tags}));
+  return {mode:isLocalProvisioningEnabled()?'local':'LIVE',operation:'CreateRole',changed:true,roleName:input.roleName,roleArn:response.Role?.Arn,awsRequestId:response.$metadata.requestId};
+ }
+ async updateRoleTrustPolicy(roleName:string,document:Record<string,unknown>){
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,operation:'UpdateAssumeRolePolicy',changed:false,roleName,message:'Trust policy update skipped outside live mode.'};
+  if(!isLocalProvisioningEnabled()&&!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
+  const response=await this.iam.send(new UpdateAssumeRolePolicyCommand({RoleName:roleName,PolicyDocument:JSON.stringify(document)}));
+  return {mode:isLocalProvisioningEnabled()?'local':'LIVE',operation:'UpdateAssumeRolePolicy',changed:true,roleName,awsRequestId:response.$metadata.requestId};
+ }
+ async createUser(userName:string,path='/permissionhub/'){
+  if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,operation:'CreateUser',changed:false,userName,path,message:'User creation skipped outside live mode.'};
+  if(!isLocalProvisioningEnabled()&&!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
+  try{const existing=await this.iam.send(new GetUserCommand({UserName:userName}));if(existing.User?.Arn)throw new Error(`USER_NAME_CONFLICT: ${userName}`)}catch(error:any){if(error?.name!=='NoSuchEntity'&&error?.Code!=='NoSuchEntity')throw error}
+  const response=await this.iam.send(new CreateUserCommand({UserName:userName,Path:path,Tags:[{Key:'ManagedBy',Value:'PermissionHub'},...(this.requestId?[{Key:'PermissionHubRequestId',Value:this.requestId}]:[])]}));
+  return {mode:isLocalProvisioningEnabled()?'local':'LIVE',operation:'CreateUser',changed:true,userName,userArn:response.User?.Arn,awsRequestId:response.$metadata.requestId};
+ }
  async attach(input:{targetType:TargetType;targetName:string;policyArn:string}){
   this.assertAllowed(input.policyArn,'attach');
   if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE==='disabled')return {mode:'disabled',operation:attachOperation(input.targetType),changed:false,message:'Provisioning is disabled; no AWS change was made.'};
