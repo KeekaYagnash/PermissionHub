@@ -5,8 +5,6 @@ on:
     branches:
       - demo_ready_2
 
-  workflow_dispatch:
-
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
