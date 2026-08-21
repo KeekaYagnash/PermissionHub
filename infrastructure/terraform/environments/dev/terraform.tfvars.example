@@ -8,6 +8,7 @@ private_app_subnet_cidrs = ["10.40.10.0/24", "10.40.11.0/24"]
 private_db_subnet_cidrs = ["10.40.20.0/24", "10.40.21.0/24"]
 enable_nat_gateway = true
 enable_rds_proxy = false
+postgres_engine_version = "16.15"
 interface_endpoint_services = ["secretsmanager", "sts", "logs", "sqs"]
 
 frontend_url = "http://localhost:5173"

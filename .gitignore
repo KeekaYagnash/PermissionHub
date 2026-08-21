@@ -10,6 +10,7 @@ dist/
 .DS_Store
 coverage/
 **/coverage/
+artifacts/
 frontend/.vite/
 backend/lambda-dist/
 *.pem

@@ -9,7 +9,7 @@ locals {
 
   lambda_common_environment = {
     NODE_ENV                               = "production"
-    AWS_REGION                             = var.aws_region
+    APP_AWS_REGION                         = var.aws_region
     FRONTEND_URL                           = module.frontend_hosting.frontend_url
     AWS_CONNECTION_MODE                    = "manual"
     ENABLE_AWS_DEMO_DATA                   = "false"

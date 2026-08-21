@@ -20,6 +20,10 @@ variable "enable_rds_proxy" {
   type    = bool
   default = false
 }
+variable "postgres_engine_version" {
+  type    = string
+  default = "16.15"
+}
 variable "interface_endpoint_services" {
   type    = list(string)
   default = ["secretsmanager", "sts", "logs", "sqs"]

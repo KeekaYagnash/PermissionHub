@@ -11,4 +11,12 @@ terraform {
       version = "~> 3.6"
     }
   }
+
+  backend "s3" {
+    bucket         = "permissionhub-dev-bucket"
+    key            = "permissionhub/dev/terraform.tfstate"
+    region         = "af-south-1"
+    dynamodb_table = "permissionhub-state-lock"
+    encrypt        = true
+  }
 }

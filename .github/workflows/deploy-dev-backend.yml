@@ -1,9 +1,9 @@
 name: PermissionHub dev backend / Terraform
 
 on:
-  push:
-    branches:
-      - demo_ready_2
+  # push:
+  #   branches:
+  #     - demo_ready_2
   workflow_dispatch:
     inputs:
       environment:
@@ -110,10 +110,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          (cd backend/lambda-dist && zip -qr "../../artifacts/${TF_VAR_api_lambda_artifact_key}" .)
-          cp "artifacts/${TF_VAR_api_lambda_artifact_key}" "artifacts/${TF_VAR_provisioning_lambda_artifact_key}"
-          cp "artifacts/${TF_VAR_api_lambda_artifact_key}" "artifacts/${TF_VAR_expiry_lambda_artifact_key}"
-          cp "artifacts/${TF_VAR_api_lambda_artifact_key}" "artifacts/${TF_VAR_migration_lambda_artifact_key}"
+          (cd backend/lambda-dist/packages/api && zip -qr "../../../../artifacts/${TF_VAR_api_lambda_artifact_key}" .)
+          (cd backend/lambda-dist/packages/provisioning && zip -qr "../../../../artifacts/${TF_VAR_provisioning_lambda_artifact_key}" .)
+          (cd backend/lambda-dist/packages/expiry && zip -qr "../../../../artifacts/${TF_VAR_expiry_lambda_artifact_key}" .)
+          (cd backend/lambda-dist/packages/migration && zip -qr "../../../../artifacts/${TF_VAR_migration_lambda_artifact_key}" .)
           ls -lh artifacts
 
       - name: Verify Lambda artifact bucket exists

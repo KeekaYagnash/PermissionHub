@@ -9,7 +9,7 @@ locals {
 
   lambda_common_environment = {
     NODE_ENV                               = "production"
-    AWS_REGION                             = var.aws_region
+    APP_AWS_REGION                         = var.aws_region
     FRONTEND_URL                           = module.frontend_hosting.frontend_url
     AWS_CONNECTION_MODE                    = "manual"
     ENABLE_AWS_DEMO_DATA                   = "false"
@@ -73,6 +73,7 @@ module "rds" {
   security_group_id       = module.security.rds_security_group_id
   instance_class          = "db.t4g.micro"
   allocated_storage       = 20
+  postgres_engine_version = var.postgres_engine_version
   multi_az                = false
   backup_retention_period = 3
   deletion_protection     = false

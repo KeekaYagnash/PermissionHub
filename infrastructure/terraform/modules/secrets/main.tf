@@ -13,9 +13,9 @@ resource "aws_secretsmanager_secret" "app" {
   recovery_window_in_days = 30
   tags                    = var.tags
 
-  lifecycle {
-    prevent_destroy = true
-  }
+  # lifecycle {
+  #   prevent_destroy = true
+  # }
 }
 
 resource "aws_secretsmanager_secret_version" "app" {
