@@ -1,6 +1,9 @@
 name: PermissionHub dev backend / Terraform
 
 on:
+  push:
+    branches:
+      - demo_ready_2
   workflow_dispatch:
     inputs:
       environment:
