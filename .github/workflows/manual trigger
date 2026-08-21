@@ -1,0 +1,21 @@
+name: PermissionHub Manual Trigger
+
+on:
+  push:
+    branches:
+      - demo_ready_2
+
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm workflow
+        run: |
+          echo "GitHub Actions is working"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
