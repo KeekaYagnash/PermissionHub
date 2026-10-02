@@ -16,7 +16,7 @@ resource "aws_cognito_user_pool" "this" {
   }
 
   admin_create_user_config {
-    allow_admin_create_user_only = true
+    allow_admin_create_user_only = false
   }
 
   auto_verified_attributes = ["email"]
@@ -48,6 +48,7 @@ resource "aws_cognito_user_pool_client" "spa" {
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   supported_identity_providers         = ["COGNITO"]
   prevent_user_existence_errors        = "ENABLED"
+  explicit_auth_flows                  = ["ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_PASSWORD_AUTH", "ALLOW_USER_SRP_AUTH"]
   access_token_validity                = 60
   id_token_validity                    = 60
   refresh_token_validity               = 30

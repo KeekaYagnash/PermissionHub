@@ -180,7 +180,8 @@ describe('Connection Add Account modal',()=>{
   await user.click(screen.getByRole('button',{name:'Add account'}));
   await user.type(screen.getByLabelText('Account name'),'Disraptor Sandbox');
   await user.type(screen.getByLabelText('AWS account ID'),'854924711147');
-  await user.click(within(screen.getByRole('dialog',{name:'Add AWS account'})).getByRole('button',{name:'Add account'}));
+  await user.click(screen.getByLabelText(/Save as pending and validate later/i));
+  await user.click(within(screen.getByRole('dialog',{name:'Add AWS account'})).getByRole('button',{name:'Save pending account'}));
   await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Add AWS account'})).toBeNull());
   expect(api.createAwsAccount).toHaveBeenCalledWith(expect.objectContaining({accountName:'Disraptor Sandbox',accountId:'854924711147'}),expect.anything());
   expect(api.session).toHaveBeenCalled();

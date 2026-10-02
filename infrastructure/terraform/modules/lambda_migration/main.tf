@@ -46,6 +46,7 @@ resource "aws_lambda_function" "this" {
   handler       = var.handler
   s3_bucket     = var.artifact_s3_bucket
   s3_key        = var.artifact_s3_key
+  source_code_hash = var.artifact_source_hash
   role          = aws_iam_role.this.arn
   memory_size   = var.memory_size
   timeout       = var.timeout

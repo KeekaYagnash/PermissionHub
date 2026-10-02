@@ -126,6 +126,6 @@ describe('safe request review HTTP workflow',()=>{
   const attach=vi.spyOn(IamProvisioningService.prototype,'attach').mockResolvedValue({mode:'local',operation:'AttachUserPolicy',changed:true,awsRequestId:'mock-attach-request'});
   const {agent,csrf}=await authenticatedAgent('user_requester_dev');
   const response=await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','local-provision-operation').send({action:'APPROVE_AND_PROVISION'}).expect(200);
-  expect(response.body.data).toMatchObject({request:{status:'Provisioned',completedApprovalStages:['DEVELOPMENT_REVIEW']},provisioning:{mode:'local',executed:true}});expect(validate).toHaveBeenCalledWith(expect.anything(),account.id,'READ',true);expect(identity).toHaveBeenCalledWith(item.targetName);expect(policyValidation).toHaveBeenCalledTimes(1);expect(create).toHaveBeenCalledTimes(1);expect(attach).toHaveBeenCalledTimes(1);
+   expect(response.body.data).toMatchObject({request:{status:'Provisioned',completedApprovalStages:['SECURITY_REVIEWER']},provisioning:{mode:'local',executed:true}});expect(validate).toHaveBeenCalledWith(expect.anything(),account.id,'READ',true);expect(identity).toHaveBeenCalledWith(item.targetName);expect(policyValidation).toHaveBeenCalledTimes(1);expect(create).toHaveBeenCalledTimes(1);expect(attach).toHaveBeenCalledTimes(1);
  });
 });

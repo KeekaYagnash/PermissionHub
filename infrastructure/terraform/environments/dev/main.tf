@@ -20,16 +20,19 @@ locals {
     CROSS_ACCOUNT_PROVISIONING_ENABLED     = "false"
     ENABLE_LIVE_PROVISIONING               = "true"
     PROVISIONING_CONFIRMATION              = "I_UNDERSTAND_THIS_CHANGES_AWS"
+    GLOBAL_PROVISIONING_ENABLED            = "true"
     EXPIRY_REVOCATION_MODE                 = var.enable_expiry_worker ? "worker" : "manual"
     DATABASE_HOST                          = var.enable_rds_proxy ? module.rds_proxy[0].endpoint : module.rds.address
     DATABASE_PORT                          = "5432"
     DATABASE_NAME                          = "permissionhub"
+    DATABASE_MIGRATION_MODE                = "push"
     DATABASE_SECRET_ARN                    = module.rds.secret_arn
     APP_SECRET_ARN                         = module.secrets.app_secret_arn
     PROVISIONING_QUEUE_URL                 = module.queues.queue_url
     COGNITO_USER_POOL_ID                   = module.cognito.user_pool_id
     COGNITO_APP_CLIENT_ID                  = module.cognito.app_client_id
     COGNITO_ISSUER_URL                     = module.cognito.issuer_url
+    COGNITO_DEFAULT_APP_ROLE               = "ORGANISATION_ADMIN"
     PERMISSIONHUB_RUNTIME_ADAPTATION_STATE = "demo-ready-lambda"
   }
 }
@@ -94,7 +97,7 @@ module "rds_proxy" {
 
 module "secrets" {
   source = "../../modules/secrets"
-  name   = local.name
+  name   = "dev/${local.name}"
   tags   = local.tags
 }
 
@@ -126,6 +129,7 @@ module "api_lambda" {
   handler                     = var.api_lambda_handler
   artifact_s3_bucket          = var.lambda_artifact_bucket
   artifact_s3_key             = var.api_lambda_artifact_key
+  artifact_source_hash        = var.api_lambda_artifact_hash
   memory_size                 = var.api_lambda_memory_size
   timeout                     = var.api_lambda_timeout
   reserved_concurrency        = var.api_lambda_reserved_concurrency
@@ -148,6 +152,7 @@ module "provisioning_lambda" {
   handler                     = var.provisioning_lambda_handler
   artifact_s3_bucket          = var.lambda_artifact_bucket
   artifact_s3_key             = var.provisioning_lambda_artifact_key
+  artifact_source_hash        = var.provisioning_lambda_artifact_hash
   memory_size                 = var.provisioning_lambda_memory_size
   timeout                     = var.provisioning_lambda_timeout
   reserved_concurrency        = var.provisioning_reserved_concurrency
@@ -170,6 +175,7 @@ module "expiry_lambda" {
   handler               = var.expiry_lambda_handler
   artifact_s3_bucket    = var.lambda_artifact_bucket
   artifact_s3_key       = var.expiry_lambda_artifact_key
+  artifact_source_hash  = var.expiry_lambda_artifact_hash
   memory_size           = var.expiry_lambda_memory_size
   timeout               = var.expiry_lambda_timeout
   reserved_concurrency  = var.expiry_reserved_concurrency
@@ -192,6 +198,7 @@ module "migration_lambda" {
   handler               = var.migration_lambda_handler
   artifact_s3_bucket    = var.lambda_artifact_bucket
   artifact_s3_key       = var.migration_lambda_artifact_key
+  artifact_source_hash  = var.migration_lambda_artifact_hash
   memory_size           = 1024
   timeout               = var.migration_lambda_timeout
   subnet_ids            = module.networking.private_app_subnet_ids

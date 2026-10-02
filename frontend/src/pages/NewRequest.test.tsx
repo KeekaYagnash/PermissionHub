@@ -5,13 +5,16 @@ import userEvent from '@testing-library/user-event';
 import {MemoryRouter} from 'react-router-dom';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import NewRequest from './NewRequest';
-import {api} from '../lib/api';
+import {api,ClientApiError} from '../lib/api';
 import {useAuthStore} from '../store/auth';
 import type {AppContext,AuthSession,IamIdentity,IamPolicySummary} from '../types';
 
-vi.mock('../lib/api',()=>({
- setCsrfToken:vi.fn(),
- api:{
+vi.mock('../lib/api',()=>{
+ class ClientApiError extends Error{
+  status?:number;code?:string;correlationId?:string;details?:unknown;response?:unknown;
+  constructor(input:{message:string;status?:number;code?:string;correlationId?:string;details?:unknown;response?:unknown}){super(input.message);this.name='ClientApiError';this.status=input.status;this.code=input.code;this.correlationId=input.correlationId;this.details=input.details;this.response=input.response}
+ }
+ return {setCsrfToken:vi.fn(),ClientApiError,api:{
   users:vi.fn(),
   roles:vi.fn(),
   groups:vi.fn(),
@@ -23,8 +26,8 @@ vi.mock('../lib/api',()=>({
   validatePolicy:vi.fn(),
   createRequest:vi.fn(),
   submitRequest:vi.fn()
- }
-}));
+ }};
+});
 
 const session:AuthSession={authenticated:true,csrfToken:'csrf',authProvider:'development',devAuthAvailable:true,user:{id:'user-1',email:'admin@example.com',displayName:'Organisation Admin',provider:'development',providerSubject:'user-1',activeTenantId:'tenant-1',activeAccountId:'account-1',activeAwsAccountRecordId:'account-1',permissions:['REQUEST_CREATE'],memberships:[]}};
 const context:AppContext={tenants:[],organisations:[],organisationalUnits:[],accounts:[{id:'account-1',accountRecordId:'account-1',tenantId:'tenant-1',accountId:'143671530412',awsAccountNumber:'143671530412',accountName:'Disraptor Production',accountType:'PRODUCTION',environment:'production',riskTier:'HIGH',region:'af-south-1',connectionType:'LOCAL_DEFAULT_CREDENTIALS',connectionStatus:'CONNECTED',sourceType:'MANUAL',connectionSource:'MANUAL',hasConnection:true,provisioningStatus:'DISABLED',provisioningEnabled:false}],activeTenantId:'tenant-1',activeAccountId:'account-1',activeAwsAccountRecordId:'account-1'};
@@ -141,7 +144,8 @@ describe('New Request IAM user creation flow',()=>{
   await userEvent.click(iamUserTargetButton());
   await userEvent.click(screen.getByRole('button',{name:/continue/i}));
   await userEvent.click(screen.getByRole('button',{name:/create new users/i}));
-  await userEvent.type(screen.getByLabelText(/iam usernames/i),'demo.user');
+  fireEvent.change(screen.getByLabelText(/iam usernames/i),{target:{value:'demo.user'}});
+  await waitFor(()=>expect((screen.getByRole('button',{name:/continue/i}) as HTMLButtonElement).disabled).toBe(false));
   await userEvent.click(screen.getByRole('button',{name:/continue/i}));
   expect(screen.getByRole('button',{name:/create users only/i})).toBeTruthy();
   expect(screen.queryByRole('button',{name:/update\/remove existing permissions/i})).toBeNull();
@@ -197,6 +201,38 @@ describe('New Request IAM user creation flow',()=>{
   await waitFor(()=>expect((screen.getByRole('button',{name:/continue/i}) as HTMLButtonElement).disabled).toBe(false));
   await userEvent.click(screen.getByRole('button',{name:/continue/i}));
   expect(await screen.findByText(/Create 2 IAM users in Disraptor Production without assigning permissions or group membership/i)).toBeTruthy();
+ });
+
+ it('shows a structured backend error and allows retry after request persistence fails',async()=>{
+  const created={id:'DIS-PR-1001',targetType:'USER',targetName:'demo.one',items:[],submittedAt:'2026-09-11T12:00:00.000Z',requiredApprovalStages:['ACCOUNT_APPROVER']};
+  vi.mocked(api.createRequest)
+   .mockRejectedValueOnce(new ClientApiError({message:'PermissionHub could not persist the permission request. No request was created.',status:500,code:'REQUEST_PERSISTENCE_FAILED',correlationId:'corr-123'}))
+   .mockResolvedValueOnce(created as any);
+  vi.mocked(api.submitRequest).mockResolvedValue(created as any);
+  renderNewRequest();
+  await screen.findByRole('button',{name:/iam user group/i});
+  await userEvent.click(iamUserTargetButton());
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/create new users/i}));
+  fireEvent.change(screen.getByLabelText(/iam usernames/i),{target:{value:'demo.one'}});
+  await waitFor(()=>expect((screen.getByRole('button',{name:/continue/i}) as HTMLButtonElement).disabled).toBe(false));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/create users only/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  fireEvent.change(screen.getByLabelText(/request title/i),{target:{value:'Create demo user'}});
+  await userEvent.selectOptions(screen.getByLabelText(/approver/i),'Security Reviewer');
+  fireEvent.change(screen.getByLabelText(/business justification/i),{target:{value:'Create a demo IAM user for request persistence validation.'}});
+  await waitFor(()=>expect((screen.getByRole('button',{name:/continue/i}) as HTMLButtonElement).disabled).toBe(false));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/submit request/i}));
+  expect((await screen.findByRole('alert')).textContent).toContain("Request couldn't be created");
+  expect(screen.getByText(/could not persist the permission request/i)).toBeTruthy();
+  await userEvent.click(screen.getByText(/technical reference/i));
+  expect(screen.getByText('REQUEST_PERSISTENCE_FAILED')).toBeTruthy();
+  expect(screen.getByText('corr-123')).toBeTruthy();
+  await userEvent.click(screen.getByRole('button',{name:/try again/i}));
+  expect(await screen.findByText(/Request DIS-PR-1001 submitted/i)).toBeTruthy();
+  expect(api.createRequest).toHaveBeenCalledTimes(2);
  });
 });
 

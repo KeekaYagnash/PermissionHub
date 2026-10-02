@@ -41,7 +41,7 @@ export class IdentityDomainService {
  sessionUserFromCognito(claims:{sub:string;email?:string;name?:string;groups?:string[]}):SessionUser{
   const matched=this.findByProviderSubject('cognito',claims.sub,claims.email);
   if(matched)return this.sessionUser(matched,'cognito');
-  const role=(claims.groups?.find(group=>['ORGANISATION_ADMIN','SECURITY_REVIEWER','PROVISIONER','REQUESTER','ACCOUNT_APPROVER'].includes(group)) as AppRole|undefined)??'ORGANISATION_ADMIN';
+  const role=(claims.groups?.find(group=>['ORGANISATION_ADMIN','SECURITY_REVIEWER','PROVISIONER','REQUESTER','ACCOUNT_APPROVER','OU_ADMIN','PLATFORM_ADMIN'].includes(group)) as AppRole|undefined)??env.COGNITO_DEFAULT_APP_ROLE;
   const id=`cognito_${claims.sub.replace(/[^A-Za-z0-9_-]/g,'_').slice(0,48)}`;
   return this.sessionUser({id,email:claims.email??`${id}@cognito.local`,displayName:claims.name??claims.email??'Cognito demo user',providerSubject:claims.sub,memberships:[membership(`membership_${id}`,role,[scope('TENANT',tenant.id,{canView:true,canRequest:true,canApprove:true,canProvision:true,canRevoke:true,canManageConfiguration:role==='ORGANISATION_ADMIN'})])]},'cognito');
  }
@@ -65,6 +65,18 @@ export class IdentityDomainService {
 export const identityDomain=new IdentityDomainService();
 export const accountTypeLabel=(type:AccountType)=>type.replaceAll('_',' ').toLowerCase().replace(/^\w/,c=>c.toUpperCase());
 
+export function organisationSlug(name:string){return name.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,48)||'organisation'}
+export function configureSessionOrganisation(user:SessionUser,companyName:string){
+ const name=companyName.trim(),slug=organisationSlug(name),tenantId=`tenant_${slug}`,membershipId=`membership_${user.id}_${slug}`.replace(/[^A-Za-z0-9_-]/g,'_');
+ const next=membership(membershipId,'ORGANISATION_ADMIN',[scope('TENANT',tenantId,{canView:true,canRequest:true,canApprove:true,canProvision:true,canRevoke:true,canManageConfiguration:true})]);
+ next.tenantName=name;next.tenantSlug=slug;
+ user.memberships=[next,...user.memberships.filter(item=>item.tenantId!==tenantId)];
+ user.activeTenantId=tenantId;
+ user.activeAwsAccountRecordId=undefined;
+ user.activeAccountId=undefined;
+ return user;
+}
+
 export async function persistDevelopmentIdentity(user:SessionUser){
  if(process.env.VITEST||env.NODE_ENV!=='development'||user.provider!=='development')return;
  const membership=user.memberships.find(item=>item.tenantId===user.activeTenantId);if(!membership)return;
@@ -83,8 +95,9 @@ export async function persistSessionUser(user:SessionUser){
  try{
   await prisma.$transaction(async tx=>{
    await tx.tenant.upsert({where:{id:membership.tenantId},create:{id:membership.tenantId,name:membership.tenantName,slug:membership.tenantSlug,status:'ACTIVE'},update:{name:membership.tenantName,status:'ACTIVE'}});
-   await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()},update:{email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()}});
+   await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date(),activeTenantId:user.activeTenantId},update:{email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date(),activeTenantId:user.activeTenantId}});
    await tx.tenantMembership.upsert({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}},create:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'},update:{role:membership.role,status:'ACTIVE'}});
+   for(const item of membership.scopes){const data={scopeType:item.scopeType,scopeId:item.scopeId,includeDescendants:item.includeDescendants,canView:item.canView,canRequest:item.canRequest,canApprove:item.canApprove,canProvision:item.canProvision,canRevoke:item.canRevoke,canManageConfiguration:item.canManageConfiguration};await tx.adminScope.upsert({where:{tenantMembershipId_scopeType_scopeId:{tenantMembershipId:membership.id,scopeType:item.scopeType,scopeId:item.scopeId}},create:{tenantMembershipId:membership.id,...data},update:data})}
   });
  }catch{}
  return user;
@@ -93,6 +106,8 @@ export async function persistSessionUser(user:SessionUser){
 export async function hydrateSessionPreferences(user:SessionUser){
  if(process.env.VITEST)return user;
  try{
+  const memberships=await prisma.tenantMembership.findMany({where:{userId:user.id,status:'ACTIVE'},include:{tenant:true,adminScopes:true}});
+  if(memberships.length)user.memberships=memberships.map(item=>({id:item.id,tenantId:item.tenantId,tenantName:item.tenant.name,tenantSlug:item.tenant.slug,role:item.role,status:item.status,scopes:item.adminScopes.map(scope=>({scopeType:scope.scopeType,scopeId:scope.scopeId,includeDescendants:scope.includeDescendants,canView:scope.canView,canRequest:scope.canRequest,canApprove:scope.canApprove,canProvision:scope.canProvision,canRevoke:scope.canRevoke,canManageConfiguration:scope.canManageConfiguration}))}));
   const rows=await prisma.$queryRawUnsafe<Array<{activeTenantId:string|null;activeAwsAccountRecordId:string|null}>>('SELECT "activeTenantId", "activeAwsAccountRecordId" FROM "User" WHERE id = $1 LIMIT 1',user.id);
   const preference=rows[0];if(!preference)return user;
   if(preference.activeTenantId&&user.memberships.some(item=>item.tenantId===preference.activeTenantId&&item.status==='ACTIVE'))user.activeTenantId=preference.activeTenantId;

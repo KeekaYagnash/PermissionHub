@@ -1,8 +1,10 @@
 import { build } from 'esbuild';
-import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, extname, join, resolve } from 'node:path';
 
+const require = createRequire(import.meta.url);
 const root = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(root, '..');
 const out = resolve(root, 'lambda-dist');
@@ -24,15 +26,19 @@ await Promise.all(entries.map(entry => build({
   sourcemap: false,
   minify: true,
   external: ['@prisma/client'],
-  banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' }
+  banner: { js: 'import { createRequire } from "node:module"; import { fileURLToPath } from "node:url"; import { dirname as __pathDirname } from "node:path"; const require = createRequire(import.meta.url); const __filename = fileURLToPath(import.meta.url); const __dirname = __pathDirname(__filename);' }
 })));
 
 for (const entry of entries) {
   const packageRoot = resolve(packagesOut, entry);
+  const includePrismaClient = entry === 'api' || entry === 'migration';
   await mkdir(resolve(packageRoot, 'dist/lambda'), { recursive: true });
   await cp(resolve(out, `dist/lambda/${entry}.js`), resolve(packageRoot, `dist/lambda/${entry}.js`));
-  await writePackageJson(packageRoot, entry === 'migration');
-  await copyPrismaClientRuntime(packageRoot);
+  await writePackageJson(packageRoot, includePrismaClient, entry === 'migration');
+
+  if (includePrismaClient) {
+    await copyPrismaClientRuntime(packageRoot);
+  }
 
   if (entry === 'migration') {
     await copyMigrationAssets(packageRoot);
@@ -41,12 +47,14 @@ for (const entry of entries) {
 
 await writeBuildManifest();
 
-async function writePackageJson(packageRoot, includePrismaCli) {
+async function writePackageJson(packageRoot, includePrismaClient, includePrismaCli) {
+  const dependencies = {};
+  if (includePrismaClient) dependencies['@prisma/client'] = '6.19.3';
+  if (includePrismaCli) dependencies.prisma = '6.19.3';
+
   await writeFile(resolve(packageRoot, 'package.json'), JSON.stringify({
     type: 'module',
-    dependencies: includePrismaCli
-      ? { '@prisma/client': '6.19.3', prisma: '6.19.3' }
-      : { '@prisma/client': '6.19.3' }
+    dependencies
   }, null, 2));
 }
 
@@ -85,28 +93,51 @@ async function copyMigrationAssets(packageRoot) {
     filter: source => !shouldExcludeFromLambda(source)
   });
 
-  const prismaCliPackage = resolve(workspaceRoot, 'node_modules/prisma');
-  const targetPrismaCli = resolve(packageRoot, 'node_modules/prisma');
-  if (!existsSync(prismaCliPackage)) {
-    throw new Error('Prisma CLI package is missing. Run `npm ci` first.');
+  await copyNodePackageWithDependencies('prisma', packageRoot, new Set());
+  await downloadMigrationSchemaEngine(packageRoot);
+}
+
+async function copyNodePackageWithDependencies(packageName, packageRoot, copied) {
+  if (copied.has(packageName)) return;
+  copied.add(packageName);
+
+  const sourcePackage = resolve(workspaceRoot, 'node_modules', packageName);
+  const targetPackage = resolve(packageRoot, 'node_modules', packageName);
+  if (!existsSync(sourcePackage)) {
+    throw new Error(`${packageName} package is missing. Run \`npm ci\` first.`);
   }
 
-  await mkdir(targetPrismaCli, { recursive: true });
-  await copyIfExists(resolve(prismaCliPackage, 'package.json'), resolve(targetPrismaCli, 'package.json'));
-  await copyIfExists(resolve(prismaCliPackage, 'build'), resolve(targetPrismaCli, 'build'));
-
-  const prismaEnginesPackage = resolve(workspaceRoot, 'node_modules/@prisma/engines');
-  const targetEngines = resolve(packageRoot, 'node_modules/@prisma/engines');
-  if (existsSync(prismaEnginesPackage)) {
-    await mkdir(targetEngines, { recursive: true });
-    await copyIfExists(resolve(prismaEnginesPackage, 'package.json'), resolve(targetEngines, 'package.json'));
-    await copyMatching(prismaEnginesPackage, targetEngines, file => (
+  if (packageName === '@prisma/engines') {
+    await mkdir(targetPackage, { recursive: true });
+    await copyIfExists(resolve(sourcePackage, 'package.json'), resolve(targetPackage, 'package.json'));
+    await copyMatching(sourcePackage, targetPackage, file => (
       file.includes(lambdaEngineTarget) ||
       file === 'dist/index.js' ||
       file === 'dist/index.d.ts' ||
       file === 'scripts/postinstall.js'
     ));
+  } else {
+    await copyIfExists(sourcePackage, targetPackage);
   }
+
+  const packageJson = JSON.parse(await readFile(resolve(sourcePackage, 'package.json'), 'utf8'));
+  const dependencies = Object.keys(packageJson.dependencies ?? {});
+  for (const dependency of dependencies) {
+    await copyNodePackageWithDependencies(dependency, packageRoot, copied);
+  }
+}
+
+async function downloadMigrationSchemaEngine(packageRoot) {
+  const { BinaryType, download } = require('@prisma/fetch-engine');
+  const { enginesVersion } = require('@prisma/engines-version');
+  const engineTargetFolder = resolve(packageRoot, 'node_modules/@prisma/engines');
+  await mkdir(engineTargetFolder, { recursive: true });
+  await download({
+    binaries: { [BinaryType.SchemaEngineBinary]: engineTargetFolder },
+    binaryTargets: [lambdaEngineTarget],
+    version: enginesVersion,
+    showProgress: false
+  });
 }
 
 async function copyMatching(sourceRoot, targetRoot, predicate) {
@@ -152,9 +183,15 @@ async function walk(rootDir) {
 function shouldExcludeFromLambda(file) {
   const normalised = file.replaceAll('\\', '/');
   const extension = extname(file);
+  const isPrismaProviderWasm = (
+    normalised.includes('/prisma/build/query_engine_bg.') ||
+    normalised.includes('/prisma/build/query_compiler_bg.')
+  );
+
   return (
     extension === '.map' ||
     extension === '.ts' ||
+    (isPrismaProviderWasm && !normalised.includes('.postgresql.')) ||
     normalised.includes('/node_modules/.cache/') ||
     normalised.includes('/.cache/') ||
     normalised.includes('/tests/') ||

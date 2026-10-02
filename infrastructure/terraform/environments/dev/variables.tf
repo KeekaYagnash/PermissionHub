@@ -69,6 +69,22 @@ variable "api_lambda_artifact_key" { type = string }
 variable "provisioning_lambda_artifact_key" { type = string }
 variable "expiry_lambda_artifact_key" { type = string }
 variable "migration_lambda_artifact_key" { type = string }
+variable "api_lambda_artifact_hash" {
+  type    = string
+  default = null
+}
+variable "provisioning_lambda_artifact_hash" {
+  type    = string
+  default = null
+}
+variable "expiry_lambda_artifact_hash" {
+  type    = string
+  default = null
+}
+variable "migration_lambda_artifact_hash" {
+  type    = string
+  default = null
+}
 variable "api_lambda_handler" {
   type    = string
   default = "dist/lambda/api.handler"

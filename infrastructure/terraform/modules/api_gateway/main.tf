@@ -44,6 +44,20 @@ resource "aws_apigatewayv2_route" "health" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
+resource "aws_apigatewayv2_route" "options_root" {
+  api_id             = aws_apigatewayv2_api.this.id
+  route_key          = "OPTIONS /"
+  authorization_type = "NONE"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "options_proxy" {
+  api_id             = aws_apigatewayv2_api.this.id
+  route_key          = "OPTIONS /{proxy+}"
+  authorization_type = "NONE"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
 resource "aws_apigatewayv2_route" "root" {
   api_id             = aws_apigatewayv2_api.this.id
   route_key          = "ANY /"

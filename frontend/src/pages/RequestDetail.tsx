@@ -57,7 +57,7 @@ export default function RequestDetail(){
    <aside className="panel side-panel approval-panel compact-actions">
     <h2>{pending?'Review request':failed?'Provisioning failed':approved?'Ready for provisioning':provisioning?'Provisioning in progress':activeGrant?'Access active':'Request status'}</h2>
     <p className="muted">{pending?'Review the reason and requested access before making a decision.':failed?'Retry after reviewing the failure details.':approved?'Required approvals are complete. Provisioning is now the primary action.':provisioning?'PermissionHub is applying the approved IAM change.':activeGrant?'The approved permission is active.':'No workflow action is currently available.'}</p>
-    {localMode&&<p className="info-note compact">Development provisioning mode enabled.</p>}
+    {localMode&&<p className="info-note compact">Provisioning enabled for the selected AWS account.</p>}
     {canReview&&pending&&<label className="field"><span>Reviewer comment</span><textarea value={comment} onChange={event=>{setComment(event.target.value);setCommentError(undefined)}} placeholder="Optional for approval; required for reject or information requests."/><small>Required for Reject and Request information.</small>{commentError&&<span className="field-error" role="alert">{commentError}</span>}</label>}
     {canReview&&<div className="approval-actions">
      {pending&&canApprove&&<Button onClick={()=>submitReview('APPROVE')} disabled={busy||!approvalAllowed}>Approve request</Button>}

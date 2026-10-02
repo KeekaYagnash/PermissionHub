@@ -11,10 +11,12 @@ import { PageHeader } from '../components/ui';
 export default function Overview(){
  const session=useAuthStore(state=>state.session),userId=session?.user?.id;
  const canViewActivity=can(session,'ACTIVITY_VIEW'),canViewAllRequests=can(session,'REQUEST_VIEW_ALL'),canReview=can(session,'REQUEST_REVIEW'),canManageConnection=can(session,'CONNECTION_MANAGE'),canConnectionView=can(session,'CONNECTION_VIEW');
- const connection=useQuery({queryKey:['connection'],queryFn:api.connection});
  const context=useQuery({queryKey:['auth-context'],queryFn:api.context});
- const requests=useQuery({queryKey:['requests','overview'],queryFn:()=>api.requests()});
- const activity=useQuery({queryKey:['activity'],queryFn:api.activity,enabled:canViewActivity});
+ const activeAwsAccountRecordId=context.data?.activeAwsAccountRecordId??context.data?.activeAccountId;
+ const hasActiveAwsAccount=Boolean(activeAwsAccountRecordId);
+ const connection=useQuery({queryKey:['connection',activeAwsAccountRecordId],queryFn:api.connection,enabled:canConnectionView&&hasActiveAwsAccount});
+ const requests=useQuery({queryKey:['requests','overview',activeAwsAccountRecordId],queryFn:()=>api.requests(),enabled:hasActiveAwsAccount});
+ const activity=useQuery({queryKey:['activity',activeAwsAccountRecordId],queryFn:api.activity,enabled:canViewActivity&&hasActiveAwsAccount});
  const list=requests.data?.data??[],granted=list.filter(isGrantedRequest),open=list.filter(isOpenRequest),needsResponse=list.filter(request=>needsRequesterResponse(request,userId)),expiring=granted.filter(expiringSoon),pending=list.filter(request=>request.status==='Pending approval'),highRisk=pending.filter(request=>['High','Critical'].includes(request.priority)||request.scope.type==='ALL'),failures=list.filter(request=>request.status==='Provisioning failed'),pendingProvision=list.filter(request=>request.status==='Approved'),connectionIssues=(context.data?.accounts??[]).filter(account=>!['CONNECTED','DEGRADED'].includes(account.connectionStatus));
  const title=canViewAllRequests?'AWS permission operations':canReview?'Approval workbench':'My AWS access requests';
  return <div className="page role-overview">
@@ -23,7 +25,7 @@ export default function Overview(){
   {canReview&&!canViewAllRequests&&<ApproverOverview pending={pending} highRisk={highRisk} open={open} granted={granted}/>}
   {canViewAllRequests&&!canManageConnection&&<SecurityOverview pending={pending} highRisk={highRisk} expiring={expiring} failures={failures} granted={granted} connectionIssues={connectionIssues}/>}
   {canManageConnection&&<AdminOverview pending={pending} pendingProvision={pendingProvision} failures={failures} granted={granted} connectionIssues={connectionIssues}/>}
-  {canConnectionView&&<section className="panel connection-panel"><div className="panel-title"><PlugZap size={17}/>AWS connection health</div><dl><div><dt>Status</dt><dd>{connection.data?.connected?'Connected':'Disconnected'}</dd></div><div><dt>Account ID</dt><dd>{connection.data?.accountId}</dd></div><div><dt>Region</dt><dd>{connection.data?.region}</dd></div><div><dt>Principal</dt><dd className="mono">{connection.data?.principalArn}</dd></div></dl></section>}
+  {canConnectionView&&<section className="panel connection-panel"><div className="panel-title"><PlugZap size={17}/>AWS connection health</div><dl><div><dt>Status</dt><dd>{hasActiveAwsAccount?(connection.data?.connected?'Connected':'Disconnected'):'No account selected'}</dd></div><div><dt>Account ID</dt><dd>{connection.data?.accountId??'Select an AWS account'}</dd></div><div><dt>Region</dt><dd>{connection.data?.region??'—'}</dd></div><div><dt>Principal</dt><dd className="mono">{connection.data?.principalArn??'—'}</dd></div></dl></section>}
   {canViewActivity&&<section className="panel"><div className="panel-title">Recent activity</div><div className="activity-list">{(activity.data?.data??[]).slice(0,8).map(event=><div key={event.id}><time>{fmt(event.timestamp)}</time><strong>{event.action}</strong><span>{event.actor}{event.requestId?` · ${event.requestId}`:''}</span></div>)}</div></section>}
  </div>;
 }

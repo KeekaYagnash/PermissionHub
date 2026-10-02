@@ -20,9 +20,13 @@ export async function handler() {
   }
 
   const startedAt = Date.now();
+  const migrationMode = process.env.DATABASE_MIGRATION_MODE === 'push' ? 'push' : 'migrate';
+  const prismaArgs = migrationMode === 'push'
+    ? [prismaCli, 'db', 'push', '--accept-data-loss', '--skip-generate', '--schema', schemaPath]
+    : [prismaCli, 'migrate', 'deploy', '--schema', schemaPath];
   const { stdout, stderr } = await execFileAsync(
     process.execPath,
-    [prismaCli, 'migrate', 'deploy', '--schema', schemaPath],
+    prismaArgs,
     {
       cwd: taskRoot,
       env: process.env,
@@ -33,7 +37,8 @@ export async function handler() {
 
   return {
     ok: true,
-    message: 'Prisma migrations applied.',
+    mode: migrationMode,
+    message: migrationMode === 'push' ? 'Prisma schema pushed.' : 'Prisma migrations applied.',
     durationMs: Date.now() - startedAt,
     stdout: trimOutput(stdout),
     stderr: trimOutput(stderr)

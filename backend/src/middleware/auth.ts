@@ -12,7 +12,7 @@ export async function authenticate(req:AuthenticatedRequest,_res:Response,next:N
  try{
  if(!env.AUTH_ENABLED&&!env.ENABLE_DEV_AUTH)return next(new ApiError(503,'Authentication is disabled without a configured development identity.','AUTH_CONFIGURATION_REQUIRED'));
  if(!req.session.user&&!env.AUTH_ENABLED&&env.NODE_ENV!=='production'&&env.DEV_AUTH_USER_ID){const selected=identityDomain.findDevelopmentUser(env.DEV_AUTH_USER_ID);if(selected)req.session.user=identityDomain.sessionUser(selected,'development')}
- if(!req.session.user){const user=cognitoUser(req);if(user)req.session.user=user}
+ const jwtUser=cognitoUser(req),existing=req.session.user;if(jwtUser&&!existing)req.session.user=jwtUser;else if(jwtUser&&existing?.provider==='cognito'){existing.email=jwtUser.email;existing.displayName=jwtUser.displayName;existing.providerSubject=jwtUser.providerSubject}
  if(req.session.user){await persistSessionUser(req.session.user);await hydrateSessionPreferences(req.session.user);await loadDevelopmentRoleGrants(req.session.user);req.session.user=req.session.user}
  const user=req.session.user;if(!user)return next(new ApiError(401,'Authentication required','UNAUTHENTICATED'));
  req.sessionUser=user;

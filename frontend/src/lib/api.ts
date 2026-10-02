@@ -6,8 +6,29 @@ import { getAccessToken } from './cognito';
 export const http=axios.create({baseURL:import.meta.env.VITE_API_BASE_URL||'/api',withCredentials:true});
 let csrfToken='';
 export const setCsrfToken=(token:string)=>{csrfToken=token};
+export class ClientApiError extends Error{
+ status?:number;
+ code?:string;
+ correlationId?:string;
+ details?:unknown;
+ response?:unknown;
+ constructor(input:{message:string;status?:number;code?:string;correlationId?:string;details?:unknown;response?:unknown}){
+  super(input.message);
+  this.name='ClientApiError';
+  this.status=input.status;
+  this.code=input.code;
+  this.correlationId=input.correlationId;
+  this.details=input.details;
+  this.response=input.response;
+ }
+}
+function normaliseApiError(error:any){
+ const payload=error?.response?.data?.error;
+ if(payload)return new ClientApiError({message:payload.message??'Request failed.',status:error.response?.status,code:payload.code,correlationId:payload.correlationId,details:payload.details??payload.blockingFields,response:error.response});
+ return new ClientApiError({message:error?.message??'Network request failed.',status:error?.response?.status,response:error?.response});
+}
 http.interceptors.request.use(config=>{const token=getAccessToken();if(token)config.headers.Authorization=`Bearer ${token}`;if(config.method&&!['get','head','options'].includes(config.method.toLowerCase())&&csrfToken)config.headers['X-CSRF-Token']=csrfToken;return config});
-http.interceptors.response.use(response=>response,error=>{if(error?.response?.status===401&&!String(error?.config?.url??'').includes('/auth/session')&&!location.pathname.startsWith('/login'))location.assign('/session-expired');return Promise.reject(error)});
+http.interceptors.response.use(response=>response,error=>{if(error?.response?.status===401&&!String(error?.config?.url??'').includes('/auth/session')&&!location.pathname.startsWith('/login'))location.assign('/session-expired');return Promise.reject(normaliseApiError(error))});
 const unwrap=<T>(value:{data:{data:T}})=>value.data.data;
 const unwrapPage=<T>(value:{data:Page<T>})=>value.data;
 
@@ -17,6 +38,7 @@ export const api={
  developmentLogin:(userId:string)=>http.post('/auth/development-login',{userId}).then(unwrap<AuthSession>),
  logout:()=>http.post('/auth/logout').then(unwrap<{redirectUrl:string}>),
  selectTenant:(tenantId:string)=>http.post('/auth/select-tenant',{tenantId}).then(unwrap<AuthSession>),
+ setOrganization:(companyName:string)=>http.post('/auth/organization',{companyName}).then(unwrap<AuthSession>),
  selectAccount:async(accountRecordId:string)=>{await http.post('/aws/active-account',{accountRecordId});return http.get('/auth/session').then(unwrap<AuthSession>)},
  clearAccount:()=>http.post('/auth/clear-account').then(unwrap<AuthSession>),
  context:()=>http.get('/auth/context').then(unwrap<AppContext>),
@@ -66,6 +88,7 @@ export const api={
  reassignApprover:(requestId:string,approverUserId:string)=>http.post(`/requests/${requestId}/reassign-approver`,{approverUserId}).then(unwrap<any>),
  validateProvisionRole:(accountRecordId:string)=>http.post(`/aws/accounts/${encodeURIComponent(accountRecordId)}/validate-provision-role`).then(unwrap<any>),
  adminDirectory:()=>http.get('/admin/directory').then(unwrap<any>),
+ addTenantUser:(input:unknown)=>http.post('/admin/users',input).then(unwrap<any>),
  approvalPolicies:()=>http.get('/admin/approval-policies').then(unwrap<any[]>),
  saveScope:(scope:unknown)=>http.post('/admin/scopes',scope).then(unwrap<any>),
  onboardAccount:(input:unknown)=>http.post('/admin/accounts/onboarding',input).then(unwrap<any>)

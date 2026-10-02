@@ -17,6 +17,7 @@ const schema=z.object({
  CSRF_ENABLED:z.string().optional().transform(value=>value===undefined?true:value==='true'),
  SESSION_COOKIE_NAME:z.string().default('permissionhub.sid'),
  SESSION_MAX_AGE_MINUTES:z.coerce.number().int().min(5).max(1440).default(480),
+ COGNITO_DEFAULT_APP_ROLE:z.enum(['REQUESTER','ACCOUNT_APPROVER','OU_ADMIN','SECURITY_REVIEWER','PROVISIONER','ORGANISATION_ADMIN','PLATFORM_ADMIN']).default('REQUESTER'),
  FRONTEND_URL:z.string().default('http://localhost:5173'),
  APP_AWS_REGION:z.string().optional(),
  AWS_REGION:z.string().default(process.env.APP_AWS_REGION||'af-south-1'),
@@ -48,6 +49,8 @@ const schema=z.object({
  ,CROSS_ACCOUNT_PROVISIONING_ENABLED:z.string().transform(v=>v==='true').default(false)
  ,ALLOW_DEV_SELF_APPROVAL:z.string().optional().transform(value=>value==='true').default(false)
  ,ALLOW_LOCAL_PROVISIONING:z.string().optional().transform(value=>value==='true').default(false)
+ ,GLOBAL_PROVISIONING_ENABLED:z.string().optional().transform(value=>value==='true').default(false)
+ ,DEMO_PROVISIONING_BYPASS_ENABLED:z.string().optional().transform(value=>value==='true').default(false)
  ,AWS_LIVE_TEST_ALLOWED_PRINCIPALS:z.string().default('')
  ,EXPIRY_REVOCATION_MODE:z.enum(['disabled','manual','worker']).default('disabled')
  ,AWS_ROLE_SESSION_DURATION_SECONDS:z.coerce.number().int().min(900).max(3600).optional()
@@ -61,9 +64,11 @@ export const env=schema.parse(process.env);
 process.env.DATABASE_URL=env.DATABASE_URL;
 if(env.NODE_ENV==='production'&&env.ENABLE_DEV_AUTH)throw new Error('ENABLE_DEV_AUTH must never be enabled in production.');
 if(env.NODE_ENV==='production'&&env.ALLOW_LOCAL_PROVISIONING)throw new Error('ALLOW_LOCAL_PROVISIONING must never be enabled in production.');
+if(env.NODE_ENV==='production'&&env.DEMO_PROVISIONING_BYPASS_ENABLED&&!(env.AWS_CONNECTION_MODE==='manual'&&env.AWS_PROVISIONING_MODE==='live'&&env.ENABLE_LIVE_PROVISIONING&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS'))throw new Error('DEMO_PROVISIONING_BYPASS_ENABLED requires manual live provisioning configuration.');
+if(env.NODE_ENV==='production'&&env.GLOBAL_PROVISIONING_ENABLED&&!(env.AWS_CONNECTION_MODE==='manual'&&env.AWS_PROVISIONING_MODE==='live'&&env.ENABLE_LIVE_PROVISIONING&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS'))throw new Error('GLOBAL_PROVISIONING_ENABLED requires manual live provisioning configuration.');
 if(env.NODE_ENV==='production'&&env.AWS_CONNECTION_MODE==='manual'&&env.ENABLE_AWS_DEMO_DATA)throw new Error('AWS demo data must not be enabled in production manual mode.');
 if(env.NODE_ENV==='production'&&env.SESSION_SECRET.startsWith('development-only'))throw new Error('SESSION_SECRET must be configured in production.');
 if(env.NODE_ENV==='production'&&!env.PERMISSIONHUB_CREDENTIAL_ENCRYPTION_KEY)throw new Error('PERMISSIONHUB_CREDENTIAL_ENCRYPTION_KEY must be configured before storing access-key connections in production.');
 export const liveProvisioningEnabled=env.AWS_PROVISIONING_MODE==='live'&&env.ENABLE_LIVE_PROVISIONING&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS';
-export const isLocalProvisioningEnabled=()=>env.NODE_ENV==='development'&&env.ALLOW_LOCAL_PROVISIONING;
+export const isLocalProvisioningEnabled=()=>env.NODE_ENV==='development'&&env.ALLOW_LOCAL_PROVISIONING||env.DEMO_PROVISIONING_BYPASS_ENABLED||env.GLOBAL_PROVISIONING_ENABLED;
 export const liveTestAllowedPrincipals=env.AWS_LIVE_TEST_ALLOWED_PRINCIPALS.split(',').map(value=>value.trim()).filter(Boolean);

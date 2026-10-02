@@ -367,6 +367,9 @@ model Request {
   targetName             String
   targetArn              String
   permissionSource       String?
+  group                  Json?
+  role                   Json?
+  members                Json?
   scope                  Json
   duration               String
   startDate              DateTime
@@ -381,6 +384,10 @@ model Request {
   provisioningAccountId  String?
   provisioningRoleArn    String?
   status                 RequestStatus          @default(DRAFT)
+  approvalComment        String?
+  provisioningResult     Json?
+  simulationResult       Json?
+  timeline               Json                  @default("[]")
   submittedAt            DateTime?
   createdAt              DateTime               @default(now())
   updatedAt              DateTime               @updatedAt
@@ -399,8 +406,11 @@ model RequestItem {
   requestId               String
   request                 Request     @relation(fields: [requestId], references: [id], onDelete: Cascade)
   mode                    RequestMode
+  operation               String?
   policyArn               String?
   policyName              String?
+  generatedPolicyName     String?
+  requestedPolicyName     String?
   actions                 String[]
   generatedPolicyDocument Json?
 }

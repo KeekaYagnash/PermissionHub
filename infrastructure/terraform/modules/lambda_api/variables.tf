@@ -3,6 +3,10 @@ variable "runtime" { type = string }
 variable "handler" { type = string }
 variable "artifact_s3_bucket" { type = string }
 variable "artifact_s3_key" { type = string }
+variable "artifact_source_hash" {
+  type    = string
+  default = null
+}
 variable "memory_size" { type = number }
 variable "timeout" { type = number }
 variable "reserved_concurrency" {

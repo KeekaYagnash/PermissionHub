@@ -25,3 +25,4 @@ backend/lambda-dist/
 *.tfstate.*
 *.tfplan
 tfplan*
+**/lambda-artifacts.auto.tfvars.json
