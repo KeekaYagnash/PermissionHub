@@ -58,5 +58,5 @@ function cognitoUser(req:AuthenticatedRequest){
  if(!claims?.sub)return undefined;
  const rawGroups=claims['cognito:groups'];
  const groups=Array.isArray(rawGroups)?rawGroups:typeof rawGroups==='string'?rawGroups.split(',').map(item=>item.trim()).filter(Boolean):[];
- return identityDomain.sessionUserFromCognito({sub:String(claims.sub),email:claims.email?String(claims.email):undefined,name:claims.name?String(claims.name):undefined,groups});
+ return identityDomain.sessionUserFromCognito({sub:String(claims.sub),email:claims.email?String(claims.email):undefined,emailVerified:claims.email_verified===true||claims.email_verified==='true',name:claims.name?String(claims.name):undefined,groups});
 }

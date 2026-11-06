@@ -1,0 +1,41 @@
+name: Verify PermissionHub OIDC (read-only)
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, prod]
+        default: dev
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'dev' && 'development' || 'production' }}
+    strategy:
+      matrix:
+        role: [terraform, backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require selected deployment branch and explicit role
+        env:
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          ROLE: ${{ matrix.role == 'terraform' && vars.AWS_INFRA_ROLE_ARN || matrix.role == 'backend' && vars.AWS_BACKEND_ROLE_ARN || vars.AWS_FRONTEND_ROLE_ARN }}
+        run: |
+          node infrastructure/scripts/ci.mjs environment
+          test -n "$ROLE" || { echo 'Required OIDC role variable missing; configure selected environment.'; exit 1; }
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ matrix.role == 'terraform' && vars.AWS_INFRA_ROLE_ARN || matrix.role == 'backend' && vars.AWS_BACKEND_ROLE_ARN || vars.AWS_FRONTEND_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'af-south-1' }}
+      - name: Show assumed identity (no resource mutations)
+        env:
+          EXPECTED_ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          identity=$(aws sts get-caller-identity)
+          echo "$identity"
+          test -n "$EXPECTED_ACCOUNT" && test "$(echo "$identity" | jq -r .Account)" = "$EXPECTED_ACCOUNT"

@@ -1,4 +1,8 @@
 variable "name" { type = string }
+variable "permissions_boundary_arn" {
+  type    = string
+  default = null
+}
 variable "runtime" { type = string }
 variable "handler" { type = string }
 variable "artifact_s3_bucket" { type = string }

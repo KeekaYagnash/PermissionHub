@@ -9,7 +9,8 @@ resource "random_password" "credential_encryption_key" {
 }
 
 resource "aws_secretsmanager_secret" "app" {
-  name                    = "${var.name}/app"
+  name                    = var.secret_name_prefix == null ? "${var.name}/app" : null
+  name_prefix             = var.secret_name_prefix
   recovery_window_in_days = 30
   tags                    = var.tags
 

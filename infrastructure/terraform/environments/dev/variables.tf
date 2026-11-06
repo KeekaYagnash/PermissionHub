@@ -1,4 +1,9 @@
 variable "aws_region" { type = string }
+variable "runtime_permissions_boundary_arn" {
+  type        = string
+  default     = null
+  description = "Boundary supplied by the independent GitHub OIDC bootstrap. CI role creation requires it."
+}
 variable "environment" {
   type    = string
   default = "dev"

@@ -26,13 +26,16 @@ resource "aws_db_instance" "this" {
   backup_retention_period    = var.backup_retention_period
   deletion_protection        = var.deletion_protection
   skip_final_snapshot        = var.skip_final_snapshot
+  final_snapshot_identifier  = var.final_snapshot_identifier
+  delete_automated_backups   = var.delete_automated_backups
   auto_minor_version_upgrade = true
   copy_tags_to_snapshot      = true
   tags                       = merge(var.tags, { Name = "${var.name}-postgres" })
 }
 
 resource "aws_secretsmanager_secret" "database" {
-  name                    = "${var.name}/database"
+  name                    = var.database_secret_name_prefix == null ? "${var.name}/database" : null
+  name_prefix             = var.database_secret_name_prefix
   recovery_window_in_days = 7
   tags                    = var.tags
 }

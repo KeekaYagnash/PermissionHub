@@ -5,7 +5,8 @@ resource "aws_cloudwatch_log_group" "this" {
 }
 
 resource "aws_iam_role" "this" {
-  name = "${var.name}-role"
+  permissions_boundary = var.permissions_boundary_arn
+  name                 = "${var.name}-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -52,6 +53,7 @@ resource "aws_iam_role_policy" "runtime" {
 }
 
 resource "aws_lambda_function" "this" {
+  architectures                  = ["x86_64"]
   function_name                  = var.name
   runtime                        = var.runtime
   handler                        = var.handler
@@ -72,7 +74,7 @@ resource "aws_lambda_function" "this" {
     variables = var.environment_variables
   }
 
-  depends_on = [aws_cloudwatch_log_group.this]
+  depends_on = [aws_cloudwatch_log_group.this, aws_iam_role_policy_attachment.basic, aws_iam_role_policy_attachment.vpc, aws_iam_role_policy.runtime]
   tags       = var.tags
 }
 

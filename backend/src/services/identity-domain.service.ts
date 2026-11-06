@@ -1,6 +1,8 @@
 import type { AccountType,AdminScope,AppRole,AwsAccountContext,SessionUser,TenantMembership } from '../types.js';
 import { env } from '../config/env.js';
 import { prisma } from '../config/database.js';
+import { createHash } from 'node:crypto';
+import { ApiError } from '../utils/http.js';
 
 export interface DirectoryUser {id:string;email:string;displayName:string;providerSubject:string;memberships:TenantMembership[]}
 export interface OrganisationRecord {id:string;tenantId:string;organisationId:string;name:string;managementAccountId:string;connectionStatus:string;lastSyncedAt?:string}
@@ -38,12 +40,11 @@ export class IdentityDomainService {
  private manualAccounts:AwsAccountContext[]=[];
  findDevelopmentUser(id:string){return developmentUsers.find(user=>user.id===id)}
  findByProviderSubject(provider:string,subject:string,email?:string){return developmentUsers.find(user=>user.providerSubject===subject||(provider!=='development'&&email&&user.email.toLowerCase()===email.toLowerCase()))}
- sessionUserFromCognito(claims:{sub:string;email?:string;name?:string;groups?:string[]}):SessionUser{
+ sessionUserFromCognito(claims:{sub:string;email?:string;emailVerified?:boolean;name?:string;groups?:string[]}):SessionUser{
   const matched=this.findByProviderSubject('cognito',claims.sub,claims.email);
-  if(matched)return this.sessionUser(matched,'cognito');
-  const role=(claims.groups?.find(group=>['ORGANISATION_ADMIN','SECURITY_REVIEWER','PROVISIONER','REQUESTER','ACCOUNT_APPROVER','OU_ADMIN','PLATFORM_ADMIN'].includes(group)) as AppRole|undefined)??env.COGNITO_DEFAULT_APP_ROLE;
+  if(matched&&env.NODE_ENV!=='production'&&env.ENABLE_AWS_DEMO_DATA)return this.sessionUser(matched,'cognito');
   const id=`cognito_${claims.sub.replace(/[^A-Za-z0-9_-]/g,'_').slice(0,48)}`;
-  return this.sessionUser({id,email:claims.email??`${id}@cognito.local`,displayName:claims.name??claims.email??'Cognito demo user',providerSubject:claims.sub,memberships:[membership(`membership_${id}`,role,[scope('TENANT',tenant.id,{canView:true,canRequest:true,canApprove:true,canProvision:true,canRevoke:true,canManageConfiguration:role==='ORGANISATION_ADMIN'})])]},'cognito');
+  return {...this.sessionUser({id,email:claims.email??`${id}@cognito.local`,displayName:claims.name??claims.email??'Cognito demo user',providerSubject:claims.sub,memberships:[]},'cognito'),emailVerified:claims.emailVerified};
  }
  sessionUser(user:DirectoryUser,provider:string):SessionUser{const memberships=user.memberships.map(membership=>({...membership,scopes:membership.scopes.map(item=>({...item}))}));if(provider==='development'&&!env.AUTH_ENABLED&&env.ENABLE_DEV_AUTH&&env.DEV_AUTH_USER_ID===user.id){const membership=memberships[0];if(membership&&!membership.scopes.some(item=>item.scopeType==='TENANT'&&item.scopeId===membership.tenantId&&item.canManageConfiguration))membership.scopes.push(scope('TENANT',membership.tenantId,{canView:true,canRequest:true,canManageConfiguration:true}))}return {id:user.id,email:user.email,displayName:user.displayName,provider,providerSubject:user.providerSubject,activeTenantId:memberships.length===1?memberships[0]!.tenantId:undefined,activeAccountId:undefined,permissions:[],memberships,roleAssignments:[]}}
  tenantsFor(user:SessionUser){return user.memberships.filter(m=>m.status==='ACTIVE').map(m=>({id:m.tenantId,name:m.tenantName,slug:m.tenantSlug,role:m.role}))}
@@ -67,9 +68,9 @@ export const accountTypeLabel=(type:AccountType)=>type.replaceAll('_',' ').toLow
 
 export function organisationSlug(name:string){return name.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,48)||'organisation'}
 export function configureSessionOrganisation(user:SessionUser,companyName:string){
- const name=companyName.trim(),slug=organisationSlug(name),tenantId=`tenant_${slug}`,membershipId=`membership_${user.id}_${slug}`.replace(/[^A-Za-z0-9_-]/g,'_');
+ const name=companyName.trim(),slug=`${organisationSlug(name)}-${createHash('sha256').update(user.id).digest('hex').slice(0,12)}`,tenantId=`tenant_${slug}`,membershipId=`membership_${user.id}_${slug}`.replace(/[^A-Za-z0-9_-]/g,'_');
  const next=membership(membershipId,'ORGANISATION_ADMIN',[scope('TENANT',tenantId,{canView:true,canRequest:true,canApprove:true,canProvision:true,canRevoke:true,canManageConfiguration:true})]);
- next.tenantName=name;next.tenantSlug=slug;
+ next.tenantId=tenantId;next.tenantName=name;next.tenantSlug=slug;
  user.memberships=[next,...user.memberships.filter(item=>item.tenantId!==tenantId)];
  user.activeTenantId=tenantId;
  user.activeAwsAccountRecordId=undefined;
@@ -82,24 +83,47 @@ export async function persistDevelopmentIdentity(user:SessionUser){
  const membership=user.memberships.find(item=>item.tenantId===user.activeTenantId);if(!membership)return;
  try{await prisma.$transaction(async tx=>{
    await tx.tenant.upsert({where:{id:membership.tenantId},create:{id:membership.tenantId,name:membership.tenantName,slug:membership.tenantSlug,status:'ACTIVE'},update:{name:membership.tenantName,status:'ACTIVE'}});
-   await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()},update:{email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()}});
-   await tx.tenantMembership.upsert({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}},create:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'},update:{role:membership.role,status:'ACTIVE'}});
+   await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date()},update:{email:user.email,displayName:user.displayName,lastLoginAt:new Date()}});
+   const existingMembership=await tx.tenantMembership.findUnique({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}}});
+   if(existingMembership)return;
+   await tx.tenantMembership.create({data:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'}});
    for(const item of membership.scopes){const scope={scopeType:item.scopeType,scopeId:item.scopeId,includeDescendants:item.includeDescendants,canView:item.canView,canRequest:item.canRequest,canApprove:item.canApprove,canProvision:item.canProvision,canRevoke:item.canRevoke,canManageConfiguration:item.canManageConfiguration};await tx.adminScope.upsert({where:{tenantMembershipId_scopeType_scopeId:{tenantMembershipId:membership.id,scopeType:item.scopeType,scopeId:item.scopeId}},create:{tenantMembershipId:membership.id,...scope},update:scope})}
  })}catch{}
 }
 
+async function bindCognitoIdentity(user:SessionUser){
+ if(user.provider!=='cognito')return;
+ const identity=await prisma.authIdentity.findUnique({where:{provider_providerSubject:{provider:'cognito',providerSubject:user.providerSubject}},include:{user:true}});
+ if(identity){if(identity.user.status!=='ACTIVE')throw new ApiError(403,'This PermissionHub user is inactive.','USER_INACTIVE');user.id=identity.userId;user.email=identity.user.email;return;}
+ // Only a verified provider email may claim a pre-created organisation membership.
+ if(!user.emailVerified)throw new ApiError(403,'Verify your email before continuing.','EMAIL_VERIFICATION_REQUIRED');
+ const stored=await prisma.$transaction(async tx=>{
+  const existing=await tx.user.findUnique({where:{email:user.email.toLowerCase()}});
+  if(existing&&!['ACTIVE','INVITED'].includes(existing.status))throw new ApiError(403,'This PermissionHub user is inactive.','USER_INACTIVE');
+  const record=existing??await tx.user.upsert({where:{email:user.email.toLowerCase()},create:{id:user.id,email:user.email.toLowerCase(),displayName:user.displayName,status:'ACTIVE'},update:{}});
+  const bound=await tx.authIdentity.upsert({where:{provider_providerSubject:{provider:'cognito',providerSubject:user.providerSubject}},create:{provider:'cognito',providerSubject:user.providerSubject,providerEmail:user.email,userId:record.id},update:{}});
+  if(bound.userId!==record.id)throw new ApiError(403,'This identity is already linked to a different user.','IDENTITY_LINK_CONFLICT');
+  if(record.status==='INVITED')await tx.user.update({where:{id:record.id},data:{status:'ACTIVE'}});
+  return record;
+ });
+ user.id=stored.id;
+}
+
 export async function persistSessionUser(user:SessionUser){
  if(process.env.VITEST)return user;
+ await bindCognitoIdentity(user);
  const membership=user.activeTenantId?user.memberships.find(item=>item.tenantId===user.activeTenantId):user.memberships[0];
  if(!membership)return user;
  try{
   await prisma.$transaction(async tx=>{
    await tx.tenant.upsert({where:{id:membership.tenantId},create:{id:membership.tenantId,name:membership.tenantName,slug:membership.tenantSlug,status:'ACTIVE'},update:{name:membership.tenantName,status:'ACTIVE'}});
-   await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date(),activeTenantId:user.activeTenantId},update:{email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date(),activeTenantId:user.activeTenantId}});
-   await tx.tenantMembership.upsert({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}},create:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'},update:{role:membership.role,status:'ACTIVE'}});
-   for(const item of membership.scopes){const data={scopeType:item.scopeType,scopeId:item.scopeId,includeDescendants:item.includeDescendants,canView:item.canView,canRequest:item.canRequest,canApprove:item.canApprove,canProvision:item.canProvision,canRevoke:item.canRevoke,canManageConfiguration:item.canManageConfiguration};await tx.adminScope.upsert({where:{tenantMembershipId_scopeType_scopeId:{tenantMembershipId:membership.id,scopeType:item.scopeType,scopeId:item.scopeId}},create:{tenantMembershipId:membership.id,...data},update:data})}
+   await tx.user.upsert({where:{id:user.id},create:{id:user.id,email:user.email,displayName:user.displayName,status:'ACTIVE',lastLoginAt:new Date(),activeTenantId:user.activeTenantId},update:{email:user.email,displayName:user.displayName,lastLoginAt:new Date(),activeTenantId:user.activeTenantId}});
+   const existingMembership=await tx.tenantMembership.findUnique({where:{tenantId_userId:{tenantId:membership.tenantId,userId:user.id}}});
+   if(existingMembership)return;
+   await tx.tenantMembership.create({data:{id:membership.id,tenantId:membership.tenantId,userId:user.id,role:membership.role,status:'ACTIVE'}});
+   for(const item of membership.scopes){const data={scopeType:item.scopeType,scopeId:item.scopeId,includeDescendants:item.includeDescendants,canView:item.canView,canRequest:item.canRequest,canApprove:item.canApprove,canProvision:item.canProvision,canRevoke:item.canRevoke,canManageConfiguration:item.canManageConfiguration};await tx.adminScope.upsert({where:{tenantMembershipId_scopeType_scopeId:{tenantMembershipId:membership.id,scopeType:item.scopeType,scopeId:item.scopeId}},create:{tenantMembershipId:membership.id,...data},update:{}})}
   });
- }catch{}
+ }catch{throw new ApiError(503,'Unable to persist your organisation session. Please retry.','SESSION_PERSISTENCE_UNAVAILABLE')}
  return user;
 }
 
@@ -107,12 +131,13 @@ export async function hydrateSessionPreferences(user:SessionUser){
  if(process.env.VITEST)return user;
  try{
   const memberships=await prisma.tenantMembership.findMany({where:{userId:user.id,status:'ACTIVE'},include:{tenant:true,adminScopes:true}});
-  if(memberships.length)user.memberships=memberships.map(item=>({id:item.id,tenantId:item.tenantId,tenantName:item.tenant.name,tenantSlug:item.tenant.slug,role:item.role,status:item.status,scopes:item.adminScopes.map(scope=>({scopeType:scope.scopeType,scopeId:scope.scopeId,includeDescendants:scope.includeDescendants,canView:scope.canView,canRequest:scope.canRequest,canApprove:scope.canApprove,canProvision:scope.canProvision,canRevoke:scope.canRevoke,canManageConfiguration:scope.canManageConfiguration}))}));
+  user.memberships=memberships.map(item=>({id:item.id,tenantId:item.tenantId,tenantName:item.tenant.name,tenantSlug:item.tenant.slug,role:item.role,status:item.status,scopes:item.adminScopes.map(scope=>({scopeType:scope.scopeType,scopeId:scope.scopeId,includeDescendants:scope.includeDescendants,canView:scope.canView,canRequest:scope.canRequest,canApprove:scope.canApprove,canProvision:scope.canProvision,canRevoke:scope.canRevoke,canManageConfiguration:scope.canManageConfiguration}))}));
+  if(!user.memberships.some(item=>item.tenantId===user.activeTenantId))user.activeTenantId=user.memberships.length===1?user.memberships[0]!.tenantId:undefined;
   const rows=await prisma.$queryRawUnsafe<Array<{activeTenantId:string|null;activeAwsAccountRecordId:string|null}>>('SELECT "activeTenantId", "activeAwsAccountRecordId" FROM "User" WHERE id = $1 LIMIT 1',user.id);
   const preference=rows[0];if(!preference)return user;
   if(preference.activeTenantId&&user.memberships.some(item=>item.tenantId===preference.activeTenantId&&item.status==='ACTIVE'))user.activeTenantId=preference.activeTenantId;
   if(preference.activeAwsAccountRecordId)user.activeAwsAccountRecordId=user.activeAccountId=preference.activeAwsAccountRecordId;
- }catch{}
+ }catch{throw new ApiError(503,'Unable to load current organisation access. Please retry.','SESSION_MEMBERSHIP_UNAVAILABLE')}
  return user;
 }
 

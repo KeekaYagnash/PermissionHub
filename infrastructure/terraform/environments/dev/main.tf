@@ -25,7 +25,7 @@ locals {
     DATABASE_HOST                          = var.enable_rds_proxy ? module.rds_proxy[0].endpoint : module.rds.address
     DATABASE_PORT                          = "5432"
     DATABASE_NAME                          = "permissionhub"
-    DATABASE_MIGRATION_MODE                = "push"
+    DATABASE_MIGRATION_MODE                = "migrate"
     DATABASE_SECRET_ARN                    = module.rds.secret_arn
     APP_SECRET_ARN                         = module.secrets.app_secret_arn
     PROVISIONING_QUEUE_URL                 = module.queues.queue_url
@@ -70,18 +70,19 @@ resource "aws_vpc_endpoint" "interface" {
 }
 
 module "rds" {
-  source                  = "../../modules/rds"
-  name                    = local.name
-  subnet_ids              = module.networking.private_db_subnet_ids
-  security_group_id       = module.security.rds_security_group_id
-  instance_class          = "db.t4g.micro"
-  allocated_storage       = 20
-  postgres_engine_version = var.postgres_engine_version
-  multi_az                = false
-  backup_retention_period = 3
-  deletion_protection     = false
-  skip_final_snapshot     = true
-  tags                    = local.tags
+  database_secret_name_prefix = "${local.name}/database-"
+  source                      = "../../modules/rds"
+  name                        = local.name
+  subnet_ids                  = module.networking.private_db_subnet_ids
+  security_group_id           = module.security.rds_security_group_id
+  instance_class              = "db.t4g.micro"
+  allocated_storage           = 20
+  postgres_engine_version     = var.postgres_engine_version
+  multi_az                    = false
+  backup_retention_period     = 3
+  deletion_protection         = false
+  skip_final_snapshot         = true
+  tags                        = local.tags
 }
 
 module "rds_proxy" {
@@ -96,9 +97,10 @@ module "rds_proxy" {
 }
 
 module "secrets" {
-  source = "../../modules/secrets"
-  name   = "dev/${local.name}"
-  tags   = local.tags
+  secret_name_prefix = "${local.name}/app-"
+  source             = "../../modules/secrets"
+  name               = "dev/${local.name}"
+  tags               = local.tags
 }
 
 module "cognito" {
@@ -123,6 +125,7 @@ module "queues" {
 }
 
 module "api_lambda" {
+  permissions_boundary_arn    = var.runtime_permissions_boundary_arn
   source                      = "../../modules/lambda_api"
   name                        = "${local.name}-api"
   runtime                     = var.lambda_runtime
@@ -146,6 +149,7 @@ module "api_lambda" {
 }
 
 module "provisioning_lambda" {
+  permissions_boundary_arn    = var.runtime_permissions_boundary_arn
   source                      = "../../modules/lambda_provisioning"
   name                        = "${local.name}-provisioning"
   runtime                     = var.lambda_runtime
@@ -169,45 +173,47 @@ module "provisioning_lambda" {
 }
 
 module "expiry_lambda" {
-  source                = "../../modules/lambda_expiry"
-  name                  = "${local.name}-expiry"
-  runtime               = var.lambda_runtime
-  handler               = var.expiry_lambda_handler
-  artifact_s3_bucket    = var.lambda_artifact_bucket
-  artifact_s3_key       = var.expiry_lambda_artifact_key
-  artifact_source_hash  = var.expiry_lambda_artifact_hash
-  memory_size           = var.expiry_lambda_memory_size
-  timeout               = var.expiry_lambda_timeout
-  reserved_concurrency  = var.expiry_reserved_concurrency
-  subnet_ids            = module.networking.private_app_subnet_ids
-  security_group_id     = module.security.lambda_security_group_id
-  environment_variables = local.lambda_common_environment
-  app_secret_arn        = module.secrets.app_secret_arn
-  database_secret_arn   = module.rds.secret_arn
-  assumable_role_arns   = var.assumable_role_arns
-  schedule_expression   = var.expiry_schedule_expression
-  enable_schedule       = var.enable_expiry_worker
-  log_retention_days    = var.log_retention_days
-  tags                  = local.tags
+  permissions_boundary_arn = var.runtime_permissions_boundary_arn
+  source                   = "../../modules/lambda_expiry"
+  name                     = "${local.name}-expiry"
+  runtime                  = var.lambda_runtime
+  handler                  = var.expiry_lambda_handler
+  artifact_s3_bucket       = var.lambda_artifact_bucket
+  artifact_s3_key          = var.expiry_lambda_artifact_key
+  artifact_source_hash     = var.expiry_lambda_artifact_hash
+  memory_size              = var.expiry_lambda_memory_size
+  timeout                  = var.expiry_lambda_timeout
+  reserved_concurrency     = var.expiry_reserved_concurrency
+  subnet_ids               = module.networking.private_app_subnet_ids
+  security_group_id        = module.security.lambda_security_group_id
+  environment_variables    = local.lambda_common_environment
+  app_secret_arn           = module.secrets.app_secret_arn
+  database_secret_arn      = module.rds.secret_arn
+  assumable_role_arns      = var.assumable_role_arns
+  schedule_expression      = var.expiry_schedule_expression
+  enable_schedule          = var.enable_expiry_worker
+  log_retention_days       = var.log_retention_days
+  tags                     = local.tags
 }
 
 module "migration_lambda" {
-  source                = "../../modules/lambda_migration"
-  name                  = "${local.name}-db-migration"
-  runtime               = var.lambda_runtime
-  handler               = var.migration_lambda_handler
-  artifact_s3_bucket    = var.lambda_artifact_bucket
-  artifact_s3_key       = var.migration_lambda_artifact_key
-  artifact_source_hash  = var.migration_lambda_artifact_hash
-  memory_size           = 1024
-  timeout               = var.migration_lambda_timeout
-  subnet_ids            = module.networking.private_app_subnet_ids
-  security_group_id     = module.security.lambda_security_group_id
-  environment_variables = local.lambda_common_environment
-  app_secret_arn        = module.secrets.app_secret_arn
-  database_secret_arn   = module.rds.secret_arn
-  log_retention_days    = var.log_retention_days
-  tags                  = local.tags
+  permissions_boundary_arn = var.runtime_permissions_boundary_arn
+  source                   = "../../modules/lambda_migration"
+  name                     = "${local.name}-db-migration"
+  runtime                  = var.lambda_runtime
+  handler                  = var.migration_lambda_handler
+  artifact_s3_bucket       = var.lambda_artifact_bucket
+  artifact_s3_key          = var.migration_lambda_artifact_key
+  artifact_source_hash     = var.migration_lambda_artifact_hash
+  memory_size              = 1024
+  timeout                  = var.migration_lambda_timeout
+  subnet_ids               = module.networking.private_app_subnet_ids
+  security_group_id        = module.security.lambda_security_group_id
+  environment_variables    = merge(local.lambda_common_environment, { DATABASE_MIGRATION_MODE = "migrate" })
+  app_secret_arn           = module.secrets.app_secret_arn
+  database_secret_arn      = module.rds.secret_arn
+  log_retention_days       = var.log_retention_days
+  tags                     = local.tags
 }
 
 module "api_gateway" {

@@ -79,10 +79,10 @@ export default function Login() {
   async function finishCognitoSession() {
     let session = await api.session();
     const pendingCompany = sessionStorage.getItem(pendingCompanyKey);
-    if (pendingCompany?.trim()) {
+    if (pendingCompany?.trim() && !session.user?.memberships.length) {
       session = await api.setOrganization(pendingCompany.trim());
-      sessionStorage.removeItem(pendingCompanyKey);
     }
+    sessionStorage.removeItem(pendingCompanyKey);
     setSession(session);
     navigate(session.user?.activeTenantId ? '/' : '/select-tenant', { replace: true });
   }

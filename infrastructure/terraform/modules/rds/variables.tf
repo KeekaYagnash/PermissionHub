@@ -1,4 +1,9 @@
 variable "name" { type = string }
+variable "database_secret_name_prefix" {
+  type        = string
+  default     = null
+  description = "Optional unique naming for disposable environments; null preserves existing names."
+}
 variable "subnet_ids" { type = list(string) }
 variable "security_group_id" { type = string }
 variable "database_name" {
@@ -19,6 +24,14 @@ variable "multi_az" { type = bool }
 variable "backup_retention_period" { type = number }
 variable "deletion_protection" { type = bool }
 variable "skip_final_snapshot" { type = bool }
+variable "final_snapshot_identifier" {
+  type    = string
+  default = null
+}
+variable "delete_automated_backups" {
+  type    = bool
+  default = true
+}
 variable "tags" {
   type    = map(string)
   default = {}

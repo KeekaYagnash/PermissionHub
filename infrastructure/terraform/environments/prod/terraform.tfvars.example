@@ -1,4 +1,5 @@
 aws_region = "af-south-1"
+aws_account_id = "REPLACE_WITH_PRODUCTION_ACCOUNT_ID"
 environment = "prod"
 project_name = "permissionhub"
 vpc_cidr = "10.50.0.0/16"
@@ -12,10 +13,10 @@ frontend_url = "https://app.example.com"
 allowed_origins = ["https://app.example.com"]
 callback_urls = ["https://app.example.com/auth/callback"]
 logout_urls = ["https://app.example.com/login"]
-enable_cognito_domain = false
-cognito_domain_prefix = ""
+enable_cognito_domain = true
+cognito_domain_prefix = "permissionhub-prod-replace-with-unique-name"
 
-lambda_artifact_bucket = "permissionhub-lambda-artifacts-example"
+lambda_artifact_bucket = "permissionhub-prod-lambda-artifacts"
 api_lambda_artifact_key = "permissionhub-api-replace-with-git-sha.zip"
 provisioning_lambda_artifact_key = "permissionhub-provisioning-replace-with-git-sha.zip"
 expiry_lambda_artifact_key = "permissionhub-expiry-replace-with-git-sha.zip"
@@ -24,3 +25,7 @@ migration_lambda_artifact_key = "permissionhub-db-migration-replace-with-git-sha
 enable_expiry_worker = false
 assumable_role_arns = []
 enable_demo_iam_permissions = false
+database_instance_class = "db.t3.medium"
+postgres_engine_version = "16.15"
+database_deletion_protection = true
+cognito_deletion_protection = "ACTIVE"

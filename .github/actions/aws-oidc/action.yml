@@ -1,0 +1,24 @@
+name: Require explicit AWS OIDC authentication
+description: Fail clearly on missing roles; never fall back to long-lived credentials
+inputs:
+  role-to-assume:
+    required: true
+    description: Environment-specific deployment or read-only planning role ARN
+  aws-region:
+    required: true
+    description: Explicit selected AWS region
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ROLE: ${{ inputs.role-to-assume }}
+        REGION: ${{ inputs.aws-region }}
+      run: |
+        test -n "$REGION" || { echo 'AWS_REGION is required'; exit 1; }
+        case "$ROLE" in arn:aws:iam::*:role/*) ;; *) echo 'Missing/invalid OIDC role ARN. Configure the selected GitHub Environment role variables. Static AWS credentials are not supported.'; exit 1 ;; esac
+    - uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.role-to-assume }}
+        aws-region: ${{ inputs.aws-region }}
+        unset-current-credentials: true

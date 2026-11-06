@@ -70,5 +70,6 @@ if(env.NODE_ENV==='production'&&env.AWS_CONNECTION_MODE==='manual'&&env.ENABLE_A
 if(env.NODE_ENV==='production'&&env.SESSION_SECRET.startsWith('development-only'))throw new Error('SESSION_SECRET must be configured in production.');
 if(env.NODE_ENV==='production'&&!env.PERMISSIONHUB_CREDENTIAL_ENCRYPTION_KEY)throw new Error('PERMISSIONHUB_CREDENTIAL_ENCRYPTION_KEY must be configured before storing access-key connections in production.');
 export const liveProvisioningEnabled=env.AWS_PROVISIONING_MODE==='live'&&env.ENABLE_LIVE_PROVISIONING&&env.PROVISIONING_CONFIRMATION==='I_UNDERSTAND_THIS_CHANGES_AWS';
-export const isLocalProvisioningEnabled=()=>env.NODE_ENV==='development'&&env.ALLOW_LOCAL_PROVISIONING||env.DEMO_PROVISIONING_BYPASS_ENABLED||env.GLOBAL_PROVISIONING_ENABLED;
+// Enabling provisioning globally is not permission to bypass tenant approval gates.
+export const isLocalProvisioningEnabled=()=>env.NODE_ENV==='development'&&(env.ALLOW_LOCAL_PROVISIONING||env.DEMO_PROVISIONING_BYPASS_ENABLED);
 export const liveTestAllowedPrincipals=env.AWS_LIVE_TEST_ALLOWED_PRINCIPALS.split(',').map(value=>value.trim()).filter(Boolean);

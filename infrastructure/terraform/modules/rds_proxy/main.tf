@@ -1,5 +1,6 @@
 resource "aws_iam_role" "proxy" {
-  name = "${var.name}-rds-proxy"
+  permissions_boundary = var.permissions_boundary_arn
+  name                 = "${var.name}-rds-proxy"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -25,6 +26,7 @@ resource "aws_iam_role_policy" "proxy_secret" {
 }
 
 resource "aws_db_proxy" "this" {
+  depends_on             = [aws_iam_role_policy.proxy_secret]
   name                   = "${var.name}-proxy"
   debug_logging          = false
   engine_family          = "POSTGRESQL"

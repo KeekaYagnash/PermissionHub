@@ -1,0 +1,36 @@
+name: PermissionHub infrastructure review
+on:
+  workflow_dispatch:
+    inputs:
+      fresh_deployment:
+        description: Explicit one-time creation into empty selected state (not routine deployment)
+        type: boolean
+        default: false
+      environment:
+        type: choice
+        options: [dev, prod]
+        default: dev
+      apply:
+        type: boolean
+        default: false
+      run_migrations:
+        type: boolean
+        default: false
+      defer_frontend:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+jobs:
+  infrastructure:
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+    with:
+      fresh_deployment: ${{ inputs.fresh_deployment }}
+      environment: ${{ inputs.environment }}
+      infrastructure: true
+      apply: ${{ inputs.apply }}
+      run_migrations: ${{ inputs.run_migrations }}
+      defer_frontend: ${{ inputs.defer_frontend }}

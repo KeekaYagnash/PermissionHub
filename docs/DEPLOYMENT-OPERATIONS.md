@@ -1,0 +1,374 @@
+# PermissionHub dev/prod deployment and reviewed destruction
+
+Implementation branch: `demo_ready_2`. No AWS deployment/destruction, role/provider
+changes, AWS migration, push or merge was performed during implementation.
+This guide supersedes the old main-only development instructions.
+
+## Branches, workflows and protections
+
+| Event | Target | Behaviour |
+|---|---|---|
+| PR to dev | development-plan (optional AWS plan) | Credential-free tests/builds/Prisma/format/validation plus read-only plan when explicitly enabled |
+| PR to main | production-plan (optional AWS plan) | Same validation, production config, no deployment |
+| Push/merge to dev | development → dev Terraform | Validate, immutable artifacts, guarded deploy, controlled migrations, frontend, health |
+| Push/merge to main | production → prod Terraform | Same pipeline, protected production approval before AWS deployment work |
+| Manual fresh deployment | matching dev/main branch | Explicit fresh_deployment; empty application state only; all four artifacts and reviewed migrations required |
+| Manual destroy | matching dev/main branch | Confirmation, encrypted saved plan, optional separate human approval, exact-plan apply |
+
+`terraform-pr.yml` handles PRs and reusable validation. `deploy.yml` is the only
+push deployment trigger. `deploy-dev-backend.yml` and `deploy-dev-frontend.yml`
+retain their filenames but support both environments. `deploy-infrastructure.yml`
+is a manual wrapper, not another push trigger. `verify-aws-oidc.yml` only reads
+STS identity. `destroy-infrastructure.yml` is the ONLY destruction workflow and
+has workflow_dispatch only. Deployment and destruction share the concurrency
+group `permissionhub-state-dev` or `permissionhub-state-prod`; no child workflow
+takes a second conflicting lock. Terraform state locking provides extra safety.
+
+Configure GitHub Environments before dispatch:
+
+* development: selected **dev branch only**, preserve reviewer requirements.
+* production: selected **main branch only**, required reviewers, prevent self-review,
+  disable administrator bypass. Workflow checks fail closed if protections are absent.
+* development-plan / production-plan: optional, reviewed same-repository PR plans
+  only, required reviewers, prevent self-review, disable admin bypass. Permit the
+  PR merge refs appropriate to GitHub's environment branch rules. Use dedicated
+  read-only planning identities, NEVER deployment-write role ARNs.
+* development-destroy: selected dev branch only; required reviewers.
+* production-destroy: selected main branch only; required reviewers, prevent
+  self-review, disable admin bypass. Separate security/operations reviewers are
+  recommended. This approval job has no AWS credentials/OIDC access.
+
+GitHub Environment reviewers approve a job, not a Terraform CLI prompt. Destroy
+approval must review the resources printed by the preceding plan job. Native
+reviewer lists require one reviewer, not all listed reviewers. If two-person
+approval is mandatory, add an external/custom protection rule; do not claim
+native GitHub lists enforce a quorum. Some repository visibility/plan combinations
+do not support required environment reviewers; production/destroy stays blocked
+until the necessary protection is available.
+
+References: [GitHub environment protections](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments),
+[reviewing deployments](https://docs.github.com/en/actions/how-tos/managing-workflow-runs-and-deployments/managing-deployments/reviewing-deployments).
+
+## External OIDC/prerequisite dependencies — not provisioned by this work
+
+Configure the EXISTING variable names independently on development and production:
+
+`AWS_INFRA_ROLE_ARN`, `AWS_PLAN_ROLE_ARN`, `AWS_BACKEND_ROLE_ARN`,
+`AWS_ARTIFACT_ROLE_ARN`, `AWS_FRONTEND_ROLE_ARN`.
+
+Also configure `AWS_ACCOUNT_ID`, `AWS_REGION`, `TF_STATE_BUCKET`, `TF_STATE_KEY`,
+`TF_LOCK_TABLE`, `LAMBDA_ARTIFACT_BUCKET`, `CI_TF_VARS_JSON`,
+`CI_MIGRATIONS_READY`, and secret `TF_PLAN_ENCRYPTION_KEY` (32 random bytes/base64).
+Do not configure AWS access-key secrets. The shared OIDC action requires a role
+ARN and clears existing credentials; missing roles fail explicitly.
+
+The independent dev bootstrap files were deliberately NOT modified. Their old
+main-only dev trust must be separately updated by the operator to dev branch,
+environment development, repository KeekaYagnash/PermissionHub. Production roles
+must trust main/production, and cover production resource names, RDS Proxy and
+IAM pass-role to RDS as well as Lambda. No production role is created here.
+The boundary, if configured, must permit the proxy role's secret access too.
+
+State/artifact buckets and lock tables must be provisioned separately from the
+application root. Keep the independent bootstrap state. Suggested production
+names: permissionhub-prod-state-ACCOUNT_ID, permissionhub-prod-lambda-artifacts-ACCOUNT_ID,
+permissionhub-prod-state-lock. Actual globally unique bucket names are operator
+inputs. Artifact bucket names must contain the selected dev/prod segment.
+State keys are strictly permissionhub/dev/terraform.tfstate and
+permissionhub/prod/terraform.tfstate; workspace must be default. Backend bucket,
+key, region and STS account are checked against the selected environment. Never
+reuse the dev artifact bucket for production. Buckets need encryption, public
+access blocking and versioning. CI checks artifact bucket versioning and ownership
+via the selected account/permissions before it can upload. Initial bucket creation
+is not an application Terraform dependency cycle.
+
+For PR cloud plans, set repository ENABLE_PR_TERRAFORM_PLAN=true only after
+protected planning environments and externally provisioned read-only roles are
+ready. Populate their selected environment configuration/state variables and
+AWS_PLAN_ROLE_ARN. Fork PRs never receive AWS credentials. Terraform state can
+contain secrets: approve only trusted PR code. Local/fork validation works with
+the flag false and reports AWS plan NOT RUN, rather than claiming a successful plan.
+An opted-in missing role/configuration is a clear failure, not a silent skip.
+
+## Production architecture and costs
+
+Production is independent: prod namespaces, provider allowed_account_ids from
+aws_account_id, separate remote backend, VPC 10.50.0.0/16, private DB, Cognito,
+secrets, four Lambda functions, API, queues, frontend bucket/CloudFront and alarms.
+Do not copy dev URLs, secrets, state, artifact references or connection keys.
+Replace the placeholders in prod/terraform.tfvars.example before exporting.
+
+RDS baseline: **db.t3.medium, 20 GiB**, PostgreSQL 16.15, encrypted storage,
+Multi-AZ retained, 14-day automated backups, private access, deletion protection.
+Read-only AWS discovery confirmed db.t3.medium/PostgreSQL 16.15/Multi-AZ is orderable
+in af-south-1. db.t3.small can be viable for tiny workloads but has less memory
+(2 GiB vs 4 GiB), less cache/connection headroom and needs load testing; it is not
+the default. T3 is burstable; CPU credit charges can apply. No unrelated Lambda
+memory/concurrency sizing was changed.
+
+Multi-AZ, two NAT gateways, RDS Proxy and four interface endpoints remain present
+and have continuing cost. They were not silently removed. Alarms do not currently
+have notification actions configured. Production live IAM provisioning remains
+disabled by default. Any real enablement is a separately reviewed operation.
+
+Final snapshot names have a stable random suffix; automated backups are retained
+on RDS deletion. Existing allocated RDS storage cannot be shrunk in place: the
+20 GiB configuration is for a fresh production environment, not an instruction
+to reduce an existing database's storage.
+
+## Artifacts, migrations and frontend
+
+Validation packages API/provisioning/expiry/migration independently from the
+exact workflow commit. Handler exports and compressed/uncompressed sizes are
+checked. CI uploads SHA-256 content-addressed objects using conditional create-only
+writes in the selected environment bucket. Terraform alone updates Lambda code.
+
+Routine releases update/check the migration Lambda first, then apply the main
+guarded application plan. These are serial stages under ONE orchestration/state
+concurrency lock, not independent applies. Fresh releases first create the full
+infrastructure, then run status/migrate-deploy/status using the backend role.
+Prisma's PostgreSQL advisory lock and orchestration concurrency prevent competing
+migrations. Pending migrations require explicit reviewed flags; failed deploy or
+postcheck blocks application/frontend release. The validated initial migration
+and seven historical upgrades are unchanged; no db push/reset exists.
+
+Public frontend outputs are passed from Terraform, including frontend-only
+releases through a read-only context job. No stale bucket/distribution IDs are
+hardcoded. The frontend checks bucket ownership, existence and CloudFront origin
+before publication. New Terraform resources are usable immediately through new
+outputs. Missing REQUIRED outputs/resources fail clearly. Set defer_frontend=true
+only when intentionally deferring publication; the summary says DEFERRED, not
+deployed. Backend/API health is still checked. A successful /health response is
+not proof of Cognito login or live IAM operations; browser smoke testing follows
+the first approved deployment.
+
+## Reviewed destroy: what it does and does not delete
+
+Phase A: exact DESTROY dev/prod confirmation, matching branch, selected OIDC role,
+account/region/default-workspace/backend checks, terraform plan -destroy, resource
+allowlist, resource display, encrypted plan artifact (one-day retention). No apply.
+Phase B exists only when execute=true. A SEPARATE protected destroy Environment
+job must be approved after reviewing Phase A; apply then authenticates the same
+saved plan, environment, account, backend, commit, run and run attempt. It never
+regenerates a plan. Terraform also rejects a stale state serial. Re-run the entire
+workflow after preparation, not an old apply job.
+
+The guard rejects OIDC providers, lock tables, shared buckets, CI roles/policies,
+other-environment resources, forced bucket deletion, non-delete actions and
+production plans without retained snapshots/backups. The bootstrap root is never
+initialized by this workflow. Resources outside application Terraform state are
+not removed or claimed removed.
+
+Preparation requiring separate explicit approval:
+
+1. Archive required data, exports, frontend objects and account credentials.
+   Existing disposable dev RDS settings skip a final snapshot; take a separately
+   approved backup first if dev data must survive. Destroy never silently changes
+   those settings or disables deletion protection.
+2. For prod RDS/Cognito, change database_deletion_protection=false and
+   cognito_deletion_protection=INACTIVE in reviewed production config, export it,
+   and run a NORMAL guarded infrastructure deployment first. Destroy does not
+   disable protections itself. Restore protections if destruction is cancelled.
+3. Confirm final snapshot identifier is unique and backups retained. Do not set
+   skip_final_snapshot=true or delete_automated_backups=true to bypass a blocker.
+4. Frontend buckets have force_destroy=false. Nonempty buckets intentionally
+   block; apply preflight checks current objects (and versions/delete markers
+   when versioning is enabled) before deleting anything. Separately archive and
+   explicitly empty only that application bucket. Versioned buckets require the
+   externally managed infrastructure role to allow s3:ListBucketVersions.
+   No automatic recursive purge, shared-bucket deletion or force-delete exists.
+5. Secrets are scheduled for normal recovery windows, not permanently deleted.
+   Retained snapshots/backups, scheduled secrets, immutable build artifacts and
+   out-of-state resources may continue to exist after destroy.
+
+## Commands — local checks and operator-only operations
+
+Local validation was executed as reported below. GitHub configuration and live
+deployment/destruction commands are instructions only and were NOT executed.
+
+### Safe local verification
+
+```powershell
+cd C:\Users\yagi1\OneDrive\Desktop\PermissionHub
+git branch --show-current
+npm ci
+npm run prisma:generate --workspace backend
+npm run typecheck
+npm run lint
+npm test --workspace backend
+npm test --workspace frontend
+node --test infrastructure/scripts/ci-lib.test.mjs infrastructure/scripts/workflows.test.mjs
+npm run build
+npm run build:lambda --workspace backend
+npm run package:lambda --workspace backend
+terraform fmt -check -recursive infrastructure/terraform
+foreach ($environment in @('dev','prod')) {
+  terraform "-chdir=infrastructure/terraform/environments/$environment" init -backend=false
+  terraform "-chdir=infrastructure/terraform/environments/$environment" validate
+}
+terraform -chdir=infrastructure/terraform/environments/prod test
+terraform -chdir=infrastructure/terraform/modules/rds init -backend=false
+terraform -chdir=infrastructure/terraform/modules/rds test
+# If actionlint is on PATH:
+actionlint -shellcheck=''
+```
+
+For an empty local PostgreSQL test, use the Docker commands in
+[FRESH-DEPLOYMENT.md](FRESH-DEPLOYMENT.md); choose a new disposable test database.
+Never point MIGRATION_TEST_DATABASE_URL at AWS. The script rejects remote URLs.
+
+### GitHub configuration — modifies GitHub, not AWS
+
+First configure the Environment reviewers/branch restrictions listed above in
+GitHub Settings. After OIDC/prerequisite provisioning by the operator, repeat
+this block for dev and prod, entering actual values. No AWS keys are requested.
+
+```powershell
+$repo='KeekaYagnash/PermissionHub'
+$environment=Read-Host 'Terraform environment: dev or prod'
+if ($environment -notin @('dev','prod')) { throw 'Invalid environment' }
+$githubEnvironment=if ($environment -eq 'dev') {'development'} else {'production'}
+$values=@{
+ AWS_ACCOUNT_ID=(Read-Host '12-digit selected AWS account ID')
+ AWS_REGION='af-south-1'
+ TF_STATE_BUCKET=(Read-Host 'Existing selected-environment state bucket')
+ TF_STATE_KEY="permissionhub/$environment/terraform.tfstate"
+ TF_LOCK_TABLE=(Read-Host 'Existing selected-environment lock table')
+ LAMBDA_ARTIFACT_BUCKET=(Read-Host 'Existing selected-environment Lambda artifact bucket')
+ AWS_INFRA_ROLE_ARN=(Read-Host 'Infrastructure deployment role ARN')
+ AWS_PLAN_ROLE_ARN=(Read-Host 'Deployment-plan role ARN')
+ AWS_BACKEND_ROLE_ARN=(Read-Host 'Backend deployment role ARN')
+ AWS_ARTIFACT_ROLE_ARN=(Read-Host 'Artifact upload role ARN')
+ AWS_FRONTEND_ROLE_ARN=(Read-Host 'Frontend deployment role ARN')
+ CI_MIGRATIONS_READY='true' # after reviewed/passing migration history
+}
+foreach ($item in $values.GetEnumerator()) {
+ gh variable set $item.Key --body $item.Value --env $githubEnvironment --repo $repo
+}
+gh variable set ENABLE_PR_TERRAFORM_PLAN --body false --repo $repo
+# Generate once per environment; don't rotate between plan and apply jobs.
+$key=[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$key | gh secret set TF_PLAN_ENCRYPTION_KEY --env $githubEnvironment --repo $repo
+Remove-Variable key
+
+# Read-only checks of separately provisioned prerequisites:
+aws s3api head-bucket --bucket $values.TF_STATE_BUCKET --expected-bucket-owner $values.AWS_ACCOUNT_ID
+aws s3api get-bucket-versioning --bucket $values.LAMBDA_ARTIFACT_BUCKET --region $values.AWS_REGION
+aws dynamodb describe-table --table-name $values.TF_LOCK_TABLE --region $values.AWS_REGION --query 'Table.TableStatus'
+
+# Review/create the local terraform.tfvars first; replace ALL prod example placeholders.
+# Uses the already configured operator AWS identity; no apply or state recovery.
+terraform "-chdir=infrastructure/terraform/environments/$environment" init -reconfigure "-backend-config=bucket=$($values.TF_STATE_BUCKET)" "-backend-config=key=$($values.TF_STATE_KEY)" "-backend-config=region=$($values.AWS_REGION)" "-backend-config=dynamodb_table=$($values.TF_LOCK_TABLE)" '-backend-config=encrypt=true'
+$boundary=Read-Host 'Externally managed runtime boundary ARN (blank if not required)'
+$config=.\infrastructure\scripts\export-ci-config.ps1 -Environment $environment -Fresh -RuntimePermissionsBoundaryArn $boundary
+$config | gh variable set CI_TF_VARS_JSON --env $githubEnvironment --repo $repo
+Remove-Variable config
+```
+
+Optional protected PR plans: independently populate development-plan and
+production-plan with the matching AWS_ACCOUNT_ID, AWS_REGION, state/lock/artifact
+variables, CI_TF_VARS_JSON, and a dedicated read-only AWS_PLAN_ROLE_ARN. Only after
+trust/reviewer verification:
+
+```powershell
+gh variable set ENABLE_PR_TERRAFORM_PLAN --body true --repo $repo
+```
+
+### Initial deployment — dispatches AWS-changing workflows
+
+Only after reviewed changes exist on the matching branches and external trust
+is correct. Plan-only still builds/uploads immutable S3 artifacts. It never
+applies infrastructure. Apply runs create their own exact saved plan; they do not
+reuse a prior plan-only run's plan. Review logs and environment gates accordingly.
+
+```powershell
+# Read-only AWS identity verification:
+gh workflow run verify-aws-oidc.yml --ref dev --repo $repo -f environment=dev
+gh workflow run verify-aws-oidc.yml --ref main --repo $repo -f environment=prod
+
+# Initial dev: plan first, then approved creation/migrations/frontend:
+gh workflow run deploy-infrastructure.yml --ref dev --repo $repo -f environment=dev -f fresh_deployment=true -f apply=false -f run_migrations=true
+gh workflow run deploy-infrastructure.yml --ref dev --repo $repo -f environment=dev -f fresh_deployment=true -f apply=true -f run_migrations=true
+
+# Initial prod: separate state/account/config, protected production approval:
+gh workflow run deploy-infrastructure.yml --ref main --repo $repo -f environment=prod -f fresh_deployment=true -f apply=false -f run_migrations=true
+gh workflow run deploy-infrastructure.yml --ref main --repo $repo -f environment=prod -f fresh_deployment=true -f apply=true -f run_migrations=true
+
+# Add -f defer_frontend=true ONLY if intentionally deferring frontend publication.
+gh run list --repo $repo --limit 10
+$runId=Read-Host 'Run ID to watch'
+gh run watch $runId --exit-status --repo $repo
+```
+
+After the first successful deployment, merges to dev/main perform routine releases
+without fresh mode. Never erase nonempty state to satisfy a fresh guard. A partial
+creation failure requires reviewed reconciliation, not automated recovery/deletion.
+
+### Manual destroy — plan only, then separately approved execution
+
+```powershell
+# Plans only; no destruction:
+gh workflow run destroy-infrastructure.yml --ref dev --repo $repo -f environment=dev -f confirmation='DESTROY dev' -f execute=false
+gh workflow run destroy-infrastructure.yml --ref main --repo $repo -f environment=prod -f confirmation='DESTROY prod' -f execute=false
+
+# DESTRUCTIVE: only after preparation/approval. Each run generates a plan,
+# pauses at a SEPARATE protected destroy approval, then applies THAT saved plan.
+gh workflow run destroy-infrastructure.yml --ref dev --repo $repo -f environment=dev -f confirmation='DESTROY dev' -f execute=true
+gh workflow run destroy-infrastructure.yml --ref main --repo $repo -f environment=prod -f confirmation='DESTROY prod' -f execute=true
+```
+
+No deploy/destroy commands above were executed during this implementation. Real
+OIDC trust, protected-environment approvals, IAM permissions, browser sign-in and
+live provisioning remain to be verified after separately approved configuration.
+
+## Validation results
+
+* Backend: 102 tests passed, zero failed.
+* Frontend: 111 tests passed, zero failed.
+* Deployment/destroy helpers and workflow scenarios: 24 tests passed.
+* Typechecks, backend/frontend builds, Lambda builds/packages/handler exports: passed.
+* Prisma schema validation and isolated empty PostgreSQL 16.15 migration chain:
+  passed, 8 migrations, 20 application tables, zero schema drift, second deploy no-op.
+* Terraform dev/prod validation and recursive formatting: passed.
+* Mocked independent fresh-production plan: 1 passed; mocked RDS safeguard plan: 1 passed.
+* All 8 workflow/composite YAML files parsed; actionlint passed; PowerShell scripts parsed.
+* Lint: zero errors, two pre-existing unused-variable warnings.
+* No authenticated production Terraform plan/apply/destroy or GitHub approval run
+  was executed. Production account/role/backend configuration is operator-supplied.
+
+## Files changed in this pass
+
+```text
+.github/actions/aws-oidc/action.yml
+.github/workflows/terraform-pr.yml
+.github/workflows/deploy.yml
+.github/workflows/deploy-dev-backend.yml
+.github/workflows/deploy-dev-frontend.yml
+.github/workflows/deploy-infrastructure.yml
+.github/workflows/verify-aws-oidc.yml
+.github/workflows/destroy-infrastructure.yml
+infrastructure/scripts/ci.mjs
+infrastructure/scripts/ci-lib.mjs
+infrastructure/scripts/ci-lib.test.mjs
+infrastructure/scripts/workflows.test.mjs
+infrastructure/scripts/export-ci-config.ps1
+infrastructure/terraform/environments/prod/main.tf
+infrastructure/terraform/environments/prod/providers.tf
+infrastructure/terraform/environments/prod/variables.tf
+infrastructure/terraform/environments/prod/terraform.tfvars.example
+infrastructure/terraform/environments/prod/tests/fresh.tftest.hcl
+infrastructure/terraform/modules/rds/main.tf
+infrastructure/terraform/modules/rds/variables.tf
+infrastructure/terraform/modules/rds/versions.tf
+infrastructure/terraform/modules/rds/.terraform.lock.hcl
+infrastructure/terraform/modules/rds/tests/production.tftest.hcl
+infrastructure/terraform/modules/rds_proxy/main.tf
+infrastructure/terraform/modules/rds_proxy/variables.tf
+docs/CI-CD.md
+docs/FRESH-DEPLOYMENT.md
+docs/OIDC-BOOTSTRAP.md
+docs/DEPLOYMENT-OPERATIONS.md
+```
+
+Pre-existing unrelated working-tree changes were preserved. Initial/historical
+migration SQL and independent OIDC bootstrap Terraform/policies were not changed.

@@ -107,12 +107,12 @@ describe('safe request review HTTP workflow',()=>{
   await agent.post(`/api/requests/${incomplete.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(422).expect(response=>expect(response.body.error).toMatchObject({code:'INCOMPLETE_PROVISIONING_PLAN'}));
  });
 
- it('removes the named enterprise blockers for a self-requester without reaching provisioning before the action',async()=>{
+ it('does not advertise review access to a requester even when local provisioning is enabled',async()=>{
   (env as {NODE_ENV:'development'}).NODE_ENV='development';(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=true;
   const item={...pending('PR-TEST-LOCAL-CAPABILITY'),approverUserId:'user_approver_dev'};requests.unshift(item);
   const attach=vi.spyOn(IamProvisioningService.prototype,'attach'),create=vi.spyOn(IamProvisioningService.prototype,'createCustomerPolicy');
   const {agent}=await authenticatedAgent('user_requester_dev'),response=await agent.get(`/api/requests/${item.id}`).expect(200);
-  expect(response.body.data.reviewCapabilities).toMatchObject({provisioningMode:'local',approvalAllowed:true,provisioningAllowed:true,canProvision:true,blockingReasons:expect.not.arrayContaining(['CURRENT_USER_NOT_ELIGIBLE_APPROVER','CURRENT_USER_NOT_ASSIGNED_APPROVER','ACCOUNT_SCOPED_PROVISIONER_REQUIRED','PROVISIONING_MODE_DRY_RUN','PROVISION_ROLE_NOT_CONFIGURED','EXPIRY_REVOCATION_NOT_CONFIGURED','SELF_APPROVAL_BLOCKED'])});
+  expect(response.body.data.reviewCapabilities).toMatchObject({provisioningMode:'local',approvalAllowed:false,provisioningAllowed:false});
   expect(item.status).toBe('Pending approval');expect(attach).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
  });
 
@@ -124,7 +124,7 @@ describe('safe request review HTTP workflow',()=>{
   const policyValidation=vi.spyOn(IamPolicyValidationService.prototype,'validate').mockResolvedValue({mode:'LIVE',findings:[]});
   const create=vi.spyOn(IamProvisioningService.prototype,'createCustomerPolicy').mockResolvedValue({mode:'local',changed:true,policyArn,awsRequestId:'mock-create-request'});
   const attach=vi.spyOn(IamProvisioningService.prototype,'attach').mockResolvedValue({mode:'local',operation:'AttachUserPolicy',changed:true,awsRequestId:'mock-attach-request'});
-  const {agent,csrf}=await authenticatedAgent('user_requester_dev');
+  const {agent,csrf}=await authenticatedAgent('user_security_dev');
   const response=await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','local-provision-operation').send({action:'APPROVE_AND_PROVISION'}).expect(200);
    expect(response.body.data).toMatchObject({request:{status:'Provisioned',completedApprovalStages:['SECURITY_REVIEWER']},provisioning:{mode:'local',executed:true}});expect(validate).toHaveBeenCalledWith(expect.anything(),account.id,'READ',true);expect(identity).toHaveBeenCalledWith(item.targetName);expect(policyValidation).toHaveBeenCalledTimes(1);expect(create).toHaveBeenCalledTimes(1);expect(attach).toHaveBeenCalledTimes(1);
  });

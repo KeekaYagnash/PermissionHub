@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-export async function handler() {
+export async function handler(event?: {action?:'status'|'migrate'}) {
   await bootstrapLambdaEnvironment();
   const taskRoot = process.env.LAMBDA_TASK_ROOT || process.cwd();
   const prismaCli = resolve(taskRoot, 'node_modules/prisma/build/index.js');
@@ -20,11 +20,11 @@ export async function handler() {
   }
 
   const startedAt = Date.now();
-  const migrationMode = process.env.DATABASE_MIGRATION_MODE === 'push' ? 'push' : 'migrate';
-  const prismaArgs = migrationMode === 'push'
-    ? [prismaCli, 'db', 'push', '--accept-data-loss', '--skip-generate', '--schema', schemaPath]
-    : [prismaCli, 'migrate', 'deploy', '--schema', schemaPath];
-  const { stdout, stderr } = await execFileAsync(
+  if(process.env.DATABASE_MIGRATION_MODE==='push')throw new Error('Unsafe schema push is disabled. Review/baseline the existing database and configure DATABASE_MIGRATION_MODE=migrate.');
+  const migrationMode = event?.action==='status'?'status':'migrate';
+  const prismaArgs = [prismaCli, 'migrate', migrationMode==='status'?'status':'deploy', '--schema', schemaPath];
+  let stdout='',stderr='';
+  try { ({stdout,stderr}=await execFileAsync(
     process.execPath,
     prismaArgs,
     {
@@ -33,12 +33,16 @@ export async function handler() {
       timeout: 120_000,
       maxBuffer: 1024 * 1024
     }
-  );
+  )); } catch(error:unknown) {
+    if(migrationMode==='status')return {ok:false,mode:'status',upToDate:false,message:'Migration status requires review. Deployment is blocked until migration history and connectivity are verified.'};
+    throw error;
+  }
 
   return {
     ok: true,
     mode: migrationMode,
-    message: migrationMode === 'push' ? 'Prisma schema pushed.' : 'Prisma migrations applied.',
+    upToDate: true,
+    message: migrationMode==='status'?'Migration history is up to date.':'Prisma migrations applied.',
     durationMs: Date.now() - startedAt,
     stdout: trimOutput(stdout),
     stderr: trimOutput(stderr)

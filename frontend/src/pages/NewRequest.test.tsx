@@ -59,6 +59,28 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.clearAllMocks();useAuthStore.getState().clear()});
 
 describe('New Request IAM group target',()=>{
+ it.each([false,true])('submits a new group with the selected members (include member: %s)',async includeMember=>{
+  const created={id:'DIS-PR-1090',targetType:'GROUP',targetName:'FinanceReaders',items:[],submittedAt:new Date().toISOString()};
+  vi.mocked(api.createRequest).mockResolvedValue(created as never);
+  vi.mocked(api.submitRequest).mockResolvedValue(created as never);
+  renderNewRequest();
+  await userEvent.click(await screen.findByRole('button',{name:/iam user group/i}));
+  fireEvent.change(screen.getByLabelText(/group name/i),{target:{value:'FinanceReaders'}});
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  if(includeMember)await userEvent.click((await screen.findByText('maya.chen')).closest('button')!);
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(await screen.findByRole('checkbox',{name:/AmazonS3ReadOnlyAccess/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  fireEvent.change(screen.getByLabelText(/request title/i),{target:{value:'Create finance reader group'}});
+  await userEvent.selectOptions(screen.getByLabelText(/approver/i),'Security Reviewer');
+  fireEvent.change(screen.getByLabelText(/business justification/i),{target:{value:'Prepare the finance reader group for the approved support team.'}});
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/submit request/i}));
+  await waitFor(()=>expect(api.createRequest).toHaveBeenCalledOnce());
+  expect(vi.mocked(api.createRequest).mock.calls[0]![0]).toMatchObject({targetType:'GROUP',targetName:'FinanceReaders',group:{mode:'CREATE'},members:includeMember?[expect.objectContaining({userName:'maya.chen'})]:[]});
+ });
  it('switches between target types without the isGroup initialization runtime error',async()=>{
   renderNewRequest();
   await userEvent.click(await screen.findByRole('button',{name:/iam user group/i}));
@@ -233,6 +255,48 @@ describe('New Request IAM user creation flow',()=>{
   await userEvent.click(screen.getByRole('button',{name:/try again/i}));
   expect(await screen.findByText(/Request DIS-PR-1001 submitted/i)).toBeTruthy();
   expect(api.createRequest).toHaveBeenCalledTimes(2);
+ });
+});
+
+describe('New Request IAM user group membership payload',()=>{
+ it('submits selected existing users as group members without policy items',async()=>{
+  const created={id:'DIS-PR-1002',targetType:'GROUP',targetName:'DR_DevOps',items:[],submittedAt:'2026-09-11T12:00:00.000Z',requiredApprovalStages:['ACCOUNT_APPROVER']};
+  vi.mocked(api.createRequest).mockResolvedValue(created as any);
+  vi.mocked(api.submitRequest).mockResolvedValue(created as any);
+  renderNewRequest();
+  await screen.findByRole('button',{name:/iam user group/i});
+  await userEvent.click(iamUserTargetButton());
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/existing users/i}));
+  const userRow=(await screen.findByText('maya.chen')).closest('button')!;
+  await userEvent.click(userRow);
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/add user\(s\) to an iam group/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  expect(screen.getByRole('heading',{name:/choose iam group/i})).toBeTruthy();
+  const groupRow=(await screen.findByText('DR_DevOps')).closest('button')!;
+  await userEvent.click(groupRow);
+  await waitFor(()=>expect((screen.getByRole('button',{name:/continue/i}) as HTMLButtonElement).disabled).toBe(false));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  expect(screen.getByRole('heading',{name:/why do you need this access/i})).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/request title/i),{target:{value:'Add Maya to group'}});
+  await userEvent.selectOptions(screen.getByLabelText(/approver/i),'Security Reviewer');
+  fireEvent.change(screen.getByLabelText(/business justification/i),{target:{value:'Add Maya Chen to the approved DevOps group for the scheduled support task.'}});
+  await waitFor(()=>expect((screen.getByRole('button',{name:/continue/i}) as HTMLButtonElement).disabled).toBe(false));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  expect(await screen.findByText(/Add maya.chen to DR_DevOps/i)).toBeTruthy();
+  await userEvent.click(screen.getByRole('button',{name:/submit request/i}));
+  await waitFor(()=>expect(api.createRequest).toHaveBeenCalledTimes(1));
+  const payload=vi.mocked(api.createRequest).mock.calls[0]![0] as any;
+  expect(payload).toEqual(expect.objectContaining({
+   targetType:'GROUP',
+   targetName:'DR_DevOps',
+   group:{mode:'EXISTING',name:'DR_DevOps'},
+   items:[],
+   members:[expect.objectContaining({userName:'maya.chen',userArn:'arn:aws:iam::143671530412:user/maya.chen',operation:'ADD',createUser:false})],
+   scope:expect.objectContaining({type:'ALL'})
+  }));
+  expect(await screen.findByText(/Request DIS-PR-1002 submitted/i)).toBeTruthy();
  });
 });
 

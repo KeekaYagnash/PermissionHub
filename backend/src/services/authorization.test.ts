@@ -5,6 +5,22 @@ import { approvalRouting } from './approval-routing.service.js';
 
 const session=(id:string)=>identityDomain.sessionUser(developmentUsers.find(user=>user.id===id)!,'development');
 describe('tenant and account authorisation',()=>{
+ it('does not expose other requests to requesters when stages are empty',()=>{
+  const user=session('user_requester_dev');
+  const request={tenantId:developmentAccounts[0]!.tenantId,awsAccountId:developmentAccounts[0]!.id,requesterUserId:'someone-else',requiredApprovalStages:[]};
+  expect(authorization.canApproveRequest(user,request)).toBe(false);
+  expect(authorization.canViewRequest(user,request)).toBe(false);
+ });
+ it('does not let tenant-wide reviewers cross account or tenant boundaries',()=>{
+  const user=session('user_security_dev');
+  expect(authorization.canViewRequest(user,{tenantId:'other-tenant',awsAccountId:developmentAccounts[0]!.id})).toBe(false);
+  expect(authorization.canViewRequest(user,{awsAccountId:'unknown-account'})).toBe(false);
+ });
+ it('lets scoped provisioners view and retry failed approved changes',()=>{
+  const user=session('user_provisioner_dev'),request={awsAccountId:developmentAccounts[0]!.id,requesterUserId:'someone-else',status:'Provisioning failed'};
+  expect(authorization.canViewRequest(user,request)).toBe(true);
+  expect(authorization.canProvisionRequest(user,request)).toBe(true);
+ });
  it('limits requester accounts to assigned scopes',()=>{const user=session('user_requester_dev');expect(authorization.canRequestAccess(user,developmentAccounts[0]!.id)).toBe(true);expect(authorization.canViewAccount(user,developmentAccounts[2]!.id)).toBe(false)});
  it('allows an OU admin to see the scoped OU account only',()=>{const user=session('user_ou_admin_dev');expect(authorization.canViewAccount(user,developmentAccounts[0]!.id)).toBe(true);expect(authorization.canViewAccount(user,developmentAccounts[1]!.id)).toBe(false)});
  it('does not grant platform admins customer AWS scope',()=>{const user=session('user_platform_dev');expect(authorization.canViewAccount(user,developmentAccounts[0]!.id)).toBe(false)});

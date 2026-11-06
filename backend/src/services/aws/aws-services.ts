@@ -9,6 +9,7 @@ import {
  UpdateAssumeRolePolicyCommand,
  ListPoliciesCommand,
  GetPolicyCommand,
+ ListPolicyTagsCommand,
  GetPolicyVersionCommand,
  ListAttachedUserPoliciesCommand,
  ListUserPoliciesCommand,
@@ -292,7 +293,7 @@ export class IamProvisioningService{
   const accountId=this.context?.accountId??env.AWS_ACCOUNT_ID,policyArn=`arn:aws:iam::${accountId}:policy/${path.replace(/^\/+|\/+$/g,'')}/${name}`;
   if(!isLocalProvisioningEnabled()&&env.AWS_PROVISIONING_MODE!=='live')return {mode:env.AWS_PROVISIONING_MODE,changed:false,policyArn,message:'Policy creation skipped outside live mode.'};
   if(!isLocalProvisioningEnabled()&&!liveProvisioningEnabled)throw new Error('Live provisioning is disabled by server configuration.');
-  try{const existing=await this.iam.send(new GetPolicyCommand({PolicyArn:policyArn}));if(existing.Policy?.DefaultVersionId){const version=await this.iam.send(new GetPolicyVersionCommand({PolicyArn:policyArn,VersionId:existing.Policy.DefaultVersionId})),current=parsePolicyDocument(version.PolicyVersion?.Document);if(stableJson(current)!==stableJson(document))throw new Error(`POLICY_NAME_CONFLICT: ${name}`);return {mode:'LIVE',changed:false,idempotent:true,policyArn,message:'A matching PermissionHub policy already exists and was reused.'}}}catch(error:any){if(error?.name!=='NoSuchEntity'&&error?.Code!=='NoSuchEntity')throw error}
+  try{const existing=await this.iam.send(new GetPolicyCommand({PolicyArn:policyArn}));if(existing.Policy?.DefaultVersionId){const tags=await this.iam.send(new ListPolicyTagsCommand({PolicyArn:policyArn}));if(!requestId||!tags.Tags?.some(tag=>tag.Key==='ManagedBy'&&tag.Value==='PermissionHub')||!tags.Tags?.some(tag=>tag.Key==='PermissionHubRequestId'&&tag.Value===requestId))throw new Error(`POLICY_NAME_CONFLICT: ${name}`);const version=await this.iam.send(new GetPolicyVersionCommand({PolicyArn:policyArn,VersionId:existing.Policy.DefaultVersionId})),current=parsePolicyDocument(version.PolicyVersion?.Document);if(stableJson(current)!==stableJson(document))throw new Error(`POLICY_NAME_CONFLICT: ${name}`);return {mode:'LIVE',changed:false,idempotent:true,policyArn,message:'A matching PermissionHub policy already exists and was reused.'}}}catch(error:any){if(error?.name!=='NoSuchEntity'&&error?.Code!=='NoSuchEntity')throw error}
   const response=await this.iam.send(new CreatePolicyCommand({PolicyName:name,Path:path,PolicyDocument:JSON.stringify(document),Tags:[{Key:'ManagedBy',Value:'PermissionHub'},...(requestId?[{Key:'PermissionHubRequestId',Value:requestId}]:[])]}));
   cache.deletePrefix(`policy-catalogue:${this.contextKey()}:Local`);
   return {mode:isLocalProvisioningEnabled()?'local':'LIVE',changed:true,policyArn:response.Policy?.Arn,awsRequestId:response.$metadata.requestId};

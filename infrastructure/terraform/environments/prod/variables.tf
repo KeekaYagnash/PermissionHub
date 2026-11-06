@@ -1,4 +1,45 @@
 variable "aws_region" { type = string }
+variable "aws_account_id" { type = string }
+variable "runtime_permissions_boundary_arn" {
+  type    = string
+  default = null
+}
+variable "database_instance_class" {
+  type    = string
+  default = "db.t3.medium"
+}
+variable "postgres_engine_version" {
+  type    = string
+  default = "16.15"
+}
+variable "database_deletion_protection" {
+  type    = bool
+  default = true
+}
+variable "cognito_deletion_protection" {
+  type    = string
+  default = "ACTIVE"
+  validation {
+    condition     = contains(["ACTIVE", "INACTIVE"], var.cognito_deletion_protection)
+    error_message = "Use ACTIVE normally; INACTIVE requires separate reviewed destroy preparation."
+  }
+}
+variable "api_lambda_artifact_hash" {
+  type    = string
+  default = null
+}
+variable "provisioning_lambda_artifact_hash" {
+  type    = string
+  default = null
+}
+variable "expiry_lambda_artifact_hash" {
+  type    = string
+  default = null
+}
+variable "migration_lambda_artifact_hash" {
+  type    = string
+  default = null
+}
 variable "environment" {
   type    = string
   default = "prod"

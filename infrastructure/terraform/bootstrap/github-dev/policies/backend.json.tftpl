@@ -1,0 +1,291 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StateBucketMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${state_bucket}"
+      ]
+    },
+    {
+      "Sid": "OnlyApplicationState",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${state_bucket}/${state_key}"
+      ]
+    },
+    {
+      "Sid": "LockMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:${region}:${account_id}:table/${lock_table}"
+      ]
+    },
+    {
+      "Sid": "OnlyDevLock",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:${region}:${account_id}:table/${lock_table}"
+      ],
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:LeadingKeys": [
+            "${state_bucket}/${state_key}",
+            "${state_bucket}/${state_key}-md5"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "InfrastructureDiscovery",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "rds:Describe*",
+        "rds:ListTagsForResource",
+        "logs:DescribeLogGroups",
+        "cloudwatch:DescribeAlarms",
+        "cloudfront:ListDistributions",
+        "cloudfront:ListOriginAccessControls",
+        "lambda:ListFunctions",
+        "lambda:ListEventSourceMappings"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ApplicationRead",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:Get*",
+        "lambda:ListTags",
+        "lambda:ListVersionsByFunction"
+      ],
+      "Resource": [
+        "arn:aws:lambda:${region}:${account_id}:function:permissionhub-dev-*",
+        "arn:aws:lambda:${region}:${account_id}:event-source-mapping:*"
+      ]
+    },
+    {
+      "Sid": "RuntimeRoleRead",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole"
+      ],
+      "Resource": "arn:aws:iam::${account_id}:role/permissionhub-dev-*-role"
+    },
+    {
+      "Sid": "ManagedPolicyRead",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": [
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+        "${boundary_arn}"
+      ]
+    },
+    {
+      "Sid": "SecretsRead",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:ListSecretVersionIds",
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:${region}:${account_id}:secret:permissionhub-dev/*",
+        "arn:aws:secretsmanager:${region}:${account_id}:secret:dev/permissionhub-dev/*"
+      ]
+    },
+    {
+      "Sid": "FrontendConfigRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucket*",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:GetReplicationConfiguration",
+        "s3:GetAccelerateConfiguration",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::permissionhub-dev-frontend-*",
+        "arn:aws:s3:::${artifact_bucket}"
+      ]
+    },
+    {
+      "Sid": "DistributionRead",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:distribution/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Application": "PermissionHub",
+          "aws:ResourceTag/Environment": "dev"
+        }
+      }
+    },
+    {
+      "Sid": "OriginAccessControlRead",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:GetOriginAccessControlConfig"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:origin-access-control/*"
+    },
+    {
+      "Sid": "LogRead",
+      "Effect": "Allow",
+      "Action": [
+        "logs:ListTagsLogGroup"
+      ],
+      "Resource": "arn:aws:logs:${region}:${account_id}:log-group:/aws/*/permissionhub-dev-*:*"
+    },
+    {
+      "Sid": "QueueRead",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:GetQueueAttributes",
+        "sqs:ListQueueTags"
+      ],
+      "Resource": "arn:aws:sqs:${region}:${account_id}:permissionhub-dev-*"
+    },
+    {
+      "Sid": "ScheduleRead",
+      "Effect": "Allow",
+      "Action": [
+        "events:DescribeRule",
+        "events:ListTargetsByRule",
+        "events:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:events:${region}:${account_id}:rule/permissionhub-dev-*"
+    },
+    {
+      "Sid": "CognitoRead",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:DescribeUserPool",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:DescribeUserPoolDomain",
+        "cognito-idp:GetUserPoolMfaConfig",
+        "cognito-idp:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:cognito-idp:${region}:${account_id}:userpool/*"
+    },
+    {
+      "Sid": "ApiRead",
+      "Effect": "Allow",
+      "Action": [
+        "apigateway:GET"
+      ],
+      "Resource": "arn:aws:apigateway:${region}::*"
+    },
+    {
+      "Sid": "ArtifactMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketVersioning"
+      ],
+      "Resource": "arn:aws:s3:::${artifact_bucket}"
+    },
+    {
+      "Sid": "ArtifactRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${artifact_bucket}/lambda/*",
+        "arn:aws:s3:::${artifact_bucket}/*demo.zip"
+      ]
+    },
+    {
+      "Sid": "ImmutableArtifactUpload",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::${artifact_bucket}/lambda/*",
+      "Condition": {
+        "StringEquals": {
+          "s3:if-none-match": "*"
+        }
+      }
+    },
+    {
+      "Sid": "FunctionCodeOnly",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:UpdateFunctionCode"
+      ],
+      "Resource": "arn:aws:lambda:${region}:${account_id}:function:permissionhub-dev-*"
+    },
+    {
+      "Sid": "MigrationConfigAndInvocation",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:InvokeFunction"
+      ],
+      "Resource": "arn:aws:lambda:${region}:${account_id}:function:permissionhub-dev-db-migration"
+    },
+    {
+      "Sid": "ReadTaggedApiAlarm",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:cloudwatch:${region}:${account_id}:alarm:*-5xx",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Application": "PermissionHub",
+          "aws:ResourceTag/Environment": "dev"
+        }
+      }
+    },
+    {
+      "Sid": "ReadCognitoGroups",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:GetGroup",
+        "cognito-idp:ListGroups"
+      ],
+      "Resource": "arn:aws:cognito-idp:${region}:${account_id}:userpool/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Application": "PermissionHub",
+          "aws:ResourceTag/Environment": "dev"
+        }
+      }
+    }
+  ]
+}

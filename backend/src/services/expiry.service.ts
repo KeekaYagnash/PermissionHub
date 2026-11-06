@@ -16,6 +16,7 @@ export class PermissionGrantExpiryService{
    const memberResults=[];
    if(grant.targetType==='GROUP')for(const userName of grant.groupMembersAdded??[])memberResults.push(await this.provisioning.removeUserFromGroup(grant.targetName,userName));
    const response=membershipOnly?{operation:'RemoveUserFromGroup',changed:memberResults.some(item=>(item as {changed?:boolean}).changed),members:memberResults}:await this.provisioning.detach({targetType:grant.targetType,targetName:grant.targetName,policyArn:grant.policyArn});
+   if(!(response as {changed?:boolean}).changed)throw new Error('Revocation did not execute; the grant remains active.');
    grant.revokedAt=new Date().toISOString();
    grant.revocationResponse=response;
    auditEvents.unshift(this.audit(actor,grant,response));

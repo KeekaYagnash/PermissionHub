@@ -6,7 +6,7 @@ import {ApiError} from '../utils/http.js';
 export const reviewActions=['APPROVE','APPROVE_AND_PROVISION','REJECT','REQUEST_INFORMATION'] as const;
 export type ReviewAction=typeof reviewActions[number];
 export type AwsProvisioningMode='disabled'|'dry-run'|'live'|'local';
-export interface PlannedOperation{service:'iam';operation:'CreateUser'|'CreateRole'|'UpdateAssumeRolePolicy'|'CreatePolicy'|'AttachUserPolicy'|'AttachRolePolicy'|'DetachRolePolicy'|'CreateGroup'|'AttachGroupPolicy'|'AddUserToGroup';executed:false;policyArn?:string;policyName?:string;policyPath?:'/permissionhub/';policyDocument?:Record<string,unknown>;targetName?:string;targetArn?:string;groupName?:string;userName?:string}
+export interface PlannedOperation{service:'iam';operation:'CreateUser'|'CreateRole'|'UpdateAssumeRolePolicy'|'CreatePolicy'|'AttachUserPolicy'|'AttachRolePolicy'|'DetachRolePolicy'|'DetachUserPolicy'|'DetachGroupPolicy'|'RemoveUserFromGroup'|'CreateGroup'|'AttachGroupPolicy'|'AddUserToGroup';executed:false;policyArn?:string;policyName?:string;policyPath?:'/permissionhub/';policyDocument?:Record<string,unknown>;targetName?:string;targetArn?:string;groupName?:string;userName?:string}
 export interface ProvisioningPlan{valid:boolean;policyMode:'MANAGED_POLICY'|'GENERATED_CUSTOMER_POLICY'|'MIXED';targetAccount:string;targetPrincipal:string;targetPrincipalType:'USER'|'ROLE'|'GROUP';generatedPolicyNames:string[];plannedOperations:PlannedOperation[];validationResults:{check:string;valid:boolean;message:string}[];errors:{field:string;message:string}[]}
 
 const optionalComment=z.preprocess(value=>{
@@ -43,7 +43,7 @@ export function buildProvisioningPlan(request:PermissionRequest,account:AwsAccou
  if(request.targetType==='GROUP'){
   if(!request.group)errors.push({field:'group',message:'Group create/update details are required.'});
   else if(request.group.name!==request.targetName)errors.push({field:'group.name',message:'Group name must match the target name.'});
-  if(!request.members?.some(member=>(member.operation??'ADD')==='ADD'))errors.push({field:'members',message:'Select at least one IAM user to add to the group.'});
+  if((!request.group||request.group.mode==='EXISTING'&&!request.items.length)&&!request.members?.length)errors.push({field:'members',message:'Select at least one IAM user to add to the group.'});
   if(request.group?.mode==='CREATE')operations.push({service:'iam',operation:'CreateGroup',executed:false,targetName:request.targetName,targetArn:request.targetArn,groupName:request.targetName});
  }
  if(request.targetType==='ROLE'){
@@ -66,7 +66,7 @@ export function buildProvisioningPlan(request:PermissionRequest,account:AwsAccou
   if(item.mode==='MANAGED_POLICY'){
    if(!item.policyArn)errors.push({field:`items.${index}.policyArn`,message:'Managed-policy attachment requires a policy ARN.'});
    else if(item.policyArn.endsWith('/AdministratorAccess'))errors.push({field:`items.${index}.policyArn`,message:'AdministratorAccess provisioning is blocked.'});
-   else if(request.targetType==='ROLE'&&item.operation==='DETACH')operations.push({service:'iam',operation:'DetachRolePolicy',executed:false,policyArn:item.policyArn,targetName:request.targetName,targetArn:request.targetArn});
+   else if(item.operation==='DETACH')operations.push({service:'iam',operation:request.targetType==='USER'?'DetachUserPolicy':request.targetType==='GROUP'?'DetachGroupPolicy':'DetachRolePolicy',executed:false,policyArn:item.policyArn,targetName:request.targetName,targetArn:request.targetArn});
    else if(userTargets)for(const user of userTargets)operations.push({service:'iam',operation:attachOperation,executed:false,policyArn:item.policyArn,targetName:user.name,targetArn:user.arn});
    else operations.push({service:'iam',operation:attachOperation,executed:false,policyArn:item.policyArn,targetName:request.targetName,targetArn:request.targetArn});
   }else{
@@ -80,7 +80,7 @@ export function buildProvisioningPlan(request:PermissionRequest,account:AwsAccou
  });
  if(request.targetType==='GROUP'){
   for(const member of createUsers)operations.push({service:'iam',operation:'CreateUser',executed:false,targetName:member.userName,targetArn:member.userArn,userName:member.userName});
-  for(const member of request.members??[])if((member.operation??'ADD')==='ADD')operations.push({service:'iam',operation:'AddUserToGroup',executed:false,targetName:request.targetName,targetArn:request.targetArn,groupName:request.targetName,userName:member.userName});
+  for(const member of request.members??[])operations.push({service:'iam',operation:member.operation==='REMOVE'?'RemoveUserFromGroup':'AddUserToGroup',executed:false,targetName:request.targetName,targetArn:request.targetArn,groupName:request.targetName,userName:member.userName});
  }
  if(request.targetType==='ROLE'&&request.role?.mode==='CREATE'&&!request.role.trustPolicyDocument)errors.push({field:'role.trustPolicyDocument',message:'A trust policy document is required to create an IAM role.'});
  if(request.targetType==='ROLE'&&request.role?.updateAction==='UPDATE_TRUST'&&!request.role.trustPolicyDocument)errors.push({field:'role.trustPolicyDocument',message:'A trust policy document is required to update the role trust relationship.'});

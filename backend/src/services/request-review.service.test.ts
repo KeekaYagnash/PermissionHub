@@ -20,6 +20,18 @@ describe('review action comment validation',()=>{
 });
 
 describe('safe provisioning plan',()=>{
+ it('allows an empty new group and plans no membership change',()=>{
+  const plan=buildProvisioningPlan(request({targetType:'GROUP',targetName:'Finance',targetArn:'arn:aws:iam::143671530412:group/Finance',group:{mode:'CREATE',name:'Finance'},members:[],items:[]}),account);
+  expect(plan.valid).toBe(true);
+  expect(plan.plannedOperations.map(item=>item.operation)).toEqual(['CreateGroup']);
+ });
+ it('plans user and group removals as removals rather than attachments',()=>{
+  const plan=buildProvisioningPlan(request({items:[{mode:'MANAGED_POLICY',operation:'DETACH',policyArn:'arn:aws:iam::aws:policy/ReadOnlyAccess'}]}),account);
+  expect(plan.plannedOperations[0]?.operation).toBe('DetachUserPolicy');
+  const group=buildProvisioningPlan(request({targetType:'GROUP',targetName:'Finance',targetArn:'arn:aws:iam::143671530412:group/Finance',group:{mode:'EXISTING',name:'Finance'},members:[{userName:'maya.chen',operation:'REMOVE'}],items:[]}),account);
+  expect(group.valid).toBe(true);
+  expect(group.plannedOperations.map(item=>item.operation)).toEqual(['RemoveUserFromGroup']);
+ });
  it('defaults to disabled and does not advertise provisioning',()=>{
   expect(provisioningMode()).toBe('disabled');
   expect(reviewCapabilities({request:request(),account,approvalAllowed:true,provisionPermission:true})).toMatchObject({provisioningAllowed:false,provisioningMode:'disabled'});
@@ -153,12 +165,12 @@ describe('safe provisioning plan',()=>{
   (env as {NODE_ENV:'production'}).NODE_ENV='production';(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=true;
   expect(provisioningMode()).toBe(originalMode);
  });
- it('enables demo provisioning bypass from an explicit production demo flag',()=>{
+ it('does not bypass production approval gates through the legacy demo flag',()=>{
   (env as {NODE_ENV:'production'}).NODE_ENV='production';(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=false;(env as {DEMO_PROVISIONING_BYPASS_ENABLED:boolean}).DEMO_PROVISIONING_BYPASS_ENABLED=true;
-  expect(reviewCapabilities({request:request(),account:{...account,connectionStatus:'CONNECTED'},approvalAllowed:false,provisionPermission:false,canReview:true,currentUserRoles:['ORGANISATION_ADMIN'],selfApprovalBlocked:true,assignedApproverMatch:false})).toMatchObject({provisioningMode:'local',localProvisioningEnabled:true,approvalAllowed:true,provisioningAllowed:true,canApprove:true,canProvision:true,blockingReasons:expect.not.arrayContaining(['CURRENT_USER_NOT_ELIGIBLE_APPROVER','CURRENT_USER_NOT_ASSIGNED_APPROVER','ACCOUNT_SCOPED_PROVISIONER_REQUIRED','PROVISIONING_MODE_DRY_RUN','PROVISION_ROLE_NOT_CONFIGURED','EXPIRY_REVOCATION_NOT_CONFIGURED','SELF_APPROVAL_BLOCKED'])});
+  expect(reviewCapabilities({request:request(),account:{...account,connectionStatus:'CONNECTED'},approvalAllowed:false,provisionPermission:false,canReview:true,currentUserRoles:['ORGANISATION_ADMIN'],selfApprovalBlocked:true,assignedApproverMatch:false})).toMatchObject({localProvisioningEnabled:false,approvalAllowed:false,provisioningAllowed:false,canApprove:false,canProvision:false});
  });
- it('reports global provisioning as live while bypassing enterprise blockers when explicitly enabled',()=>{
+ it('keeps global live provisioning separate from approval authorization',()=>{
   (env as {NODE_ENV:'production'}).NODE_ENV='production';(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=false;(env as {DEMO_PROVISIONING_BYPASS_ENABLED:boolean}).DEMO_PROVISIONING_BYPASS_ENABLED=false;(env as {GLOBAL_PROVISIONING_ENABLED:boolean}).GLOBAL_PROVISIONING_ENABLED=true;(env as {AWS_PROVISIONING_MODE:'live'}).AWS_PROVISIONING_MODE='live';
-  expect(reviewCapabilities({request:request(),account:{...account,connectionStatus:'CONNECTED'},approvalAllowed:false,provisionPermission:false,canReview:true,currentUserRoles:['ORGANISATION_ADMIN'],selfApprovalBlocked:true,assignedApproverMatch:false})).toMatchObject({provisioningMode:'live',localProvisioningEnabled:true,approvalAllowed:true,provisioningAllowed:true,canApprove:true,canProvision:true,requiredApproverRoles:['SECURITY_REVIEWER'],blockingReasons:expect.not.arrayContaining(['CURRENT_USER_NOT_ELIGIBLE_APPROVER','CURRENT_USER_NOT_ASSIGNED_APPROVER','ACCOUNT_SCOPED_PROVISIONER_REQUIRED','PROVISIONING_MODE_DRY_RUN','PROVISION_ROLE_NOT_CONFIGURED','EXPIRY_REVOCATION_NOT_CONFIGURED','SELF_APPROVAL_BLOCKED'])});
+  expect(reviewCapabilities({request:request(),account:{...account,connectionStatus:'CONNECTED'},approvalAllowed:false,provisionPermission:false,canReview:true,currentUserRoles:['ORGANISATION_ADMIN'],selfApprovalBlocked:true,assignedApproverMatch:false})).toMatchObject({provisioningMode:'live',localProvisioningEnabled:false,approvalAllowed:false,provisioningAllowed:false,canApprove:false,canProvision:false,blockingReasons:expect.arrayContaining(['SELF_APPROVAL_BLOCKED','ACCOUNT_SCOPED_PROVISIONER_REQUIRED'])});
  });
 });

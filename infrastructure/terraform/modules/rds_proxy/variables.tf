@@ -1,4 +1,8 @@
 variable "name" { type = string }
+variable "permissions_boundary_arn" {
+  type    = string
+  default = null
+}
 variable "vpc_subnet_ids" { type = list(string) }
 variable "proxy_security_group_id" { type = string }
 variable "db_instance_identifier" { type = string }

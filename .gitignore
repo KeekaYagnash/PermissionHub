@@ -26,3 +26,5 @@ backend/lambda-dist/
 *.tfplan
 tfplan*
 **/lambda-artifacts.auto.tfvars.json
+**/bootstrap.auto.tfvars.json
+**/imports.generated.tf
