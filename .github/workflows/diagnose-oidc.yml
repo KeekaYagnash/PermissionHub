@@ -1,0 +1,66 @@
+name: Diagnose GitHub repository and OIDC claims (no AWS access)
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  repository:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show PR repository references safely
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
+        shell: bash
+        run: |
+          node <<'JS'
+          const {appendFileSync}=require('node:fs');
+          const keys=['GITHUB_REPOSITORY','GITHUB_REPOSITORY_OWNER','GITHUB_EVENT_NAME','GITHUB_REF','GITHUB_HEAD_REF','GITHUB_BASE_REF','GITHUB_WORKFLOW_REF','GITHUB_SHA','HEAD_REPOSITORY','BASE_REPOSITORY'];
+          const context=Object.fromEntries(keys.map(key=>[key,process.env[key] || '(not set)']));
+          console.log(JSON.stringify(context,null,2));
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,'## Repository context\n\n```json\n'+JSON.stringify(context,null,2)+'\n```\n');
+          JS
+  pr-claims:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    # No deployment environment, secrets, checkout, AWS action or role assumption.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - &show-claims
+        name: Show allowlisted OIDC claims only (never the token)
+        shell: bash
+        run: |
+          node <<'JS'
+          const {appendFileSync}=require('node:fs');
+          (async()=>{
+            const url=new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+            url.searchParams.set('audience','sts.amazonaws.com');
+            const response=await fetch(url,{headers:{Authorization:`bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`},signal:AbortSignal.timeout(15000)});
+            if(!response.ok)throw Error(`GitHub OIDC request failed (HTTP ${response.status}); token and response body withheld.`);
+            const {value}=await response.json();
+            if(typeof value!=='string'||value.split('.').length!==3)throw Error('GitHub returned an invalid token shape; response withheld.');
+            console.log(`::add-mask::${value}`);
+            const payload=JSON.parse(Buffer.from(value.split('.')[1],'base64url').toString());
+            const keys=['iss','aud','sub','repository','repository_id','repository_owner','repository_owner_id','ref','base_ref','head_ref','environment','event_name','workflow_ref','job_workflow_ref'];
+            const claims=Object.fromEntries(keys.map(key=>[key,payload[key] ?? '(not set)']));
+            const expected={provider:'arn:aws:iam::143671530412:oidc-provider/token.actions.githubusercontent.com',aud:'sts.amazonaws.com',sub:'repo:KeekaYagnash/PermissionHub:environment:development',ref:'refs/heads/dev',environment:'development'};
+            const comparison=Object.fromEntries(['aud','sub','ref','environment'].map(key=>[key,{actual:claims[key],expected:expected[key],matches:claims[key]===expected[key]}]));
+            const report={claims,expectedDevDeployment:expected,comparison};
+            console.log(JSON.stringify(report,null,2));
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY,'## OIDC claims (diagnostic decoding only, not JWT verification)\n\n```json\n'+JSON.stringify(report,null,2)+'\n```\n\nPRs intentionally differ from deployment: no AWS role is assumed. A manual run on dev uses the development environment to show deployment claims. Custom/immutable subjects must be compared with actual AWS trust; do not broaden trust to fix a mismatch.\n');
+          })().catch(()=>{console.error('OIDC diagnostic failed; response/token details withheld.');process.exitCode=1;});
+          JS
+  development-claims:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    environment: development
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - *show-claims
