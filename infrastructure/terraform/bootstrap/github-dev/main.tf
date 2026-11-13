@@ -79,7 +79,8 @@ locals {
     { backend = jsondecode(templatefile("${path.module}/policies/backend.json.tftpl", local.template_variables)),
     frontend = jsondecode(templatefile("${path.module}/policies/frontend.json.tftpl", local.template_variables)) }
   )
-  runtime_boundary = jsondecode(templatefile("${path.module}/policies/runtime-boundary.json.tftpl", local.template_variables))
+  runtime_boundary    = jsondecode(templatefile("${path.module}/policies/runtime-boundary.json.tftpl", local.template_variables))
+  storage_full_access = jsondecode(file("${path.module}/policies/storage-full-access.json"))
 }
 resource "aws_iam_openid_connect_provider" "github" {
   count          = var.create_oidc_provider ? 1 : 0
@@ -115,6 +116,12 @@ resource "aws_iam_role_policy_attachment" "deploy" {
   for_each   = local.role_policies
   role       = aws_iam_role.deploy[startswith(each.key, "terraform-") ? "terraform" : each.key].name
   policy_arn = aws_iam_policy.deploy[each.key].arn
+}
+resource "aws_iam_role_policy" "storage_full_access" {
+  for_each = aws_iam_role.deploy
+  name     = "permissionhub-github-storage-full-access-dev"
+  role     = each.value.name
+  policy   = jsonencode(local.storage_full_access)
 }
 resource "aws_iam_policy" "runtime_boundary" {
   name   = "permissionhub-github-runtime-boundary-dev"

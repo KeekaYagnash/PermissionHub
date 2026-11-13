@@ -2,6 +2,56 @@
 
 ## Existing account provider
 
+### Requested dev storage permissions
+
+All three dev GitHub deployment roles now receive the inline policy
+`permissionhub-github-storage-full-access-dev` with `s3:*` and `dynamodb:*` on
+`Resource: "*"`. This is an explicit operator-requested expansion, **not least
+privilege**: it includes deleting/reading/modifying unrelated accessible S3 and
+DynamoDB resources. It is not attached to application runtime roles or production
+roles. Existing trust restrictions remain unchanged. Organization policies,
+permissions boundaries, KMS permissions and explicit resource-policy denies can
+still prevent access; this change is not a guarantee of every AWS API succeeding.
+
+The shared JSON source is `policies/storage-full-access.json`. Terraform manages
+one same-named inline policy on each role. The bootstrap preparation script can
+import an existing same-named policy, and the renderer exports its JSON. Existing
+conditional state-lock allows remain but no longer limit these broader allows.
+Terraform locking remains enabled. Frontend CloudFront permissions also include
+the `GetDistribution` call used to verify the hosting origin.
+
+Use local administrator/bootstrap credentials to review/apply this independent
+root; GitHub roles must not modify themselves. Do not use the application root:
+
+```powershell
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev init
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev plan '-out=github-permissions.tfplan'
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev show 'github-permissions.tfplan'
+# Creates/updates live IAM policies only after reviewing the plan:
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev apply 'github-permissions.tfplan'
+```
+
+Alternatively, an administrator can immediately apply only the requested storage
+policy from the repository root (this modifies live AWS IAM):
+
+```powershell
+$storagePolicy = (Resolve-Path 'infrastructure/terraform/bootstrap/github-dev/policies/storage-full-access.json').Path
+foreach ($role in @('permissionhub-github-terraform-dev','permissionhub-github-backend-dev','permissionhub-github-frontend-dev')) {
+  aws iam put-role-policy --role-name $role --policy-name permissionhub-github-storage-full-access-dev --policy-document "file://$storagePolicy"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to update $role" }
+}
+```
+
+The direct command does not update the separate frontend CloudFront policy. Run
+the reviewed bootstrap Terraform update to converge all policy changes. Verify
+inline policy installation without acquiring/deleting a real Terraform lock:
+
+```powershell
+aws iam get-role-policy --role-name permissionhub-github-terraform-dev --policy-name permissionhub-github-storage-full-access-dev
+```
+
+No commands in this section were executed against AWS during implementation.
+
 The existing provider is `arn:aws:iam::143671530412:oidc-provider/token.actions.githubusercontent.com`.
 Keep `create_oidc_provider = false` (the default and current local bootstrap configuration).
 All three `permissionhub-github-{terraform,backend,frontend}-dev` role trust policies

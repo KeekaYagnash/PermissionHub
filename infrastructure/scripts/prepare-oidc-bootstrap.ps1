@@ -38,7 +38,10 @@ foreach($kind in @('terraform','backend','frontend')){
   $attached=Read-Aws @('iam','list-attached-role-policies','--role-name',$name,'--output','json') ''
   $inline=Read-Aws @('iam','list-role-policies','--role-name',$name,'--output','json') ''
   $expected=if($kind -eq 'terraform'){@('state','network','identity','platform','discovery') | ForEach-Object {"arn:aws:iam::143671530412:policy/permissionhub-github-terraform-$_-dev"}}else{@("arn:aws:iam::143671530412:policy/permissionhub-github-$kind-dev")}
-  if(@($inline.PolicyNames).Count -or @($attached.AttachedPolicies | Where-Object {$_.PolicyArn -notin $expected}).Count){throw "Existing $name has unreviewed additional policies. Do not assume least privilege or silently detach them; review before adoption."}
+  if(@($inline.PolicyNames | Where-Object {$_ -ne 'permissionhub-github-storage-full-access-dev'}).Count -or @($attached.AttachedPolicies | Where-Object {$_.PolicyArn -notin $expected}).Count){throw "Existing $name has unreviewed additional policies. Do not assume least privilege or silently detach them; review before adoption."}
+  if('permissionhub-github-storage-full-access-dev' -in $inline.PolicyNames -and -not (Is-Managed 'aws_iam_role_policy' 'storage_full_access' $kind)){
+   $imports.Add("import {`n  to = aws_iam_role_policy.storage_full_access[`"$kind`"]`n  id = `"${name}:permissionhub-github-storage-full-access-dev`"`n}")
+  }
  }
  if($role -and -not (Is-Managed 'aws_iam_role' 'deploy' $kind)){$imports.Add("import {`n  to = aws_iam_role.deploy[`"$kind`"]`n  id = `"$name`"`n}")}
 }
