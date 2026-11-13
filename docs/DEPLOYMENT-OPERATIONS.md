@@ -405,3 +405,21 @@ The state bucket, lock table and artifact bucket must already exist. Defaults do
 not create or verify those resources. Backend preflight rejects empty or padded
 values with named errors before Terraform init. Reviewed `CI_TF_VARS_JSON` and the
 `TF_PLAN_ENCRYPTION_KEY` secret remain required; neither is fabricated by defaults.
+# Initial dev deployment (empty state)
+
+The backend now detects an entirely empty, identity-checked **dev** application
+state and selects initial deployment automatically. It requires the full Lambda
+build manifest, uploads the four artifacts, uses the infrastructure role and
+guarded infrastructure plan, applies that exact plan, and only then runs the
+migration Lambda. API verification and frontend publication follow migrations.
+Set `CI_MIGRATIONS_READY=true` in GitHub Environment `development` only after
+reviewing the passing migration checks; initial apply refuses to proceed without
+it. Reviewed `CI_TF_VARS_JSON`, plan encryption and bootstrap prerequisites remain
+required. Dev-only detection never automatically initializes production.
+
+Nonempty/partially created application state is **not** automatically treated as
+fresh. Do not delete state or change keys to trigger initial deployment. A failed
+partial apply needs review and a controlled recovery, not another empty-state
+deployment. Production still requires explicit `fresh_deployment` and migration
+approval. Older instructions requiring explicit fresh mode for dev are superseded
+by this dev-only detection.

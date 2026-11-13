@@ -116,6 +116,11 @@ export function guardPlan(plan,mode){
  }
  return changed.length;
 }
+export function resolveFreshDeployment(state,{environment,requestedFresh=false,autoBootstrapDev=false}){
+ const empty=!resources(state.values?.root_module).some(resource=>resource.mode!=='data');
+ if(requestedFresh&&!empty)throw Error('Fresh deployment requires empty application state. Preserve and review existing infrastructure; never erase state to force bootstrap.');
+ return requestedFresh||(environment==='dev'&&autoBootstrapDev&&empty);
+}
 export function artifactReferences(state,manifest,bucket,allowFresh=false){
  const all=resources(state.values?.root_module),result={lambda_artifact_bucket:bucket};
  if(allowFresh){

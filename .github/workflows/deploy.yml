@@ -118,7 +118,7 @@ jobs:
       apply: ${{ github.event_name == 'push' || inputs.apply }}
   frontend:
     needs: [changes, validation, backend]
-    if: always() && !inputs.defer_frontend && needs.validation.result == 'success' && (needs.backend.result == 'success' || needs.backend.result == 'skipped') && (github.event_name == 'push' || inputs.apply) && (needs.changes.outputs.frontend == 'true' || needs.changes.outputs.infrastructure == 'true')
+    if: always() && !inputs.defer_frontend && needs.validation.result == 'success' && (needs.backend.result == 'success' || needs.backend.result == 'skipped') && (github.event_name == 'push' || inputs.apply) && (needs.changes.outputs.frontend == 'true' || needs.changes.outputs.infrastructure == 'true' || needs.backend.outputs.fresh_deployment == 'true')
     uses: ./.github/workflows/deploy-dev-frontend.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}

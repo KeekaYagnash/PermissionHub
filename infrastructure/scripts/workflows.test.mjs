@@ -3,6 +3,20 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=name=>readFileSync(new URL(`../../.github/workflows/${name}`,import.meta.url),'utf8');
 
+test('detected initial dev deployment propagates through infrastructure, migrations and frontend',()=>{
+ const backend=read('deploy-dev-backend.yml');
+ assert.match(backend,/AUTO_BOOTSTRAP_DEV: \$\{\{ inputs.environment == 'dev' && 'true' \|\| 'false' \}\}/);
+ assert.match(backend,/fresh_deployment: \$\{\{ steps.references.outputs.fresh_deployment \}\}/);
+ assert.match(backend,/inputs.apply && needs.prepare.outputs.fresh_deployment != 'true'/);
+ assert.match(backend,/PLAN_MODE:.*needs.prepare.outputs.fresh_deployment == 'true'/);
+ assert.match(backend,/role-to-assume:.*inputs.infrastructure \|\| needs.prepare.outputs.fresh_deployment == 'true'/);
+ assert.match(backend,/needs: \[plan, prepare\]/);
+ assert.match(backend,/Initialize a fresh database only after infrastructure exists\s*\n\s*if: needs.prepare.outputs.fresh_deployment == 'true'/);
+ assert.match(read('deploy.yml'),/needs.backend.outputs.fresh_deployment == 'true'/);
+ const cli=readFileSync(new URL('./ci.mjs',import.meta.url),'utf8');
+ assert.ok(cli.indexOf('Initial deployment needs CI_MIGRATIONS_READY')<cli.indexOf("artifactReferences(state,manifest"));
+});
+
 test('backend init defaults match dev Terraform and step overrides cannot erase them',()=>{
  const code=read('deploy-dev-backend.yml');
  const expected={TF_STATE_BUCKET:'permissionhub-dev-bucket',TF_STATE_KEY:'permisionhub/dev/backend',TF_LOCK_TABLE:'permissionhub-state-lock',AWS_ACCOUNT_ID:'143671530412',LAMBDA_ARTIFACT_BUCKET:'permissionhub-dev-lambda-artifacts'};
