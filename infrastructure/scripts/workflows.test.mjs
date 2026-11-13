@@ -3,6 +3,19 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=name=>readFileSync(new URL(`../../.github/workflows/${name}`,import.meta.url),'utf8');
 
+test('deployment checks environment secrets before build, upload or plan',()=>{
+ const deploy=read('deploy.yml'),preflight=read('deployment-preflight.yml');
+ assert.match(deploy,/validation:\s*\n\s*needs: \[changes, preflight\]/);
+ assert.match(preflight,/secrets.TF_PLAN_ENCRYPTION_KEY/);
+ assert.match(preflight,/node infrastructure\/scripts\/ci.mjs preflight/);
+ assert.doesNotMatch(preflight,/id-token: write|configure-aws-credentials|aws sts|terraform apply/);
+ assert.doesNotMatch(read('terraform-pr.yml'),/secrets.TF_PLAN_ENCRYPTION_KEY/);
+ const script=readFileSync(new URL('./set-plan-encryption-key.ps1',import.meta.url),'utf8');
+ assert.match(script,/RandomNumberGenerator/);
+ assert.match(script,/gh secret set TF_PLAN_ENCRYPTION_KEY/);
+ assert.doesNotMatch(script,/Write-Host.*\$encoded|Write-Output.*\$encoded|Set-Content/);
+});
+
 test('configuration is validated in prepare before any artifact upload and in PR checks',()=>{
  const backend=read('deploy-dev-backend.yml');
  assert.ok(backend.indexOf('Validate deployment configuration before uploading artifacts')<backend.indexOf('Upload only changed artifacts'));
