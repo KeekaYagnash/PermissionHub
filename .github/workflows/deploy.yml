@@ -5,12 +5,16 @@ on:
     paths: ['frontend/**', 'backend/**', 'package.json', 'package-lock.json', '.github/**', 'infrastructure/**']
   workflow_dispatch:
     inputs:
+      recover_migration_logs:
+        description: Recovery-only mode; verify migration log group and optionally clear its taint
+        type: boolean
+        default: false
       recover_cognito_domain:
         description: Recovery-only mode; verify existing dev Cognito domain and optionally clear its taint
         type: boolean
         default: false
       recovery_confirmation:
-        description: For recovery with apply=true, type RECOVER DEV COGNITO DOMAIN
+        description: Type RECOVER DEV COGNITO DOMAIN or RECOVER DEV MIGRATION LOG GROUP for the selected recovery
         type: string
         default: ''
       fresh_deployment:
@@ -22,7 +26,7 @@ on:
         options: [dev, prod]
         default: dev
       apply:
-        description: Apply deployment; in recovery-only mode, clear the verified domain taint only
+        description: Apply deployment; in recovery-only mode, clear the verified resource taint only
         type: boolean
         default: false
       run_migrations:
@@ -63,18 +67,25 @@ concurrency:
   cancel-in-progress: false
 jobs:
   invalid-recovery:
-    if: github.event_name == 'workflow_dispatch' && inputs.recover_cognito_domain && inputs.environment != 'dev'
+    if: github.event_name == 'workflow_dispatch' && (((inputs.recover_cognito_domain || inputs.recover_migration_logs) && inputs.environment != 'dev') || (inputs.recover_cognito_domain && inputs.recover_migration_logs))
     runs-on: ubuntu-latest
     steps:
-      - run: echo 'Cognito recovery is dev-only. Select environment dev and branch dev.'; exit 1
+      - run: echo 'Recovery is dev-only. Select exactly one recovery target, environment dev and branch dev.'; exit 1
   recover-cognito:
-    if: github.event_name == 'workflow_dispatch' && inputs.recover_cognito_domain && inputs.environment == 'dev'
+    if: github.event_name == 'workflow_dispatch' && inputs.recover_cognito_domain && inputs.environment == 'dev' && !inputs.recover_migration_logs
     uses: ./.github/workflows/recover-dev-cognito.yml
     with:
       execute: ${{ inputs.apply }}
       confirmation: ${{ inputs.recovery_confirmation }}
+  recover-migration-logs:
+    if: github.event_name == 'workflow_dispatch' && inputs.recover_migration_logs && inputs.environment == 'dev' && !inputs.recover_cognito_domain
+    uses: ./.github/workflows/recover-dev-cognito.yml
+    with:
+      target: migration-logs
+      execute: ${{ inputs.apply }}
+      confirmation: ${{ inputs.recovery_confirmation }}
   changes:
-    if: ${{ !inputs.recover_cognito_domain }}
+    if: ${{ !inputs.recover_cognito_domain && !inputs.recover_migration_logs }}
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.context.outputs.environment }}

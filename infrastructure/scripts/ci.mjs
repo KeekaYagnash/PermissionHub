@@ -4,6 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {validatePlanEncryptionKey} from './ci-lib.mjs';
 import {inspectCognitoRecovery,cognitoDomainAddress} from './cognito-recovery.mjs';
+import {inspectMigrationLogRecovery,migrationLogAddress,migrationLogName,migrationLogArn} from './log-group-recovery.mjs';
 import {guardFoundationPlan,stagedArtifactReferences} from './ci-lib.mjs';
 import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations,validateBackendConfig,resolveFreshDeployment,parseDeploymentConfig} from './ci-lib.mjs';
 const [command,...args]=process.argv.slice(2);
@@ -17,7 +18,26 @@ async function deploymentConfig(){
  console.log(raw?.trim()?'Using explicit CI_TF_VARS_JSON configuration (values withheld).':'Using reviewed dev ci.tfvars.json configuration.');
  return value;
 }
-if(command==='recover-cognito-domain'){
+if(command==='recover-migration-logs'){
+ if(process.env.DEPLOY_ENV!=='dev'||process.env.AWS_ACCOUNT_ID!=='143671530412'||process.env.AWS_REGION!=='af-south-1'||process.env.GITHUB_REF!=='refs/heads/dev')throw Error('Migration log recovery is restricted to the dev branch/account/region.');
+ validateBackendConfig(process.env);
+ const execute=process.env.RECOVERY_EXECUTE==='true';
+ if(execute&&process.env.RECOVERY_CONFIRMATION!=='RECOVER DEV MIGRATION LOG GROUP')throw Error('Explicit confirmation RECOVER DEV MIGRATION LOG GROUP is required. No state changed.');
+ const readState=()=>JSON.parse(run('terraform',['state','pull']));
+ const description=JSON.parse(run('aws',['logs','describe-log-groups','--log-group-name-prefix',migrationLogName,'--region','af-south-1','--output','json']));
+ const tags=JSON.parse(run('aws',['logs','list-tags-for-resource','--resource-arn',migrationLogArn,'--region','af-south-1','--output','json']));
+ const report=inspectMigrationLogRecovery(readState(),description,tags);
+ console.log(JSON.stringify(report));
+ if(!execute){console.log('Recovery dry-run only. State and AWS resources unchanged.');}
+ else if(!report.tainted){console.log('Migration log group already untainted; nothing changed.');}
+ else{
+  const versioning=JSON.parse(run('aws',['s3api','get-bucket-versioning','--bucket',process.env.STATE_BUCKET,'--expected-bucket-owner',process.env.AWS_ACCOUNT_ID]));
+  if(versioning.Status!=='Enabled')throw Error('Versioned state backups are required before recovery. No state changed.');
+  run('terraform',['untaint','-lock-timeout=5m',migrationLogAddress]);
+  if(inspectMigrationLogRecovery(readState(),description,tags).tainted)throw Error('Recovery could not verify cleared log-group taint.');
+  console.log('Migration log-group taint cleared. No logs deleted or AWS resources modified. Start a new deployment to generate a fresh plan.');
+ }
+}else if(command==='recover-cognito-domain'){
  if(process.env.DEPLOY_ENV!=='dev'||process.env.AWS_ACCOUNT_ID!=='143671530412'||process.env.AWS_REGION!=='af-south-1'||process.env.GITHUB_REF!=='refs/heads/dev')throw Error('Cognito recovery is restricted to the dev branch/environment in account 143671530412, af-south-1.');
  validateBackendConfig(process.env);
  const execute=process.env.RECOVERY_EXECUTE==='true';

@@ -7,13 +7,24 @@ test('Cognito recovery is explicitly dispatched and cannot deploy or weaken repl
  const deploy=read('deploy.yml'),recover=read('recover-dev-cognito.yml');
  assert.match(deploy,/recover_cognito_domain:[\s\S]*?default: false/);
  assert.match(deploy,/github.event_name == 'workflow_dispatch' && inputs.recover_cognito_domain && inputs.environment == 'dev'/);
- assert.match(deploy,/changes:\s*\n\s*if: \$\{\{ !inputs.recover_cognito_domain \}\}/);
+ assert.match(deploy,/changes:\s*\n\s*if: \$\{\{ !inputs.recover_cognito_domain && !inputs.recover_migration_logs \}\}/);
  assert.match(recover,/RECOVER DEV COGNITO DOMAIN/);
  assert.match(recover,/test "\$GITHUB_REF" = refs\/heads\/dev/);
  assert.doesNotMatch(recover,/terraform apply|terraform destroy|force-unlock|lock=false/);
  const cli=readFileSync(new URL('./ci.mjs',import.meta.url),'utf8');
  assert.match(cli,/versioning.Status!=='Enabled'/);
  assert.match(cli,/\['untaint','-lock-timeout=5m',cognitoDomainAddress\]/);
+});
+
+test('migration log recovery is opt-in, exclusive and uses the same guarded recovery workflow',()=>{
+ const deploy=read('deploy.yml'),recover=read('recover-dev-cognito.yml');
+ assert.match(deploy,/recover_migration_logs:[\s\S]*?default: false/);
+ assert.match(deploy,/target: migration-logs/);
+ assert.match(deploy,/inputs.recover_cognito_domain && inputs.recover_migration_logs/);
+ assert.match(recover,/RECOVER DEV MIGRATION LOG GROUP/);
+ const cli=readFileSync(new URL('./ci.mjs',import.meta.url),'utf8');
+ assert.match(cli,/\['untaint','-lock-timeout=5m',migrationLogAddress\]/);
+ assert.doesNotMatch(cli,/delete-log-group|delete-log-stream/);
 });
 
 test('dev applies same-runner plans before packaging and never needs cross-job plan encryption',()=>{
