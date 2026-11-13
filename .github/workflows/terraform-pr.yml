@@ -3,6 +3,10 @@ on:
   pull_request:
     branches: [dev, main]
   workflow_call:
+    outputs:
+      migrations_validated:
+        description: Same-commit migration and credential-free preparation checks passed
+        value: ${{ jobs.validate.outputs.migrations_validated }}
 permissions:
   contents: read
 concurrency:
@@ -11,6 +15,8 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      migrations_validated: ${{ steps.prepared.outputs.migrations_validated }}
     services:
       postgres:
         image: postgres:16
@@ -41,7 +47,7 @@ jobs:
       - run: npm run lint
       - run: npm test --workspace backend
       - run: npm test --workspace frontend
-      - run: node --test infrastructure/scripts/ci-lib.test.mjs infrastructure/scripts/workflows.test.mjs
+      - run: node --test infrastructure/scripts/ci-lib.test.mjs infrastructure/scripts/workflows.test.mjs infrastructure/scripts/prepare-check.test.mjs
       - name: Validate GitHub workflow syntax and expression types
         run: |
           set -euo pipefail
@@ -53,6 +59,21 @@ jobs:
       - run: npm run build
       - run: npm run build:lambda --workspace backend
       - run: npm run package:lambda --workspace backend
+      - name: Backend prepare pre-merge checks (no AWS access)
+        id: prepared
+        if: github.base_ref == 'dev' || github.ref == 'refs/heads/dev'
+        env:
+          DEPLOY_ENV: dev
+          AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID || '143671530412' }}
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'permissionhub-dev-bucket' }}
+          STATE_KEY: permisionhub/dev/backend
+          LOCK_TABLE: ${{ vars.TF_LOCK_TABLE || 'permissionhub-state-lock' }}
+          LAMBDA_ARTIFACT_BUCKET: ${{ vars.LAMBDA_ARTIFACT_BUCKET || 'permissionhub-dev-lambda-artifacts' }}
+          CI_TF_VARS_JSON: ${{ vars.CI_TF_VARS_JSON }}
+        run: |
+          node infrastructure/scripts/ci.mjs prepare-check
+          echo 'migrations_validated=true' >> "$GITHUB_OUTPUT"
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.8

@@ -407,6 +407,22 @@ values with named errors before Terraform init. Reviewed `CI_TF_VARS_JSON` and t
 `TF_PLAN_ENCRYPTION_KEY` secret remain required; neither is fabricated by defaults.
 # Initial dev deployment (empty state)
 
+**Migration readiness update:** dev deployments now receive
+`migrations_validated` from the same-commit validation workflow. That job runs the
+complete migration chain on disposable PostgreSQL before packaging and the new
+`Backend prepare pre-merge checks (no AWS access)` step. A successful validation
+therefore satisfies dev readiness without setting `CI_MIGRATIONS_READY=true`
+manually. An explicit `CI_MIGRATIONS_READY=false` remains an operator stop switch.
+Production still requires its manually configured readiness flag.
+
+Pre-merge preparation verifies all four artifact hashes/sizes, manifest handler
+paths, backend settings and repository-level `CI_TF_VARS_JSON` if supplied. It
+does not assume AWS roles, read remote state, upload ZIPs or use environment
+secrets. GitHub Environment-only values cannot be inspected by this credential-free
+PR job. Deployment still verifies environment configuration, remote state and
+AWS permissions. Protect dev with required validation checks; never give PR code
+the deployment role just to run preparation early.
+
 The backend now detects an entirely empty, identity-checked **dev** application
 state and selects initial deployment automatically. It requires the full Lambda
 build manifest, uploads the four artifacts, uses the infrastructure role and

@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=name=>readFileSync(new URL(`../../.github/workflows/${name}`,import.meta.url),'utf8');
 
+test('same-commit migration validation unblocks dev prepare without manual readiness variable',()=>{
+ const validation=read('terraform-pr.yml'),backend=read('deploy-dev-backend.yml');
+ assert.match(validation,/migrations_validated:[\s\S]*jobs.validate.outputs.migrations_validated/);
+ assert.ok(validation.indexOf('npm run test:migrations')<validation.indexOf('Backend prepare pre-merge checks'));
+ assert.ok(validation.indexOf('npm run package:lambda')<validation.indexOf('Backend prepare pre-merge checks'));
+ assert.match(validation,/node infrastructure\/scripts\/ci.mjs prepare-check/);
+ assert.match(read('deploy.yml'),/migrations_validated: \$\{\{ needs.validation.outputs.migrations_validated == 'true' \}\}/);
+ const settings=backend.split('\n').filter(line=>line.includes('vars.CI_MIGRATIONS_READY'));
+ assert.equal(settings.length,4);
+ for(const line of settings)assert.match(line,/vars.CI_MIGRATIONS_READY \|\| \(inputs.environment == 'dev' && inputs.migrations_validated && 'true' \|\| 'false'\)/);
+});
+
 test('detected initial dev deployment propagates through infrastructure, migrations and frontend',()=>{
  const backend=read('deploy-dev-backend.yml');
  assert.match(backend,/AUTO_BOOTSTRAP_DEV: \$\{\{ inputs.environment == 'dev' && 'true' \|\| 'false' \}\}/);

@@ -9,6 +9,10 @@ on:
         description: Public frontend configuration from this deployment (no secrets or state access required)
         value: ${{ jobs.apply.outputs.public_config || jobs.context.outputs.public_config }}
     inputs:
+      migrations_validated:
+        description: Same-commit validation workflow passed the empty-database migration checks
+        type: boolean
+        default: false
       defer_frontend:
         type: boolean
         default: false
@@ -92,7 +96,7 @@ jobs:
         if: inputs.fresh_deployment && inputs.apply
         env:
           MIGRATIONS: ${{ inputs.migrations }}
-          READY: ${{ vars.CI_MIGRATIONS_READY }}
+          READY: ${{ vars.CI_MIGRATIONS_READY || (inputs.environment == 'dev' && inputs.migrations_validated && 'true' || 'false') }}
         run: test "$MIGRATIONS" = true && test "$READY" = true
       - uses: actions/setup-node@v4
         with:
@@ -128,7 +132,7 @@ jobs:
           ALLOW_FRESH_DEPLOYMENT: ${{ inputs.fresh_deployment }}
           AUTO_BOOTSTRAP_DEV: ${{ inputs.environment == 'dev' && 'true' || 'false' }}
           DEPLOY_APPLY: ${{ inputs.apply }}
-          CI_MIGRATIONS_READY: ${{ vars.CI_MIGRATIONS_READY }}
+          CI_MIGRATIONS_READY: ${{ vars.CI_MIGRATIONS_READY || (inputs.environment == 'dev' && inputs.migrations_validated && 'true' || 'false') }}
           ARTIFACT_MODE: ${{ inputs.backend && 'built' || 'state' }}
         run: node ../../../scripts/ci.mjs refs "$RUNNER_TEMP/artifacts.tfvars.json" "$ARTIFACT_MODE"
       - name: Upload only changed artifacts with create-only S3 writes
@@ -175,7 +179,7 @@ jobs:
         working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
         env:
           RUN_MIGRATIONS: ${{ inputs.migrations }}
-          CI_MIGRATIONS_READY: ${{ vars.CI_MIGRATIONS_READY }}
+          CI_MIGRATIONS_READY: ${{ vars.CI_MIGRATIONS_READY || (inputs.environment == 'dev' && inputs.migrations_validated && 'true' || 'false') }}
         run: |
           node ../../../scripts/ci.mjs identity
           node ../../../scripts/ci.mjs config "$RUNNER_TEMP/config.tfvars.json"
@@ -291,7 +295,7 @@ jobs:
         working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
         env:
           RUN_MIGRATIONS: 'true'
-          CI_MIGRATIONS_READY: ${{ vars.CI_MIGRATIONS_READY }}
+          CI_MIGRATIONS_READY: ${{ vars.CI_MIGRATIONS_READY || (inputs.environment == 'dev' && inputs.migrations_validated && 'true' || 'false') }}
         run: node ../../../scripts/ci.mjs migrate
       - name: Verify API and report frontend outputs
         id: frontend
