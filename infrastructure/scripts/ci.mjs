@@ -2,6 +2,7 @@ import {readFile,writeFile,appendFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {validatePlanEncryptionKey} from './ci-lib.mjs';
 import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations,validateBackendConfig,resolveFreshDeployment,parseDeploymentConfig} from './ci-lib.mjs';
 const [command,...args]=process.argv.slice(2);
 function run(tool,argv,options={}){const result=spawnSync(tool,argv,{encoding:'utf8',maxBuffer:40*1024*1024,...options});if(result.status!==0)throw Error(`${tool} failed: ${result.stderr}`);return result.stdout}
@@ -14,7 +15,18 @@ async function deploymentConfig(){
  console.log(raw?.trim()?'Using explicit CI_TF_VARS_JSON configuration (values withheld).':'Using reviewed dev ci.tfvars.json configuration.');
  return value;
 }
-if(command==='prepare-check'){
+if(command==='preflight'){
+ const errors=[];
+ try{validateBackendConfig(process.env);}catch(error){errors.push(error.message);}
+ try{await deploymentConfig();}catch(error){errors.push(error.message);}
+ try{validatePlanEncryptionKey(process.env.PLAN_ENCRYPTION_KEY);}catch(error){errors.push(error.message);}
+ for(const key of ['INFRA_ROLE_ARN','BACKEND_ROLE_ARN','FRONTEND_ROLE_ARN']){
+  const match=/^arn:aws:iam::([0-9]{12}):role\/.+$/.exec(process.env[key]??'');
+  if(!match||match[1]!==process.env.AWS_ACCOUNT_ID)errors.push(`${key} must be an IAM role ARN in the selected AWS_ACCOUNT_ID.`);
+ }
+ if(errors.length)throw Error(`Deployment preflight failed before build/upload/plan:\n- ${errors.join('\n- ')}`);
+ console.log('Deployment preflight passed: backend settings, Terraform configuration, three same-account role ARNs, and plan-encryption secret format. Live AWS permissions, resources and quotas are not verified by this check.');
+}else if(command==='prepare-check'){
  validateBackendConfig(process.env);
  const directory=resolve(process.env.GITHUB_WORKSPACE??'.','artifacts');
  const manifest=await json(resolve(directory,'lambda-manifest.json'));

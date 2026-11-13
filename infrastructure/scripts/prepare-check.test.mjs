@@ -7,6 +7,16 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 
+test('deployment preflight reports configuration problems together and never needs AWS access',()=>{
+ const key=createHash('sha256').update('test-only-plan-key').digest('base64');
+ const env={...process.env,DEPLOY_ENV:'dev',AWS_REGION:'af-south-1',AWS_ACCOUNT_ID:'143671530412',STATE_BUCKET:'permissionhub-dev-bucket',STATE_KEY:'permisionhub/dev/backend',LOCK_TABLE:'permissionhub-state-lock',LAMBDA_ARTIFACT_BUCKET:'permissionhub-dev-lambda-artifacts',CI_TF_VARS_JSON:'',PLAN_ENCRYPTION_KEY:key,INFRA_ROLE_ARN:'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev',BACKEND_ROLE_ARN:'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev',FRONTEND_ROLE_ARN:'arn:aws:iam::143671530412:role/permissionhub-github-frontend-dev'};
+ const run=patch=>spawnSync(process.execPath,[fileURLToPath(new URL('./ci.mjs',import.meta.url)),'preflight'],{env:{...env,...patch},encoding:'utf8'});
+ const valid=run({});assert.equal(valid.status,0);assert.ok(!valid.stdout.includes(key));
+ const failed=run({PLAN_ENCRYPTION_KEY:'',LOCK_TABLE:'',CI_TF_VARS_JSON:'{',FRONTEND_ROLE_ARN:''});
+ assert.notEqual(failed.status,0);
+ for(const field of ['TF_PLAN_ENCRYPTION_KEY','LOCK_TABLE','CI_TF_VARS_JSON','FRONTEND_ROLE_ARN'])assert.ok(failed.stderr.includes(field));
+});
+
 test('credential-free prepare catches damaged artifacts and invalid config before deployment',()=>{
  const directory=mkdtempSync(join(tmpdir(),'permissionhub-prepare-'));
  try{

@@ -100,8 +100,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           node infrastructure/scripts/ci.mjs protection production strict
-  validation:
+  preflight:
     needs: changes
+    uses: ./.github/workflows/deployment-preflight.yml
+    secrets: inherit
+    with:
+      environment: ${{ needs.changes.outputs.environment }}
+  validation:
+    needs: [changes, preflight]
     uses: ./.github/workflows/terraform-pr.yml
   backend:
     needs: [changes, validation]

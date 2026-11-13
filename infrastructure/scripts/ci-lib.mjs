@@ -1,11 +1,17 @@
 import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
+export function validatePlanEncryptionKey(key){
+ const value=typeof key==='string'?key.trim():'';
+ const secret=Buffer.from(value,'base64');
+ if(!/^[A-Za-z0-9+/]{43}=$/.test(value)||secret.length!==32||secret.toString('base64')!==value)throw Error('TF_PLAN_ENCRYPTION_KEY is missing or invalid. Set a base64-encoded 32-byte secret in the selected GitHub Environment. Run infrastructure/scripts/set-plan-encryption-key.ps1 locally; never put the key in YAML or tfvars.');
+ return secret;
+}
 export function sealPlan(bytes,key,context){
- const secret=Buffer.from(key??'','base64');if(secret.length!==32)throw Error('TF_PLAN_ENCRYPTION_KEY must be a base64-encoded 32-byte environment secret');
+ const secret=validatePlanEncryptionKey(key);
  const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',secret,iv);cipher.setAAD(Buffer.from(context));
  const ciphertext=Buffer.concat([cipher.update(bytes),cipher.final()]);return JSON.stringify({iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:ciphertext.toString('base64')});
 }
 export function openPlan(value,key,context){
- const envelope=JSON.parse(value),decipher=createDecipheriv('aes-256-gcm',Buffer.from(key??'','base64'),Buffer.from(envelope.iv,'base64'));decipher.setAAD(Buffer.from(context));decipher.setAuthTag(Buffer.from(envelope.tag,'base64'));return Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,'base64')),decipher.final()]);
+ const envelope=JSON.parse(value),decipher=createDecipheriv('aes-256-gcm',validatePlanEncryptionKey(key),Buffer.from(envelope.iv,'base64'));decipher.setAAD(Buffer.from(context));decipher.setAuthTag(Buffer.from(envelope.tag,'base64'));return Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,'base64')),decipher.final()]);
 }
 export const lambdaModules={api:'api_lambda',provisioning:'provisioning_lambda',expiry:'expiry_lambda',migration:'migration_lambda'};
 export function parseDeploymentConfig(raw,fallback,env){

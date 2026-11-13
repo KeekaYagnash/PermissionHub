@@ -4,6 +4,16 @@ import {validateBackendConfig} from './ci-lib.mjs';
 import {resolveFreshDeployment} from './ci-lib.mjs';
 import {parseDeploymentConfig} from './ci-lib.mjs';
 import {readFileSync} from 'node:fs';
+import {validatePlanEncryptionKey} from './ci-lib.mjs';
+
+test('plan encryption requires canonical base64 for 32 bytes without echoing secret input',()=>{
+ const key=Buffer.alloc(32,7).toString('base64');
+ assert.equal(validatePlanEncryptionKey(key).length,32);
+ assert.equal(validatePlanEncryptionKey(` ${key}\n`).length,32);
+ for(const value of [undefined,'','invalid-secret',Buffer.alloc(31).toString('base64'),Buffer.alloc(33).toString('base64'),key+'!']){
+  assert.throws(()=>validatePlanEncryptionKey(value),error=>error.message.includes('TF_PLAN_ENCRYPTION_KEY')&&(!value||!error.message.includes(value)));
+ }
+});
 
 test('deployment config handles empty GitHub variables with reviewed dev fallback only',()=>{
  const fallback=JSON.parse(readFileSync(new URL('../terraform/environments/dev/ci.tfvars.json',import.meta.url),'utf8'));

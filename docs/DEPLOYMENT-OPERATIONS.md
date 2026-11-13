@@ -457,3 +457,30 @@ The configuration is checked before uploads, in PR preparation, and through a
 credential-free mocked Terraform dev plan. Deployment-environment overrides are
 only visible to the deployment job, not the PR job. `TF_PLAN_ENCRYPTION_KEY`
 remains a required GitHub Environment secret and must not be committed here.
+# One-time saved-plan encryption secret
+
+Set `TF_PLAN_ENCRYPTION_KEY` as a **Secret**, not Variable, in GitHub Environment
+`development` (production has its own independent secret). It must encode exactly
+32 cryptographically random bytes as base64. It cannot safely be supplied as a
+checked-in default. A deployment now runs `deployment-preflight` before the build,
+artifact uploads or Terraform plan, reporting missing/invalid configuration
+together. This check has no AWS credentials and is never run with secrets on PRs.
+AWS policy/resource/quota errors still require real deployment-time checks.
+
+Run locally, after `gh auth login`, to create a missing secret without displaying it:
+
+```powershell
+.\infrastructure\scripts\set-plan-encryption-key.ps1 -Environment development
+```
+
+If the existing secret is invalid, first ensure no deployment or destroy runs are
+active/queued, then explicitly rotate it:
+
+```powershell
+.\infrastructure\scripts\set-plan-encryption-key.ps1 -Environment development -Rotate
+```
+
+This command changes GitHub configuration only, not AWS. It does not print/store
+the generated value on disk. Rotation prevents old saved plans from decrypting;
+start a new deployment run afterwards. The same environment secret is required
+by plan and apply. The helper refuses replacement without `-Rotate`.
