@@ -13,6 +13,21 @@ run "exact_trust_and_three_roles" {
     create_lock_table      = true
   }
   assert {
+    condition = alltrue([for name in ["terraform-discovery", "backend"] : length([
+      for statement in local.role_policies[name].Statement : statement
+      if try(statement.Sid == "CognitoDomainRead" && statement.Resource == "*" && contains(statement.Action, "cognito-idp:DescribeUserPoolDomain") && statement.Condition.StringEquals["aws:RequestedRegion"] == "af-south-1", false)
+    ]) == 1])
+    error_message = "Cognito domain polling requires a dedicated Resource:* read allow restricted to the deployment region for Terraform and backend roles."
+  }
+  assert {
+    condition     = length(aws_iam_role_policy.storage_full_access) == 3 && alltrue([for policy in values(aws_iam_role_policy.storage_full_access) : toset(jsondecode(policy.policy).Statement[0].Action) == toset(["s3:*", "dynamodb:*"]) && jsondecode(policy.policy).Statement[0].Resource == "*"])
+    error_message = "All three dev GitHub roles must receive the explicitly requested S3/DynamoDB full-access policy, without broader service actions."
+  }
+  assert {
+    condition     = contains(local.role_policies["frontend"].Statement[2].Action, "cloudfront:GetDistribution") && contains(local.role_policies["frontend"].Statement[2].Action, "cloudfront:GetInvalidation")
+    error_message = "Frontend deployment must inspect its CloudFront distribution and wait for invalidation."
+  }
+  assert {
     condition     = contains(local.role_policies["terraform-state"].Statement[1].Resource, "arn:aws:s3:::permissionhub-dev-bucket/permisionhub/dev/backend") && contains(local.role_policies["backend"].Statement[1].Resource, "arn:aws:s3:::permissionhub-dev-bucket/permisionhub/dev/backend")
     error_message = "Deployment role state permissions must follow the exact dev backend key."
   }

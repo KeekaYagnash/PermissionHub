@@ -118,11 +118,19 @@
       "Action": [
         "cognito-idp:DescribeUserPool",
         "cognito-idp:DescribeUserPoolClient",
-        "cognito-idp:DescribeUserPoolDomain",
         "cognito-idp:GetUserPoolMfaConfig",
         "cognito-idp:ListTagsForResource"
       ],
       "Resource": "arn:aws:cognito-idp:${region}:${account_id}:userpool/*"
+    },
+    {
+      "Sid": "CognitoDomainRead",
+      "Effect": "Allow",
+      "Action": ["cognito-idp:DescribeUserPoolDomain"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {"aws:RequestedRegion": "${region}"}
+      }
     },
     {
       "Sid": "ApiRead",
