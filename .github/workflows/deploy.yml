@@ -115,6 +115,7 @@ jobs:
       backend: ${{ needs.changes.outputs.backend == 'true' }}
       infrastructure: ${{ needs.changes.outputs.infrastructure == 'true' }}
       migrations: ${{ needs.changes.outputs.migrations == 'true' }}
+      migrations_validated: ${{ needs.validation.outputs.migrations_validated == 'true' }}
       apply: ${{ github.event_name == 'push' || inputs.apply }}
   frontend:
     needs: [changes, validation, backend]
