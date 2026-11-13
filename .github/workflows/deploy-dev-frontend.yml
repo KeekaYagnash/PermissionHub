@@ -1,0 +1,97 @@
+name: PermissionHub frontend deployment
+on:
+  workflow_call:
+    inputs:
+      public_config:
+        description: Public Terraform outputs supplied by backend deployment; existing variables used for frontend-only releases
+        type: string
+        default: ''
+      environment:
+        type: string
+        required: true
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'dev' && 'development' || 'production' }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run typecheck --workspace frontend
+      - run: npm test --workspace frontend
+      - name: Require configured frontend OIDC role
+        env:
+          ROLE: ${{ (vars.AWS_FRONTEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-frontend-dev' || '')) }}
+        run: test -n "$ROLE" || { echo 'AWS_FRONTEND_ROLE_ARN missing; no static credential fallback.'; exit 1; }
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ (vars.AWS_FRONTEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-frontend-dev' || '')) }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: aws sts get-caller-identity
+      - name: Validate public frontend configuration
+        id: config
+        env:
+          DEPLOYMENT_CONFIG: ${{ inputs.public_config }}
+          API: ${{ vars.API_GATEWAY_ENDPOINT }}
+          URL: ${{ vars.FRONTEND_URL }}
+          BUCKET: ${{ vars.FRONTEND_BUCKET }}
+          DISTRIBUTION: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+          DOMAIN: ${{ vars.COGNITO_DOMAIN }}
+          CLIENT: ${{ vars.COGNITO_CLIENT_ID }}
+          PROVIDERS: ${{ vars.COGNITO_PROVIDERS_JSON || '[]' }}
+        run: |
+          node --input-type=module <<'JS'
+          import {appendFileSync} from 'node:fs';
+          const supplied=process.env.DEPLOYMENT_CONFIG ? JSON.parse(process.env.DEPLOYMENT_CONFIG) : {};
+          const mapping={API:'API_GATEWAY_ENDPOINT',URL:'FRONTEND_URL',BUCKET:'FRONTEND_BUCKET',DISTRIBUTION:'CLOUDFRONT_DISTRIBUTION_ID',DOMAIN:'COGNITO_DOMAIN',CLIENT:'COGNITO_CLIENT_ID',PROVIDERS:'COGNITO_PROVIDERS_JSON'};
+          for(const [key,field] of Object.entries(mapping)){
+            const value=supplied[field] || process.env[key];
+            if(!value || /[\r\n]/.test(value))throw Error(`Missing/invalid public frontend setting: ${field}`);
+            appendFileSync(process.env.GITHUB_OUTPUT,`${key}=${value}\n`);
+          }
+          JS
+      - name: Verify required frontend infrastructure exists in the selected account
+        env:
+          BUCKET: ${{ steps.config.outputs.BUCKET }}
+          DISTRIBUTION: ${{ steps.config.outputs.DISTRIBUTION }}
+          EXPECTED_ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          test -n "$EXPECTED_ACCOUNT" && test "$(aws sts get-caller-identity --query Account --output text)" = "$EXPECTED_ACCOUNT"
+          case "$BUCKET" in permissionhub-$DEPLOY_ENV-frontend-*) ;; *) echo 'Cross-environment frontend bucket refused'; exit 1 ;; esac
+          aws s3api head-bucket --bucket "$BUCKET" --expected-bucket-owner "$EXPECTED_ACCOUNT" || { echo 'Required frontend bucket unavailable. Apply infrastructure first, or explicitly defer frontend deployment.'; exit 1; }
+          origin=$(aws cloudfront get-distribution --id "$DISTRIBUTION" --query 'Distribution.DistributionConfig.Origins.Items[0].DomainName' --output text) || { echo 'Required CloudFront distribution unavailable'; exit 1; }
+          case "$origin" in "$BUCKET".s3.*) ;; *) echo 'CloudFront origin does not match selected frontend bucket'; exit 1 ;; esac
+      - run: npm run build --workspace frontend
+        env:
+          VITE_AUTH_MODE: cognito
+          VITE_API_BASE_URL: ${{ steps.config.outputs.API }}/api
+          VITE_COGNITO_REGION: ${{ env.AWS_REGION }}
+          VITE_COGNITO_DOMAIN: ${{ steps.config.outputs.DOMAIN }}
+          VITE_COGNITO_CLIENT_ID: ${{ steps.config.outputs.CLIENT }}
+          VITE_COGNITO_PROVIDERS: ${{ steps.config.outputs.PROVIDERS }}
+          VITE_COGNITO_REDIRECT_URI: ${{ steps.config.outputs.URL }}/auth/callback
+          VITE_COGNITO_LOGOUT_URI: ${{ steps.config.outputs.URL }}/login
+      - name: Deploy assets first; publish HTML last
+        env:
+          BUCKET: ${{ steps.config.outputs.BUCKET }}
+          DISTRIBUTION: ${{ steps.config.outputs.DISTRIBUTION }}
+          URL: ${{ steps.config.outputs.URL }}
+        run: |
+          set -euo pipefail
+          aws s3 sync frontend/dist "s3://$BUCKET" --exclude index.html --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp frontend/dist/index.html "s3://$BUCKET/index.html" --cache-control "no-cache,no-store,must-revalidate" --content-type "text/html"
+          invalidation=$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" --paths "/*" --query Invalidation.Id --output text)
+          aws cloudfront wait invalidation-completed --distribution-id "$DISTRIBUTION" --id "$invalidation"
+          curl --fail --retry 3 "$URL/" > /dev/null
+          echo "Frontend deployed to $URL at $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

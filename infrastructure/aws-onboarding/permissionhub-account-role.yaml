@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: PermissionHub least-privilege read and guarded provisioning roles for a target AWS account.
+Parameters:
+  PermissionHubTrustedPrincipalArn:
+    Type: String
+    Description: ARN of the PermissionHub backend execution principal.
+  ExternalId:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Unique external ID for standalone or customer accounts. Store it outside PermissionHub data storage.
+  ReadRoleName:
+    Type: String
+    Default: PermissionHubReadRole
+  ProvisionRoleName:
+    Type: String
+    Default: PermissionHubProvisionRole
+  RolePath:
+    Type: String
+    Default: /
+  EnableProvisioning:
+    Type: String
+    AllowedValues: ['true','false']
+    Default: 'false'
+  OrganisationId:
+    Type: String
+    Default: ''
+    Description: Optional AWS Organisation ID used to restrict the trusted principal.
+Conditions:
+  HasExternalId: !Not [!Equals [!Ref ExternalId, '']]
+  HasOrganisationId: !Not [!Equals [!Ref OrganisationId, '']]
+  ProvisioningEnabled: !Equals [!Ref EnableProvisioning, 'true']
+Resources:
+  PermissionHubReadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref ReadRoleName
+      Path: !Ref RolePath
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref PermissionHubTrustedPrincipalArn }
+            Action:
+              - sts:AssumeRole
+              - sts:SetSourceIdentity
+              - sts:TagSession
+            Condition:
+              Fn::If:
+                - HasExternalId
+                - StringEquals:
+                    sts:ExternalId: !Ref ExternalId
+                - Fn::If:
+                    - HasOrganisationId
+                    - StringEquals:
+                        aws:PrincipalOrgID: !Ref OrganisationId
+                    - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: PermissionHubReadDiscovery
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: IdentityAndPolicyDiscovery
+                Effect: Allow
+                Action:
+                  - iam:GetAccountAuthorizationDetails
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:GetUser
+                  - iam:GetUserPolicy
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListAttachedUserPolicies
+                  - iam:ListEntitiesForPolicy
+                  - iam:ListGroupsForUser
+                  - iam:ListPolicies
+                  - iam:ListPolicyVersions
+                  - iam:ListRolePolicies
+                  - iam:ListRoles
+                  - iam:ListUserPolicies
+                  - iam:ListUsers
+                  - iam:SimulateCustomPolicy
+                  - iam:SimulatePrincipalPolicy
+                  - access-analyzer:ValidatePolicy
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketLocation
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                  - lambda:ListFunctions
+                Resource: '*'
+  PermissionHubProvisionRole:
+    Type: AWS::IAM::Role
+    Condition: ProvisioningEnabled
+    Properties:
+      RoleName: !Ref ProvisionRoleName
+      Path: !Ref RolePath
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref PermissionHubTrustedPrincipalArn }
+            Action:
+              - sts:AssumeRole
+              - sts:SetSourceIdentity
+              - sts:TagSession
+            Condition:
+              Fn::If:
+                - HasExternalId
+                - StringEquals:
+                    sts:ExternalId: !Ref ExternalId
+                - Fn::If:
+                    - HasOrganisationId
+                    - StringEquals:
+                        aws:PrincipalOrgID: !Ref OrganisationId
+                    - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: PermissionHubApprovedChanges
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AttachApprovedManagedPolicies
+                Effect: Allow
+                Action:
+                  - iam:AttachUserPolicy
+                  - iam:DetachUserPolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                Resource:
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:user/*
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+              - Sid: ManagePermissionHubPolicies
+                Effect: Allow
+                Action:
+                  - iam:CreatePolicy
+                  - iam:CreatePolicyVersion
+                  - iam:SetDefaultPolicyVersion
+                  - iam:DeletePolicyVersion
+                  - iam:TagPolicy
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/permissionhub/*
+Outputs:
+  ReadRoleArn:
+    Value: !GetAtt PermissionHubReadRole.Arn
+  ProvisionRoleArn:
+    Condition: ProvisioningEnabled
+    Value: !GetAtt PermissionHubProvisionRole.Arn

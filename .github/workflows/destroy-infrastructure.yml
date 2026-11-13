@@ -1,0 +1,154 @@
+name: PermissionHub reviewed infrastructure destroy
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, prod]
+        default: dev
+      confirmation:
+        description: 'Type exactly: DESTROY dev or DESTROY prod'
+        required: true
+        type: string
+      execute:
+        description: Request separate protected destroy approval after the plan (false = plan only)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+concurrency:
+  group: permissionhub-state-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'dev' && 'development' || 'production' }}
+    env: &destroy-env
+      DEPLOY_ENV: ${{ inputs.environment }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+      STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      STATE_KEY: ${{ vars.TF_STATE_KEY }}
+      LOCK_TABLE: ${{ vars.TF_LOCK_TABLE }}
+      LAMBDA_ARTIFACT_BUCKET: ${{ vars.LAMBDA_ARTIFACT_BUCKET }}
+      CI_TF_VARS_JSON: ${{ vars.CI_TF_VARS_JSON }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      PLAN_PURPOSE: destroy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify confirmation, branch and approval protections before AWS access
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          EXECUTE: ${{ inputs.execute }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$CONFIRMATION" = "DESTROY $DEPLOY_ENV" || { echo 'Exact environment confirmation required'; exit 1; }
+          node infrastructure/scripts/ci.mjs environment
+          if [ "$DEPLOY_ENV" = prod ]; then node infrastructure/scripts/ci.mjs protection production strict; fi
+          if [ "$EXECUTE" = true ]; then
+            if [ "$DEPLOY_ENV" = prod ]; then node infrastructure/scripts/ci.mjs protection production-destroy strict;
+            else node infrastructure/scripts/ci.mjs protection development-destroy; fi
+          fi
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ (vars.AWS_INFRA_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: Initialize and authenticate exact application state
+        working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
+        run: |
+          test -n "$STATE_BUCKET" && test -n "$STATE_KEY" && test -n "$LOCK_TABLE"
+          terraform init -reconfigure -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="dynamodb_table=$LOCK_TABLE" -backend-config="encrypt=true"
+          node ../../../scripts/ci.mjs identity
+          node ../../../scripts/ci.mjs config "$RUNNER_TEMP/config.tfvars.json"
+          node ../../../scripts/ci.mjs destroy-vars "$RUNNER_TEMP/artifacts.tfvars.json"
+          terraform validate
+      - name: Generate and display destroy plan only
+        working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
+        run: |
+          terraform plan -destroy -input=false -lock-timeout=5m -var-file="$RUNNER_TEMP/config.tfvars.json" -var-file="$RUNNER_TEMP/artifacts.tfvars.json" -out="$RUNNER_TEMP/destroy.tfplan"
+          terraform show -json "$RUNNER_TEMP/destroy.tfplan" > "$RUNNER_TEMP/destroy.json"
+          node ../../../scripts/ci.mjs destroy-guard "$RUNNER_TEMP/destroy.json"
+          echo "Destroy plan for $DEPLOY_ENV, account $AWS_ACCOUNT_ID, region $AWS_REGION, state $STATE_BUCKET/$STATE_KEY, commit $GITHUB_SHA. Nothing destroyed. Review resources in logs before approving." >> "$GITHUB_STEP_SUMMARY"
+      - name: Encrypt exact plan with account/backend/commit/run binding
+        env:
+          PLAN_ENCRYPTION_KEY: ${{ secrets.TF_PLAN_ENCRYPTION_KEY }}
+        run: node infrastructure/scripts/ci.mjs seal-plan "$RUNNER_TEMP/destroy.tfplan" "$RUNNER_TEMP/destroy.tfplan.encrypted"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-destroy-${{ inputs.environment }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/destroy.tfplan.encrypted
+          retention-days: 1
+  approval:
+    if: inputs.execute
+    needs: plan
+    runs-on: ubuntu-latest
+    # Separate human gate; no AWS identity or deployment variables are used here.
+    environment: ${{ inputs.environment == 'dev' && 'development-destroy' || 'production-destroy' }}
+    permissions:
+      contents: read
+    steps:
+      - run: echo 'Destroy approved for the saved plan from this run. Apply will not re-plan.'
+  apply:
+    if: inputs.execute
+    needs: [plan, approval]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'dev' && 'development' || 'production' }}
+    env: *destroy-env
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Recheck explicit confirmation and current environment protections
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          test "$CONFIRMATION" = "DESTROY $DEPLOY_ENV"
+          node infrastructure/scripts/ci.mjs environment
+          if [ "$DEPLOY_ENV" = prod ]; then
+            node infrastructure/scripts/ci.mjs protection production strict
+            node infrastructure/scripts/ci.mjs protection production-destroy strict
+          else node infrastructure/scripts/ci.mjs protection development-destroy; fi
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ (vars.AWS_INFRA_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: Initialize and revalidate identity
+        working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
+        run: |
+          terraform init -reconfigure -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="dynamodb_table=$LOCK_TABLE" -backend-config="encrypt=true"
+          node ../../../scripts/ci.mjs identity
+      - uses: actions/download-artifact@v4
+        with:
+          name: reviewed-destroy-${{ inputs.environment }}-${{ github.run_id }}
+          path: ${{ runner.temp }}
+      - name: Authenticate saved destroy plan (never regenerate)
+        env:
+          PLAN_ENCRYPTION_KEY: ${{ secrets.TF_PLAN_ENCRYPTION_KEY }}
+        run: node infrastructure/scripts/ci.mjs open-plan "$RUNNER_TEMP/destroy.tfplan.encrypted" "$RUNNER_TEMP/destroy.tfplan"
+      - name: Guard and apply only the reviewed saved plan
+        working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
+        env:
+          DESTROY_APPLY: 'true'
+        run: |
+          terraform show -json "$RUNNER_TEMP/destroy.tfplan" > "$RUNNER_TEMP/destroy.json"
+          node ../../../scripts/ci.mjs destroy-guard "$RUNNER_TEMP/destroy.json"
+          terraform apply -input=false -lock-timeout=5m "$RUNNER_TEMP/destroy.tfplan"
+          echo "Reviewed Terraform-owned $DEPLOY_ENV application resources destroyed. Bootstrap resources, retained snapshots/backups, secret recovery copies and out-of-state resources are NOT claimed removed." >> "$GITHUB_STEP_SUMMARY"

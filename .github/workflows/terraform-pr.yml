@@ -1,0 +1,146 @@
+name: PermissionHub validation
+on:
+  pull_request:
+    branches: [dev, main]
+  workflow_call:
+permissions:
+  contents: read
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: permissionhub_migration_test_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432/tcp']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgresql://validation:validation@localhost:5432/validation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate --workspace backend
+      - run: npx prisma validate --schema backend/prisma/schema.prisma
+      - name: Validate complete migration history on an empty disposable PostgreSQL database
+        env:
+          MIGRATION_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/permissionhub_migration_test_ci
+        run: npm run test:migrations --workspace backend
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test --workspace backend
+      - run: npm test --workspace frontend
+      - run: node --test infrastructure/scripts/ci-lib.test.mjs infrastructure/scripts/workflows.test.mjs
+      - name: Validate GitHub workflow syntax and expression types
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o "$RUNNER_TEMP/actionlint_1.7.12_linux_amd64.tar.gz"
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_checksums.txt -o "$RUNNER_TEMP/actionlint-checksums.txt"
+          (cd "$RUNNER_TEMP" && sha256sum --check --ignore-missing actionlint-checksums.txt)
+          tar -xzf "$RUNNER_TEMP/actionlint_1.7.12_linux_amd64.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -shellcheck=''
+      - run: npm run build
+      - run: npm run build:lambda --workspace backend
+      - run: npm run package:lambda --workspace backend
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive infrastructure/terraform
+      - name: Validate both existing environment roots without accessing state
+        run: |
+          for environment in dev prod; do
+            terraform -chdir=infrastructure/terraform/environments/$environment init -backend=false
+            terraform -chdir=infrastructure/terraform/environments/$environment validate
+          done
+          terraform -chdir=infrastructure/terraform/environments/prod test
+          terraform -chdir=infrastructure/terraform/bootstrap/github-dev init -backend=false
+          terraform -chdir=infrastructure/terraform/bootstrap/github-dev validate
+          terraform -chdir=infrastructure/terraform/bootstrap/github-dev test
+          terraform -chdir=infrastructure/terraform/modules/rds init -backend=false
+          terraform -chdir=infrastructure/terraform/modules/rds test
+          terraform -chdir=infrastructure/terraform/modules/cognito init -backend=false
+          terraform -chdir=infrastructure/terraform/modules/cognito test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lambda-build-${{ github.sha }}
+          path: artifacts/
+          retention-days: 3
+  plan:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.ENABLE_PR_TERRAFORM_PLAN == 'true'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: ${{ github.base_ref == 'dev' && 'development-plan' || 'production-plan' }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+      DEPLOY_ENV: ${{ github.base_ref == 'dev' && 'dev' || 'prod' }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      STATE_KEY: ${{ vars.TF_STATE_KEY }}
+      LOCK_TABLE: ${{ vars.TF_LOCK_TABLE }}
+      CI_TF_VARS_JSON: ${{ vars.CI_TF_VARS_JSON }}
+      LAMBDA_ARTIFACT_BUCKET: ${{ vars.LAMBDA_ARTIFACT_BUCKET }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require explicitly configured read-only PR role
+        env:
+          ROLE: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          GH_TOKEN: ${{ github.token }}
+          PLANNING_ENVIRONMENT: ${{ github.base_ref == 'dev' && 'development-plan' || 'production-plan' }}
+        run: |
+          test -n "$ROLE" || { echo 'AWS_PLAN_ROLE_ARN missing in the selected protected planning environment; no access-key fallback.'; exit 1; }
+          node infrastructure/scripts/ci.mjs protection "$PLANNING_ENVIRONMENT" strict
+      - uses: actions/download-artifact@v4
+        with:
+          name: lambda-build-${{ github.sha }}
+          path: artifacts
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: Initialize existing remote state
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          STATE_KEY: ${{ vars.TF_STATE_KEY }}
+          LOCK_TABLE: ${{ vars.TF_LOCK_TABLE }}
+        run: |
+          test -n "$STATE_BUCKET" && test -n "$STATE_KEY" && test -n "$LOCK_TABLE"
+          terraform -chdir=infrastructure/terraform/environments/$DEPLOY_ENV init -reconfigure -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="dynamodb_table=$LOCK_TABLE" -backend-config="encrypt=true"
+      - name: Plan against deployed artifacts (no PR artifact uploads)
+        working-directory: infrastructure/terraform/environments/${{ github.base_ref == 'dev' && 'dev' || 'prod' }}
+        run: |
+          node ../../../scripts/ci.mjs identity
+          node ../../../scripts/ci.mjs config "$RUNNER_TEMP/config.tfvars.json"
+          node ../../../scripts/ci.mjs refs "$RUNNER_TEMP/artifacts.tfvars.json" built
+          terraform plan -input=false -lock=false -var-file="$RUNNER_TEMP/config.tfvars.json" -var-file="$RUNNER_TEMP/artifacts.tfvars.json" -out="$RUNNER_TEMP/pr.tfplan"
+          terraform show -json "$RUNNER_TEMP/pr.tfplan" > "$RUNNER_TEMP/plan.json"
+          node ../../../scripts/ci.mjs guard "$RUNNER_TEMP/plan.json" infrastructure
+      - run: echo "Read-only PR plan completed. No artifacts uploaded or resources applied." >> "$GITHUB_STEP_SUMMARY"
+  plan-unavailable:
+    if: github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || vars.ENABLE_PR_TERRAFORM_PLAN != 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Terraform plan NOT RUN. AWS planning access is disabled or this is a fork PR. Static validation is separate from an AWS-backed plan." >> "$GITHUB_STEP_SUMMARY"

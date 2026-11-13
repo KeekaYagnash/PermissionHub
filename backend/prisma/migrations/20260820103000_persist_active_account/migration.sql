@@ -1,0 +1,2 @@
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "activeTenantId" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "activeAwsAccountRecordId" TEXT;

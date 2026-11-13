@@ -1,0 +1,109 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RuntimeRoleRead",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole"
+      ],
+      "Resource": "arn:aws:iam::${account_id}:role/permissionhub-dev-*-role"
+    },
+    {
+      "Sid": "CreateBoundedRuntimeRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:PutRolePermissionsBoundary"
+      ],
+      "Resource": "arn:aws:iam::${account_id}:role/permissionhub-dev-*-role",
+      "Condition": {
+        "StringEquals": {
+          "iam:PermissionsBoundary": "${boundary_arn}"
+        }
+      }
+    },
+    {
+      "Sid": "RuntimeRoleManagement",
+      "Effect": "Allow",
+      "Action": [
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:DeleteRole",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::${account_id}:role/permissionhub-dev-*-role"
+    },
+    {
+      "Sid": "AttachOnlyLambdaServicePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::${account_id}:role/permissionhub-dev-*-role",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": [
+            "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+            "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "PassRuntimeRolesOnlyToLambda",
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::${account_id}:role/permissionhub-dev-*-role",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "lambda.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "ReadApprovedPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": [
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+        "${boundary_arn}"
+      ]
+    },
+    {
+      "Sid": "RdsServiceLinkedRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateServiceLinkedRole"
+      ],
+      "Resource": "arn:aws:iam::${account_id}:role/aws-service-role/rds.amazonaws.com/*",
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": "rds.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "NeverRemoveRuntimeBoundary",
+      "Effect": "Deny",
+      "Action": [
+        "iam:DeleteRolePermissionsBoundary"
+      ],
+      "Resource": "arn:aws:iam::${account_id}:role/permissionhub-dev-*-role"
+    }
+  ]
+}

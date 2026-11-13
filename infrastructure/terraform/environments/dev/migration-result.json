@@ -1,0 +1,1 @@
+{"ok":true,"mode":"push","message":"Prisma schema pushed.","durationMs":3289,"stdout":"Prisma schema loaded from prisma/schema.prisma\nDatasource \"db\": PostgreSQL database \"permissionhub\", schema \"public\" at \"permissionhub-dev-postgres.cc7jdytilrfh.af-south-1.rds.amazonaws.com:5432\"\nThe database is already in sync with the Prisma schema.","stderr":""}

@@ -1,5 +1,7 @@
 # PermissionHub
 
+The `user_login` branch adds server-managed user authentication, tenant membership, scoped AWS account selection, delegated application roles, approval routing, and guarded cross-account role assumption. See [Authentication architecture](docs/authentication-architecture.md) and [real AWS connectivity](docs/aws-real-connectivity.md) for configuration, onboarding, and security details.
+
 PermissionHub is now a focused AWS permission request and provisioning application. The primary workflow is simple: discover IAM users and roles, choose managed policies or specific actions, submit a justified access request, approve it, preview the exact IAM change, provision the approved attachment through the backend, and audit the result.
 
 The frontend never requests, captures, displays, logs, saves, or transmits AWS access keys. Local AWS credentials must stay outside this repository and be resolved by the AWS SDK v3 default credential provider chain in the backend.
@@ -67,38 +69,50 @@ Open `http://localhost:5173`. The backend serves REST APIs at `http://localhost:
 ```text
 AWS_PROFILE
 AWS_REGION
-PROVISIONING_MODE
+AWS_PROVISIONING_MODE
 ENABLE_LIVE_PROVISIONING
 PROVISIONING_CONFIRMATION
+CROSS_ACCOUNT_PROVISIONING_ENABLED
 DATABASE_URL
 REDIS_URL
-JWT_SECRET
+AUTH_ENABLED
+ENABLE_DEV_AUTH
+SESSION_SECRET
+SESSION_COOKIE_NAME
 FRONTEND_URL
 SES_FROM_EMAIL
 ```
 
-Recommended local configuration:
+Recommended manual-connection local configuration (SSO remains disabled on this branch):
 
 ```bash
 AWS_PROFILE=permissionhub-dev
 AWS_REGION=af-south-1
-PROVISIONING_MODE=MOCK
+AWS_PROVISIONING_MODE=dry-run
+CROSS_ACCOUNT_PROVISIONING_ENABLED=false
+AUTH_ENABLED=false
+ENABLE_DEV_AUTH=true
+DEV_AUTH_USER_ID=user_org_admin_dev
+AWS_CONNECTION_MODE=manual
+ENABLE_AWS_DEMO_DATA=false
+SESSION_SECRET=<generate-at-least-32-random-characters>
 ```
 
 ## Provisioning Modes
 
-`PROVISIONING_MODE=MOCK` is the default. It makes no AWS changes and returns realistic test results.
+`AWS_PROVISIONING_MODE=disabled` is the default. Approval succeeds, the request remains `APPROVED`, and no AWS change is attempted.
 
-`PROVISIONING_MODE=SIMULATE` uses IAM simulation where supported and makes no policy attachments or modifications.
+`AWS_PROVISIONING_MODE=dry-run` builds and validates the exact operation plan and makes no policy attachments or modifications. Specific-action requests show both policy creation and attachment steps.
 
-`PROVISIONING_MODE=LIVE` can attach or detach policies only when both server-side guards are present:
+`AWS_PROVISIONING_MODE=live` can run an approved mutation only when every server-side guard is present:
 
 ```bash
 ENABLE_LIVE_PROVISIONING=true
+CROSS_ACCOUNT_PROVISIONING_ENABLED=true
 PROVISIONING_CONFIRMATION=I_UNDERSTAND_THIS_CHANGES_AWS
 ```
 
-The frontend cannot enable live provisioning.
+The legacy `PROVISIONING_MODE` variable remains accepted for compatibility with older deployments, but it does not enable this review workflow. The frontend cannot enable live provisioning.
 
 ## AWS APIs Implemented
 
@@ -137,9 +151,9 @@ Resource discovery:
 - `AdministratorAccess` provisioning is explicitly blocked.
 - Inline policy replacement, trust-policy modification, access-key creation, permission-boundary removal, user deletion, role deletion, and policy deletion are not supported.
 
-## Mock Mode
+## Manual AWS connection mode
 
-The app works immediately without AWS credentials. Mock mode includes 8 IAM users, 8 IAM roles, AWS-managed policies, customer-managed policies, S3 buckets, RDS databases, Lambda functions, existing policy assignments, sample requests, grants, and audit history. The UI clearly displays a mock/disconnected account rather than claiming live AWS connectivity.
+With `AWS_CONNECTION_MODE=manual`, no demo Organisation, OU, account, IAM identity, policy, or resource is used as a fallback. Add an account on Connection, choose `LOCAL_DEFAULT_CREDENTIALS` or `ASSUME_ROLE`, validate STS and IAM read capabilities, then set a validated account active. See [manual AWS connections](docs/manual-aws-connections.md).
 
 ## Temporary Access Expiry
 

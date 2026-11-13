@@ -1,0 +1,69 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StateBucketMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${state_bucket}"
+      ]
+    },
+    {
+      "Sid": "OnlyApplicationState",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${state_bucket}/${state_key}"
+      ]
+    },
+    {
+      "Sid": "LockMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:${region}:${account_id}:table/${lock_table}"
+      ]
+    },
+    {
+      "Sid": "OnlyDevLock",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:${region}:${account_id}:table/${lock_table}"
+      ],
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:LeadingKeys": [
+            "${state_bucket}/${state_key}",
+            "${state_bucket}/${state_key}-md5"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ArtifactsRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetBucketVersioning"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${artifact_bucket}",
+        "arn:aws:s3:::${artifact_bucket}/lambda/*"
+      ]
+    }
+  ]
+}

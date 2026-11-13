@@ -1,0 +1,23 @@
+aws_region = "af-south-1"
+environment = "dev"
+project_name = "permissionhub"
+
+vpc_cidr = "10.40.0.0/16"
+availability_zones = ["af-south-1a", "af-south-1b"]
+public_subnet_cidrs = ["10.40.0.0/24", "10.40.1.0/24"]
+private_app_subnet_cidrs = ["10.40.10.0/24", "10.40.11.0/24"]
+private_db_subnet_cidrs = ["10.40.20.0/24", "10.40.21.0/24"]
+
+frontend_url = "http://localhost:5173"
+allowed_origins = ["http://localhost:5173"]
+callback_urls = ["http://localhost:5173"]
+logout_urls = ["http://localhost:5173/login"]
+
+lambda_artifact_bucket = "permissionhub-lambda-artifacts-example"
+api_lambda_artifact_key = "permissionhub-api-replace-with-git-sha.zip"
+provisioning_lambda_artifact_key = "permissionhub-provisioning-replace-with-git-sha.zip"
+expiry_lambda_artifact_key = "permissionhub-expiry-replace-with-git-sha.zip"
+migration_lambda_artifact_key = "permissionhub-db-migration-replace-with-git-sha.zip"
+
+# Optional: execution task role may assume these PermissionHub-managed account roles.
+assumable_role_arns = []

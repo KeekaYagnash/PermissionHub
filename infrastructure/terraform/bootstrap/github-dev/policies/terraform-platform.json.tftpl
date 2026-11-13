@@ -1,0 +1,270 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LambdaInfrastructure",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:DeleteFunction",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:PutFunctionConcurrency",
+        "lambda:DeleteFunctionConcurrency",
+        "lambda:AddPermission",
+        "lambda:RemovePermission",
+        "lambda:TagResource",
+        "lambda:UntagResource"
+      ],
+      "Resource": "arn:aws:lambda:${region}:${account_id}:function:permissionhub-dev-*"
+    },
+    {
+      "Sid": "LambdaQueueMappings",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateEventSourceMapping",
+        "lambda:UpdateEventSourceMapping",
+        "lambda:DeleteEventSourceMapping",
+        "lambda:TagResource",
+        "lambda:UntagResource"
+      ],
+      "Resource": "arn:aws:lambda:${region}:${account_id}:event-source-mapping:*"
+    },
+    {
+      "Sid": "Rds",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance",
+        "rds:ModifyDBInstance",
+        "rds:DeleteDBInstance",
+        "rds:CreateDBSubnetGroup",
+        "rds:ModifyDBSubnetGroup",
+        "rds:DeleteDBSubnetGroup",
+        "rds:AddTagsToResource",
+        "rds:RemoveTagsFromResource"
+      ],
+      "Resource": [
+        "arn:aws:rds:${region}:${account_id}:db:permissionhub-dev-*",
+        "arn:aws:rds:${region}:${account_id}:subgrp:permissionhub-dev-*",
+        "arn:aws:rds:${region}:${account_id}:snapshot:permissionhub-dev-*"
+      ]
+    },
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "logs:TagLogGroup",
+        "logs:UntagLogGroup"
+      ],
+      "Resource": [
+        "arn:aws:logs:${region}:${account_id}:log-group:/aws/lambda/permissionhub-dev-*",
+        "arn:aws:logs:${region}:${account_id}:log-group:/aws/apigateway/permissionhub-dev-*",
+        "arn:aws:logs:${region}:${account_id}:log-group:/aws/*/permissionhub-dev-*:*"
+      ]
+    },
+    {
+      "Sid": "Queues",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:CreateQueue",
+        "sqs:DeleteQueue",
+        "sqs:SetQueueAttributes",
+        "sqs:TagQueue",
+        "sqs:UntagQueue"
+      ],
+      "Resource": "arn:aws:sqs:${region}:${account_id}:permissionhub-dev-*"
+    },
+    {
+      "Sid": "Secrets",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret",
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:UpdateSecret",
+        "secretsmanager:DeleteSecret",
+        "secretsmanager:RestoreSecret",
+        "secretsmanager:UpdateSecretVersionStage",
+        "secretsmanager:TagResource",
+        "secretsmanager:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:${region}:${account_id}:secret:permissionhub-dev/*",
+        "arn:aws:secretsmanager:${region}:${account_id}:secret:dev/permissionhub-dev/*"
+      ]
+    },
+    {
+      "Sid": "Alarms",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource"
+      ],
+      "Resource": "arn:aws:cloudwatch:${region}:${account_id}:alarm:permissionhub-dev-*"
+    },
+    {
+      "Sid": "Schedules",
+      "Effect": "Allow",
+      "Action": [
+        "events:PutRule",
+        "events:DeleteRule",
+        "events:PutTargets",
+        "events:RemoveTargets",
+        "events:TagResource",
+        "events:UntagResource"
+      ],
+      "Resource": "arn:aws:events:${region}:${account_id}:rule/permissionhub-dev-*"
+    },
+    {
+      "Sid": "FrontendBuckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutBucketPolicy",
+        "s3:DeleteBucketPolicy",
+        "s3:PutBucketTagging",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutBucketVersioning"
+      ],
+      "Resource": "arn:aws:s3:::permissionhub-dev-frontend-*"
+    },
+    {
+      "Sid": "CreateDistribution",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateDistribution",
+        "cloudfront:TagResource"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Application": "PermissionHub",
+          "aws:RequestTag/Environment": "dev"
+        }
+      }
+    },
+    {
+      "Sid": "ManageDistribution",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:UpdateDistribution",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:TagResource",
+        "cloudfront:UntagResource"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:distribution/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Application": "PermissionHub",
+          "aws:ResourceTag/Environment": "dev"
+        }
+      }
+    },
+    {
+      "Sid": "OriginAccessControl",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:UpdateOriginAccessControl",
+        "cloudfront:DeleteOriginAccessControl"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateUserPool",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:CreateUserPool"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Application": "PermissionHub",
+          "aws:RequestTag/Environment": "dev"
+        }
+      }
+    },
+    {
+      "Sid": "UserPoolConfiguration",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:UpdateUserPool",
+        "cognito-idp:DeleteUserPool",
+        "cognito-idp:CreateUserPoolClient",
+        "cognito-idp:UpdateUserPoolClient",
+        "cognito-idp:DeleteUserPoolClient",
+        "cognito-idp:CreateUserPoolDomain",
+        "cognito-idp:UpdateUserPoolDomain",
+        "cognito-idp:DeleteUserPoolDomain",
+        "cognito-idp:SetUserPoolMfaConfig",
+        "cognito-idp:TagResource",
+        "cognito-idp:UntagResource",
+        "cognito-idp:GetGroup",
+        "cognito-idp:ListGroups",
+        "cognito-idp:CreateGroup",
+        "cognito-idp:UpdateGroup",
+        "cognito-idp:DeleteGroup"
+      ],
+      "Resource": "arn:aws:cognito-idp:${region}:${account_id}:userpool/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Application": "PermissionHub",
+          "aws:ResourceTag/Environment": "dev"
+        }
+      }
+    },
+    {
+      "Sid": "HttpApiConfiguration",
+      "Effect": "Allow",
+      "Action": [
+        "apigateway:GET",
+        "apigateway:POST",
+        "apigateway:PUT",
+        "apigateway:PATCH",
+        "apigateway:DELETE"
+      ],
+      "Resource": "arn:aws:apigateway:${region}::*"
+    },
+    {
+      "Sid": "CreateApiAlarm",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:TagResource"
+      ],
+      "Resource": "arn:aws:cloudwatch:${region}:${account_id}:alarm:*-5xx",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Application": "PermissionHub",
+          "aws:RequestTag/Environment": "dev"
+        }
+      }
+    },
+    {
+      "Sid": "MaintainTaggedApiAlarm",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource"
+      ],
+      "Resource": "arn:aws:cloudwatch:${region}:${account_id}:alarm:*-5xx",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Application": "PermissionHub",
+          "aws:ResourceTag/Environment": "dev"
+        }
+      }
+    }
+  ]
+}

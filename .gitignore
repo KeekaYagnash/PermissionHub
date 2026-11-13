@@ -10,7 +10,9 @@ dist/
 .DS_Store
 coverage/
 **/coverage/
+artifacts/
 frontend/.vite/
+backend/lambda-dist/
 *.pem
 .aws/
 **/.aws/
@@ -18,3 +20,11 @@ frontend/.vite/
 .aws/config
 **/.aws/credentials
 **/.aws/config
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan*
+**/lambda-artifacts.auto.tfvars.json
+**/bootstrap.auto.tfvars.json
+**/imports.generated.tf

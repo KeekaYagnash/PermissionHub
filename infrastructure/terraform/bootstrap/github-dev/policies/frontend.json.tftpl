@@ -1,0 +1,37 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FrontendList",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::permissionhub-dev-frontend-*"
+    },
+    {
+      "Sid": "FrontendObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::permissionhub-dev-frontend-*/*"
+    },
+    {
+      "Sid": "FrontendInvalidation",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateInvalidation",
+        "cloudfront:GetInvalidation"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:distribution/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Application": "PermissionHub",
+          "aws:ResourceTag/Environment": "dev"
+        }
+      }
+    }
+  ]
+}

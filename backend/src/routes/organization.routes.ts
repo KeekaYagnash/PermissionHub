@@ -1,0 +1,21 @@
+import {Router} from 'express';
+import {z} from 'zod';
+import rateLimit from 'express-rate-limit';
+import {prisma} from '../config/database.js';
+import {env} from '../config/env.js';
+import {asyncHandler} from '../utils/http.js';
+import {OrganizationService,organizationRoles} from '../services/organization.service.js';
+import {SesInvitationMailer} from '../services/invitation-mailer.service.js';
+import type {AuthenticatedRequest} from '../types.js';
+
+export const organizations=new OrganizationService(prisma,new SesInvitationMailer(),env.FRONTEND_URL);
+const router=Router();
+router.use('/admin/invitations',rateLimit({windowMs:60_000,limit:20,standardHeaders:'draft-8',legacyHeaders:false}));
+const invite=z.object({email:z.string().trim().email().max(254),role:z.enum(organizationRoles)});
+router.get('/admin/members',asyncHandler(async(req:AuthenticatedRequest,res)=>res.json({data:await organizations.list(req.sessionUser!,req.tenantId!)})));
+router.post(['/admin/invitations','/admin/users'],asyncHandler(async(req:AuthenticatedRequest,res)=>{const input=invite.parse(req.body);res.status(201).json({data:await organizations.invite(req.sessionUser!,req.tenantId!,input.email,input.role)})}));
+router.post('/admin/invitations/:invitationId/resend',asyncHandler(async(req:AuthenticatedRequest,res)=>res.json({data:await organizations.resend(req.sessionUser!,req.tenantId!,String(req.params.invitationId))})));
+router.delete('/admin/invitations/:invitationId',asyncHandler(async(req:AuthenticatedRequest,res)=>res.json({data:await organizations.revoke(req.sessionUser!,req.tenantId!,String(req.params.invitationId))})));
+router.patch('/admin/members/:membershipId',asyncHandler(async(req:AuthenticatedRequest,res)=>{const input=z.object({role:z.enum(organizationRoles)}).parse(req.body);res.json({data:await organizations.changeMember(req.sessionUser!,req.tenantId!,String(req.params.membershipId),input.role)})}));
+router.delete('/admin/members/:membershipId',asyncHandler(async(req:AuthenticatedRequest,res)=>res.json({data:await organizations.changeMember(req.sessionUser!,req.tenantId!,String(req.params.membershipId))})));
+export default router;

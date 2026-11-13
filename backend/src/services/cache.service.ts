@@ -4,6 +4,7 @@ export interface CacheStore{
  set<T>(key:string,value:T,ttlMs:number):void;
  delete(key:string):void;
  deletePrefix(prefix:string):void;
+ deleteContaining(fragment:string):void;
  status(key:string):'HIT'|'MISS';
 }
 
@@ -18,6 +19,7 @@ export class InMemoryTTLCache implements CacheStore{
  set<T>(key:string,value:T,ttlMs:number){this.items.set(key,{value,createdAt:Date.now(),expiresAt:Date.now()+ttlMs})}
  delete(key:string){this.items.delete(key)}
  deletePrefix(prefix:string){for(const key of this.items.keys())if(key.startsWith(prefix))this.items.delete(key)}
+ deleteContaining(fragment:string){for(const key of this.items.keys())if(key.includes(fragment))this.items.delete(key)}
  status(key:string){return this.get(key)===undefined?'MISS':'HIT'}
 }
 

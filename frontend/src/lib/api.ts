@@ -1,15 +1,85 @@
 import axios from 'axios';
-import type { AuditEvent,AwsResource,ConnectionStatus,IamIdentity,IamPolicyDetail,IamPolicySummary,Page,PermissionRequest } from '../types';
+import type { AppContext,AuditEvent,AuthSession,AwsAccountContext,AwsResource,ConnectionStatus,IamIdentity,IamPolicyDetail,IamPolicySummary,Page,PermissionRequest } from '../types';
+import {buildReviewPayload,type LiveConfirmation,type ReviewAction} from './review';
+import { ensureAccessToken } from './cognito';
+export interface OrganizationMembers {members:{id:string;role:string;status:string;user:{id:string;email:string;displayName:string}}[];invitations:{id:string;email:string;role:string;status:string;expiresAt:string;deliveryStatus:string}[]}
 
-export const http=axios.create({baseURL:'/api'});
+export const http=axios.create({baseURL:import.meta.env.VITE_API_BASE_URL||'/api',withCredentials:true});
+let csrfToken='';
+export const setCsrfToken=(token:string)=>{csrfToken=token};
+export class ClientApiError extends Error{
+ status?:number;
+ code?:string;
+ correlationId?:string;
+ details?:unknown;
+ response?:unknown;
+ constructor(input:{message:string;status?:number;code?:string;correlationId?:string;details?:unknown;response?:unknown}){
+  super(input.message);
+  this.name='ClientApiError';
+  this.status=input.status;
+  this.code=input.code;
+  this.correlationId=input.correlationId;
+  this.details=input.details;
+  this.response=input.response;
+ }
+}
+function normaliseApiError(error:any){
+ const payload=error?.response?.data?.error;
+ if(payload)return new ClientApiError({message:payload.message??'Request failed.',status:error.response?.status,code:payload.code,correlationId:payload.correlationId,details:payload.details??payload.blockingFields,response:error.response});
+ return new ClientApiError({message:error?.message??'Network request failed.',status:error?.response?.status,response:error?.response});
+}
+http.interceptors.request.use(async config=>{const token=await ensureAccessToken();if(token)config.headers.Authorization=`Bearer ${token}`;if(config.method&&!['get','head','options'].includes(config.method.toLowerCase())&&csrfToken)config.headers['X-CSRF-Token']=csrfToken;return config});
+http.interceptors.response.use(response=>response,error=>{if(error?.response?.status===401&&!String(error?.config?.url??'').includes('/auth/session')&&!location.pathname.startsWith('/login'))location.assign('/session-expired');return Promise.reject(normaliseApiError(error))});
 const unwrap=<T>(value:{data:{data:T}})=>value.data.data;
 const unwrapPage=<T>(value:{data:Page<T>})=>value.data;
 
 export const api={
+ session:()=>http.get('/auth/session').then(unwrap<AuthSession>),
+ developmentUsers:()=>http.get('/auth/development-users').then(unwrap<any[]>),
+ developmentLogin:(userId:string)=>http.post('/auth/development-login',{userId}).then(unwrap<AuthSession>),
+ logout:()=>http.post('/auth/logout').then(unwrap<{redirectUrl:string}>),
+ selectTenant:(tenantId:string)=>http.post('/auth/select-tenant',{tenantId}).then(unwrap<AuthSession>),
+ setOrganization:(companyName:string)=>http.post('/auth/organization',{companyName}).then(unwrap<AuthSession>),
+ saveProfile:(displayName:string)=>http.patch('/auth/profile',{displayName}).then(unwrap<AuthSession>),
+ inspectInvitation:(proof:string)=>http.post('/auth/invitations/inspect',{proof}).then(unwrap<{organizationName:string;role:string;expiresAt:string}>),
+ acceptInvitation:(proof:string)=>http.post('/auth/invitations/accept',{proof}).then(unwrap<AuthSession>),
+ startIdentityLink:()=>http.post('/auth/link/start').then(unwrap<{proof:string}>),
+ acceptIdentityLink:(proof:string)=>http.post('/auth/link/accept',{proof}).then(unwrap<AuthSession>),
+ organizationMembers:()=>http.get('/admin/members').then(unwrap<OrganizationMembers>),
+ inviteMember:(input:{email:string;role:string})=>http.post('/admin/invitations',input).then(unwrap<{message:string;deliveryStatus:string}>),
+ resendInvitation:(id:string)=>http.post(`/admin/invitations/${encodeURIComponent(id)}/resend`).then(unwrap<{message:string;deliveryStatus:string}>),
+ revokeInvitation:(id:string)=>http.delete(`/admin/invitations/${encodeURIComponent(id)}`).then(unwrap<unknown>),
+ changeMember:(id:string,role:string)=>http.patch(`/admin/members/${encodeURIComponent(id)}`,{role}).then(unwrap<unknown>),
+ removeMember:(id:string)=>http.delete(`/admin/members/${encodeURIComponent(id)}`).then(unwrap<unknown>),
+ selectAccount:async(accountRecordId:string)=>{await http.post('/aws/active-account',{accountRecordId});return http.get('/auth/session').then(unwrap<AuthSession>)},
+ clearAccount:()=>http.post('/auth/clear-account').then(unwrap<AuthSession>),
+ context:()=>http.get('/auth/context').then(unwrap<AppContext>),
  connection:()=>http.get('/aws/connection').then(unwrap<ConnectionStatus>),
  testConnection:()=>http.post('/aws/connection/test').then(unwrap<ConnectionStatus>),
- users:(search='')=>http.get('/aws/identities/users',{params:{search,pageSize:100}}).then(unwrapPage<IamIdentity>),
- roles:(search='',includeServiceLinked=false)=>http.get('/aws/identities/roles',{params:{search,includeServiceLinked,pageSize:100}}).then(unwrapPage<IamIdentity>),
+ connections:()=>http.get('/aws/accounts').then(unwrap<AwsAccountContext[]>),
+ createAwsAccount:(input:unknown)=>http.post('/aws/accounts',input).then(unwrap<any>),
+ validateLocalCredentials:()=>http.post('/aws/local-credentials/validate').then(unwrap<any>),
+ validateAccessKeys:(input:unknown)=>http.post('/aws/access-keys/validate',input).then(unwrap<any>),
+ validateAwsAccount:(accountId:string)=>http.post(`/aws/accounts/${encodeURIComponent(accountId)}/validate`).then(unwrap<any>),
+ updateAwsAccount:(accountId:string,input:unknown)=>http.patch(`/aws/accounts/${encodeURIComponent(accountId)}`,input).then(unwrap<AwsAccountContext>),
+ repairAwsAccount:(accountId:string)=>http.post(`/aws/accounts/${encodeURIComponent(accountId)}/repair-connection`,{confirm:true}).then(unwrap<AwsAccountContext>),
+ convertAwsAccount:(accountId:string)=>http.post(`/aws/accounts/${encodeURIComponent(accountId)}/convert-to-manual`,{confirm:true}).then(unwrap<AwsAccountContext>),
+ removeAwsAccount:(accountId:string)=>http.delete(`/aws/accounts/${encodeURIComponent(accountId)}`).then(unwrap<any>),
+ resetAwsAccount:(accountRecordId:string,dryRun=true,confirm=false)=>http.post(`/aws/accounts/${encodeURIComponent(accountRecordId)}/reset`,{dryRun,confirm}).then(unwrap<any>),
+ runtimeDebug:()=>http.get('/debug/runtime').then(unwrap<any>),
+ clearAwsCache:()=>http.post('/aws/cache/clear').then(unwrap<any>),
+ awsDiagnostics:()=>http.get('/aws/diagnostics').then(unwrap<any>),
+ validateReadConnection:()=>http.post('/aws/connection/validate-read').then(unwrap<any>),
+ testCapabilities:()=>http.post('/aws/connection/capabilities').then(unwrap<any>),
+ validateProvisionConnection:()=>http.post('/aws/connection/validate-provision').then(unwrap<any>),
+ setConnectionStatus:(status:'DISABLED'|'PENDING')=>http.post('/aws/connection/status',{status}).then(unwrap<AwsAccountContext>),
+ syncOrganisation:(organisationId:string)=>http.post(`/aws/organisations/${encodeURIComponent(organisationId)}/sync`).then(unwrap<any>),
+  users:(search='')=>http.get('/aws/identities/users',{params:{search,pageSize:100}}).then(unwrapPage<IamIdentity>),
+  user:(userName:string)=>http.get(`/aws/identities/users/${encodeURIComponent(userName)}`).then(unwrap<IamIdentity>),
+  roles:(search='',includeServiceLinked=false)=>http.get('/aws/identities/roles',{params:{search,includeServiceLinked,pageSize:100}}).then(unwrapPage<IamIdentity>),
+  role:(roleName:string)=>http.get(`/aws/identities/roles/${encodeURIComponent(roleName)}`).then(unwrap<IamIdentity>),
+  groups:(search='')=>http.get('/aws/identities/groups',{params:{search,pageSize:100}}).then(unwrapPage<IamIdentity>),
+ group:(groupName:string)=>http.get(`/aws/identities/groups/${encodeURIComponent(groupName)}`).then(unwrap<IamIdentity>),
  policies:(params:Record<string,string|number|undefined>,signal?:AbortSignal)=>http.get('/aws/policies',{params:{pageSize:25,...params},signal}).then(unwrapPage<IamPolicySummary>),
  policy:(arn:string)=>http.get(`/aws/policies/${encodeURIComponent(arn)}`).then(unwrap<IamPolicyDetail>),
  validatePolicy:(document:Record<string,unknown>)=>http.post('/aws/policies/validate',{document}).then(unwrap<any>),
@@ -18,12 +88,20 @@ export const api={
  request:(id:string)=>http.get(`/requests/${id}`).then(unwrap<PermissionRequest>),
  createRequest:(payload:unknown)=>http.post('/requests',payload).then(unwrap<PermissionRequest>),
  submitRequest:(id:string)=>http.post(`/requests/${id}/submit`).then(unwrap<PermissionRequest>),
- approve:(id:string,comment:string)=>http.post(`/requests/${id}/approve`,{comment}).then(unwrap<PermissionRequest>),
- reject:(id:string,comment:string)=>http.post(`/requests/${id}/reject`,{comment}).then(unwrap<PermissionRequest>),
- requestInfo:(id:string,comment:string)=>http.post(`/requests/${id}/request-information`,{comment}).then(unwrap<PermissionRequest>),
+ review:(id:string,action:ReviewAction,comment:string,idempotencyKey:string,confirmation?:LiveConfirmation)=>http.post(`/requests/${id}/review`,buildReviewPayload(action,comment,idempotencyKey,confirmation)).then(unwrap<any>),
+ approve:(id:string,comment:string)=>http.post(`/requests/${id}/approve`,buildReviewPayload('APPROVE',comment)).then(unwrap<PermissionRequest>),
+ reject:(id:string,comment:string)=>http.post(`/requests/${id}/reject`,buildReviewPayload('REJECT',comment)).then(unwrap<PermissionRequest>),
+ requestInfo:(id:string,comment:string)=>http.post(`/requests/${id}/request-information`,buildReviewPayload('REQUEST_INFORMATION',comment)).then(unwrap<PermissionRequest>),
  simulate:(id:string)=>http.post(`/requests/${id}/simulate`).then(unwrap<any>),
  provision:(id:string)=>http.post(`/requests/${id}/provision`).then(unwrap<any>),
  revoke:(id:string)=>http.post(`/requests/${id}/revoke`).then(unwrap<any>),
  activity:()=>http.get('/activity',{params:{pageSize:100}}).then(unwrapPage<AuditEvent>),
- approvers:()=>http.get('/approvers').then(unwrap<any[]>)
+ approvers:(requestId?:string)=>http.get('/approvers',{params:{requestId}}).then(unwrap<any[]>),
+ reassignApprover:(requestId:string,approverUserId:string)=>http.post(`/requests/${requestId}/reassign-approver`,{approverUserId}).then(unwrap<any>),
+ validateProvisionRole:(accountRecordId:string)=>http.post(`/aws/accounts/${encodeURIComponent(accountRecordId)}/validate-provision-role`).then(unwrap<any>),
+ adminDirectory:()=>http.get('/admin/directory').then(unwrap<any>),
+ addTenantUser:(input:unknown)=>http.post('/admin/users',input).then(unwrap<any>),
+ approvalPolicies:()=>http.get('/admin/approval-policies').then(unwrap<any[]>),
+ saveScope:(scope:unknown)=>http.post('/admin/scopes',scope).then(unwrap<any>),
+ onboardAccount:(input:unknown)=>http.post('/admin/accounts/onboarding',input).then(unwrap<any>)
 };

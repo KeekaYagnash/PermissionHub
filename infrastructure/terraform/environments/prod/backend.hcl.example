@@ -1,0 +1,5 @@
+bucket         = "permissionhub-terraform-state-example"
+key            = "permissionhub/prod/terraform.tfstate"
+region         = "af-south-1"
+dynamodb_table = "permissionhub-terraform-locks"
+encrypt        = true

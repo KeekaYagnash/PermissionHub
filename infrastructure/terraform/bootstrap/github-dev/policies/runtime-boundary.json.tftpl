@@ -1,0 +1,80 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RuntimeOperations",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams",
+        "ec2:CreateNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DeleteNetworkInterface",
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:UnassignPrivateIpAddresses",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeSecurityGroups",
+        "sts:GetCallerIdentity",
+        "sts:AssumeRole",
+        "sts:TagSession",
+        "sts:SetSourceIdentity",
+        "iam:Get*",
+        "iam:List*",
+        "iam:Simulate*",
+        "iam:CreateUser",
+        "iam:CreateRole",
+        "iam:CreateGroup",
+        "iam:CreatePolicy",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:AttachUserPolicy",
+        "iam:DetachUserPolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:AttachGroupPolicy",
+        "iam:DetachGroupPolicy",
+        "iam:PutUserPolicy",
+        "iam:PutRolePolicy",
+        "iam:AddUserToGroup",
+        "iam:RemoveUserFromGroup",
+        "iam:UpdateAssumeRolePolicy",
+        "access-analyzer:ValidatePolicy",
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "secretsmanager:GetSecretValue",
+        "kms:Decrypt"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ProtectCiIdentities",
+      "Effect": "Deny",
+      "Action": [
+        "iam:*",
+        "sts:AssumeRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::${account_id}:role/permissionhub-github-*",
+        "arn:aws:iam::${account_id}:policy/permissionhub-github-*",
+        "arn:aws:iam::${account_id}:oidc-provider/token.actions.githubusercontent.com"
+      ]
+    },
+    {
+      "Sid": "ProtectRuntimeRolePermissions",
+      "Effect": "Deny",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:PutRolePermissionsBoundary",
+        "iam:DeleteRolePermissionsBoundary"
+      ],
+      "Resource": "arn:aws:iam::${account_id}:role/permissionhub-dev-*-role"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+variable "name" { type = string }
+variable "invitation_ses_identity_arn" {
+  type    = string
+  default = null
+}
+variable "permissions_boundary_arn" {
+  type    = string
+  default = null
+}
+variable "runtime" { type = string }
+variable "handler" { type = string }
+variable "artifact_s3_bucket" { type = string }
+variable "artifact_s3_key" { type = string }
+variable "artifact_source_hash" {
+  type    = string
+  default = null
+}
+variable "memory_size" { type = number }
+variable "timeout" { type = number }
+variable "reserved_concurrency" {
+  type    = number
+  default = -1
+}
+variable "subnet_ids" { type = list(string) }
+variable "security_group_id" { type = string }
+variable "environment_variables" { type = map(string) }
+variable "app_secret_arn" { type = string }
+variable "database_secret_arn" { type = string }
+variable "provisioning_queue_arn" { type = string }
+variable "assumable_role_arns" {
+  type    = list(string)
+  default = []
+}
+variable "enable_demo_iam_permissions" {
+  type    = bool
+  default = false
+}
+variable "log_retention_days" { type = number }
+variable "tags" {
+  type    = map(string)
+  default = {}
+}

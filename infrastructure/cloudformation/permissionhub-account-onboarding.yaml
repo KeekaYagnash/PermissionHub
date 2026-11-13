@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: PermissionHub cross-account read and approved IAM provisioning roles.
+Parameters:
+  PermissionHubExecutionPrincipalArn:
+    Type: String
+    Description: IAM role ARN used by the PermissionHub backend.
+  ExternalId:
+    Type: String
+    NoEcho: true
+    MinLength: 20
+    Description: Unique external ID supplied out-of-band. Store the value in Secrets Manager.
+Conditions:
+  HasExternalId: !Not [!Equals [!Ref ExternalId, '']]
+Resources:
+  PermissionHubReadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PermissionHubReadRole
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref PermissionHubExecutionPrincipalArn }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      Policies:
+        - PolicyName: PermissionHubDiscovery
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:Get*
+                  - iam:List*
+                  - iam:SimulateCustomPolicy
+                  - iam:SimulatePrincipalPolicy
+                  - access-analyzer:ValidatePolicy
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketLocation
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                  - lambda:ListFunctions
+                  - sts:GetCallerIdentity
+                Resource: '*'
+  PermissionHubProvisionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PermissionHubProvisionRole
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref PermissionHubExecutionPrincipalArn }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      Policies:
+        - PolicyName: PermissionHubApprovedChanges
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ManagedPolicyAttachments
+                Effect: Allow
+                Action:
+                  - iam:AttachUserPolicy
+                  - iam:DetachUserPolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                Resource:
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:user/*
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+              - Sid: PermissionHubManagedPolicies
+                Effect: Allow
+                Action: iam:CreatePolicy
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/PermissionHub/*
+              - Effect: Allow
+                Action: sts:GetCallerIdentity
+                Resource: '*'
+Outputs:
+  ReadRoleArn: { Value: !GetAtt PermissionHubReadRole.Arn }
+  ProvisionRoleArn: { Value: !GetAtt PermissionHubProvisionRole.Arn }

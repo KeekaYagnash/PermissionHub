@@ -1,0 +1,130 @@
+name: PermissionHub deployment
+on:
+  push:
+    branches: [dev, main]
+    paths: ['frontend/**', 'backend/**', 'package.json', 'package-lock.json', '.github/**', 'infrastructure/**']
+  workflow_dispatch:
+    inputs:
+      fresh_deployment:
+        description: Explicit one-time creation into empty selected state (not routine deployment)
+        type: boolean
+        default: false
+      environment:
+        type: choice
+        options: [dev, prod]
+        default: dev
+      apply:
+        description: Apply the guarded saved plan and deploy frontend
+        type: boolean
+        default: false
+      run_migrations:
+        description: Run reviewed migrate-deploy migrations before application deployment
+        type: boolean
+        default: false
+      defer_frontend:
+        description: Intentionally complete backend/infra without frontend publication
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      fresh_deployment:
+        description: Explicit one-time creation into empty selected state (not routine deployment)
+        type: boolean
+        default: false
+      environment:
+        type: string
+        default: dev
+      apply:
+        type: boolean
+        default: false
+      infrastructure:
+        type: boolean
+        default: true
+      run_migrations:
+        type: boolean
+        default: false
+      defer_frontend:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+concurrency:
+  group: permissionhub-state-${{ inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+  cancel-in-progress: false
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.context.outputs.environment }}
+      backend: ${{ steps.diff.outputs.backend }}
+      frontend: ${{ steps.diff.outputs.frontend }}
+      infrastructure: ${{ steps.diff.outputs.infrastructure }}
+      migrations: ${{ steps.diff.outputs.migrations }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require exact branch/environment mapping
+        id: context
+        env:
+          FRESH: ${{ inputs.fresh_deployment }}
+          REQUESTED_ENVIRONMENT: ${{ github.event_name == 'push' && '' || inputs.environment }}
+        run: |
+          node infrastructure/scripts/ci.mjs environment
+          if [ "$FRESH" = true ]; then test "$GITHUB_EVENT_NAME" != push; fi
+      - name: Detect cumulative changes since last successful release on this branch
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_MIGRATIONS: ${{ inputs.run_migrations }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            baseline=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy.yml/runs?branch=$GITHUB_REF_NAME&event=push&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // empty' || true)
+            if [ -z "$baseline" ]; then baseline=$(git hash-object -t tree /dev/null); fi
+            node infrastructure/scripts/ci.mjs changes "$baseline" "$GITHUB_SHA"
+          else
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "infrastructure=true" >> "$GITHUB_OUTPUT"
+            echo "migrations=$MANUAL_MIGRATIONS" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Require real production review protection before any production work
+        if: steps.context.outputs.environment == 'prod'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node infrastructure/scripts/ci.mjs protection production strict
+  validation:
+    needs: changes
+    uses: ./.github/workflows/terraform-pr.yml
+  backend:
+    needs: [changes, validation]
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.infrastructure == 'true' || needs.changes.outputs.frontend == 'true'
+    uses: ./.github/workflows/deploy-dev-backend.yml
+    secrets: inherit
+    with:
+      fresh_deployment: ${{ inputs.fresh_deployment || false }}
+      environment: ${{ needs.changes.outputs.environment }}
+      defer_frontend: ${{ inputs.defer_frontend || false }}
+      backend: ${{ needs.changes.outputs.backend == 'true' }}
+      infrastructure: ${{ needs.changes.outputs.infrastructure == 'true' }}
+      migrations: ${{ needs.changes.outputs.migrations == 'true' }}
+      apply: ${{ github.event_name == 'push' || inputs.apply }}
+  frontend:
+    needs: [changes, validation, backend]
+    if: always() && !inputs.defer_frontend && needs.validation.result == 'success' && (needs.backend.result == 'success' || needs.backend.result == 'skipped') && (github.event_name == 'push' || inputs.apply) && (needs.changes.outputs.frontend == 'true' || needs.changes.outputs.infrastructure == 'true')
+    uses: ./.github/workflows/deploy-dev-frontend.yml
+    with:
+      environment: ${{ needs.changes.outputs.environment }}
+      public_config: ${{ needs.backend.outputs.public_config || '' }}
+  frontend-deferred:
+    if: inputs.defer_frontend
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Frontend deployment explicitly DEFERRED. Backend/infra may complete; no frontend release or frontend health verification is claimed.' >> "$GITHUB_STEP_SUMMARY"

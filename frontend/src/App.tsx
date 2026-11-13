@@ -1,6 +1,9 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
+import AuthGate from './components/AuthGate';
+import { useAuthStore } from './store/auth';
+import { can, type Capability } from './lib/authz';
 
 const Overview=lazy(()=>import('./pages/Overview'));
 const Requests=lazy(()=>import('./pages/Requests'));
@@ -10,21 +13,45 @@ const Permissions=lazy(()=>import('./pages/Permissions'));
 const Identities=lazy(()=>import('./pages/Identities'));
 const Activity=lazy(()=>import('./pages/Activity'));
 const Connection=lazy(()=>import('./pages/Connection'));
+const Login=lazy(()=>import('./pages/Login'));
+const SelectTenant=lazy(()=>import('./pages/SelectTenant'));
+const Unauthorised=lazy(()=>import('./pages/Unauthorised'));
+const SessionExpired=lazy(()=>import('./pages/SessionExpired'));
+const Administration=lazy(()=>import('./pages/Administration'));
+const AcceptInvitation=lazy(()=>import('./pages/AcceptInvitation'));
+const Profile=lazy(()=>import('./pages/Profile'));
+const CompleteProfile=lazy(()=>import('./pages/CompleteProfile'));
 
 export default function App(){
  return <Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
   <Routes>
+   <Route path="login" element={<Login/>}/>
+   <Route path="auth/callback" element={<Login/>}/>
+   <Route path="select-tenant" element={<SelectTenant/>}/>
+   <Route path="accept-invitation" element={<AcceptInvitation/>}/>
+   <Route path="complete-profile" element={<CompleteProfile/>}/>
+   <Route path="unauthorised" element={<Unauthorised/>}/>
+   <Route path="session-expired" element={<SessionExpired/>}/>
+   <Route element={<AuthGate/>}>
    <Route element={<Layout/>}>
+    <Route path="profile" element={<Profile/>}/>
     <Route index element={<Overview/>}/>
     <Route path="requests" element={<Requests/>}/>
     <Route path="requests/:id" element={<RequestDetail/>}/>
-    <Route path="new-request" element={<NewRequest/>}/>
-    <Route path="permissions" element={<Permissions/>}/>
-    <Route path="identities" element={<Identities/>}/>
-    <Route path="activity" element={<Activity/>}/>
-    <Route path="connection" element={<Connection/>}/>
+    <Route path="new-request" element={<RequireCapability capability="REQUEST_CREATE"><NewRequest/></RequireCapability>}/>
+    <Route path="permissions" element={<RequireCapability capability="PERMISSION_CATALOGUE_VIEW"><Permissions/></RequireCapability>}/>
+    <Route path="identities" element={<RequireCapability capability="IDENTITY_VIEW_OWN"><Identities/></RequireCapability>}/>
+    <Route path="activity" element={<RequireCapability capability="ACTIVITY_VIEW"><Activity/></RequireCapability>}/>
+    <Route path="connection" element={<RequireCapability capability="CONNECTION_VIEW"><Connection/></RequireCapability>}/>
+    <Route path="administration" element={<RequireCapability capability="ADMINISTRATION_VIEW"><Administration/></RequireCapability>}/>
+   </Route>
    </Route>
    <Route path="*" element={<Navigate to="/" replace/>}/>
   </Routes>
  </Suspense>;
+}
+
+function RequireCapability({capability,children}:{capability:Capability;children:ReactNode}){
+ const session=useAuthStore(state=>state.session);
+ return can(session,capability)?children:<Navigate to="/unauthorised" replace/>;
 }
