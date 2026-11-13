@@ -1,12 +1,15 @@
 import {readFile,writeFile,appendFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations} from './ci-lib.mjs';
+import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations,validateBackendConfig} from './ci-lib.mjs';
 const [command,...args]=process.argv.slice(2);
 function run(tool,argv,options={}){const result=spawnSync(tool,argv,{encoding:'utf8',maxBuffer:40*1024*1024,...options});if(result.status!==0)throw Error(`${tool} failed: ${result.stderr}`);return result.stdout}
 const json=async path=>JSON.parse(await readFile(path,'utf8'));
 const output=async(key,value)=>{if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,`${key}=${value}\n`);else console.log(`${key}=${value}`)};
-if(command==='identity'){
+if(command==='backend-config'){
+ const config=validateBackendConfig(process.env);
+ console.log(`Terraform backend configuration verified: ${config.STATE_BUCKET}/${config.STATE_KEY}, lock table ${config.LOCK_TABLE}, region ${config.AWS_REGION}`);
+}else if(command==='identity'){
  const who=JSON.parse(run('aws',['sts','get-caller-identity']));
  validateIdentity({environment:process.env.DEPLOY_ENV,account:who.Account,expectedAccount:process.env.AWS_ACCOUNT_ID,region:process.env.AWS_REGION,expectedRegion:process.env.AWS_REGION,stateKey:process.env.STATE_KEY,bucket:process.env.STATE_BUCKET,artifactBucket:process.env.LAMBDA_ARTIFACT_BUCKET,workspace:run('terraform',['workspace','show']).trim()});
  const backend=await json('.terraform/terraform.tfstate');

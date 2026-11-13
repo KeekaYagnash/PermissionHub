@@ -74,8 +74,8 @@ application root. Keep the independent bootstrap state. Suggested production
 names: permissionhub-prod-state-ACCOUNT_ID, permissionhub-prod-lambda-artifacts-ACCOUNT_ID,
 permissionhub-prod-state-lock. Actual globally unique bucket names are operator
 inputs. Artifact bucket names must contain the selected dev/prod segment.
-State keys are strictly permissionhub/dev/terraform.tfstate and
-permissionhub/prod/terraform.tfstate; workspace must be default. Backend bucket,
+State keys are strictly permisionhub/dev/backend and
+permisionhub/prod/backend; workspace must be default. Backend bucket,
 key, region and STS account are checked against the selected environment. Never
 reuse the dev artifact bucket for production. Buckets need encryption, public
 access blocking and versioning. CI checks artifact bucket versioning and ownership
@@ -232,7 +232,7 @@ $values=@{
  AWS_ACCOUNT_ID=(Read-Host '12-digit selected AWS account ID')
  AWS_REGION='af-south-1'
  TF_STATE_BUCKET=(Read-Host 'Existing selected-environment state bucket')
- TF_STATE_KEY="permissionhub/$environment/terraform.tfstate"
+ TF_STATE_KEY="permisionhub/$environment/backend"
  TF_LOCK_TABLE=(Read-Host 'Existing selected-environment lock table')
  LAMBDA_ARTIFACT_BUCKET=(Read-Host 'Existing selected-environment Lambda artifact bucket')
  AWS_INFRA_ROLE_ARN=(Read-Host 'Infrastructure deployment role ARN')
@@ -372,3 +372,36 @@ docs/DEPLOYMENT-OPERATIONS.md
 
 Pre-existing unrelated working-tree changes were preserved. Initial/historical
 migration SQL and independent OIDC bootstrap Terraform/policies were not changed.
+# Dev backend configuration defaults
+
+State object keys use the exact requested `permisionhub` spelling (one `s`):
+`permisionhub/dev/backend` on dev and `permisionhub/prod/backend` on main.
+These are S3 object keys, not local directories; no `.tfstate` suffix is required.
+Update any explicit `TF_STATE_KEY` GitHub Environment variable, because variables
+override workflow defaults. The preflight rejects the former keys before init.
+
+**Existing state:** do not simply point a populated deployment at a new empty key.
+Back up the old state and arrange a reviewed `terraform init -migrate-state` from
+its previously initialized backend first, while deployments are paused. No state
+was migrated by this change. For a genuinely fresh environment, initialize the
+new key normally. Update the independent bootstrap IAM policies before CI uses
+the new state key; production policies are separately managed. Keep the OIDC
+bootstrap's own state key unchanged.
+
+Deployment workflows use these defaults only for dev; explicit GitHub Variables
+still override them. Production has no dev-resource fallback.
+
+| GitHub Variable | Dev default |
+|---|---|
+| `TF_STATE_BUCKET` | `permissionhub-dev-bucket` |
+| `TF_STATE_KEY` | `permisionhub/dev/backend` |
+| `TF_LOCK_TABLE` | `permissionhub-state-lock` |
+| `AWS_ACCOUNT_ID` | `143671530412` |
+| `LAMBDA_ARTIFACT_BUCKET` | `permissionhub-dev-lambda-artifacts` |
+
+The application state key is deliberately different from the independent OIDC
+bootstrap key `permissionhub/github_roles/terraform.tfstate`. Never interchange them.
+The state bucket, lock table and artifact bucket must already exist. Defaults do
+not create or verify those resources. Backend preflight rejects empty or padded
+values with named errors before Terraform init. Reviewed `CI_TF_VARS_JSON` and the
+`TF_PLAN_ENCRYPTION_KEY` secret remain required; neither is fabricated by defaults.

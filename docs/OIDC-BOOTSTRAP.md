@@ -98,7 +98,7 @@ Set these existing variables on development:
 
 * AWS_REGION=af-south-1
 * TF_STATE_BUCKET=permissionhub-dev-bucket
-* TF_STATE_KEY=permissionhub/dev/terraform.tfstate
+* TF_STATE_KEY=permisionhub/dev/backend
 * TF_LOCK_TABLE=permissionhub-state-lock
 * LAMBDA_ARTIFACT_BUCKET=permissionhub-dev-lambda-artifacts
 * Five AWS_*_ROLE_ARN variables from the three-role table.
@@ -139,7 +139,7 @@ cd C:\Users\yagi1\OneDrive\Desktop\PermissionHub
 gh auth status
 $repo='KeekaYagnash/PermissionHub'
 $values=@{
- AWS_REGION='af-south-1'; TF_STATE_BUCKET='permissionhub-dev-bucket'; TF_STATE_KEY='permissionhub/dev/terraform.tfstate'
+ AWS_REGION='af-south-1'; TF_STATE_BUCKET='permissionhub-dev-bucket'; TF_STATE_KEY='permisionhub/dev/backend'
  TF_LOCK_TABLE='permissionhub-state-lock'; LAMBDA_ARTIFACT_BUCKET='permissionhub-dev-lambda-artifacts'
  AWS_INFRA_ROLE_ARN='arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev'
  AWS_PLAN_ROLE_ARN='arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev'

@@ -2,7 +2,7 @@ param(
  [ValidateSet('dev')][string]$Environment='dev',
  [string]$Repository='KeekaYagnash/PermissionHub',
  [string]$StateBucket='permissionhub-dev-bucket',
- [string]$StateKey='permissionhub/dev/terraform.tfstate',
+ [string]$StateKey='permisionhub/dev/backend',
  [string]$LockTable='permissionhub-state-lock',
  [string]$ArtifactBucket='permissionhub-dev-lambda-artifacts',
  [string]$Region='af-south-1'

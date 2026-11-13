@@ -135,7 +135,7 @@ gh auth status
 $values=@{
  AWS_REGION='af-south-1'
  TF_STATE_BUCKET='permissionhub-dev-bucket'
- TF_STATE_KEY='permissionhub/dev/terraform.tfstate'
+ TF_STATE_KEY='permisionhub/dev/backend'
  TF_LOCK_TABLE='permissionhub-state-lock'
  LAMBDA_ARTIFACT_BUCKET='permissionhub-dev-lambda-artifacts'
  AWS_INFRA_ROLE_ARN='arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev'
@@ -152,7 +152,7 @@ $key=[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::Ge
 $key | gh secret set TF_PLAN_ENCRYPTION_KEY --env development --repo $repo
 Remove-Variable key
 
-terraform -chdir=infrastructure/terraform/environments/dev init -reconfigure '-backend-config=bucket=permissionhub-dev-bucket' '-backend-config=key=permissionhub/dev/terraform.tfstate' '-backend-config=region=af-south-1' '-backend-config=dynamodb_table=permissionhub-state-lock' '-backend-config=encrypt=true'
+terraform -chdir=infrastructure/terraform/environments/dev init -reconfigure '-backend-config=bucket=permissionhub-dev-bucket' '-backend-config=key=permisionhub/dev/backend' '-backend-config=region=af-south-1' '-backend-config=dynamodb_table=permissionhub-state-lock' '-backend-config=encrypt=true'
 $config=.\infrastructure\scripts\export-ci-config.ps1 -Environment dev -Fresh
 $config | gh variable set CI_TF_VARS_JSON --env development --repo $repo
 Remove-Variable config
