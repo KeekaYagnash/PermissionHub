@@ -1,7 +1,8 @@
 import axios from 'axios';
 import type { AppContext,AuditEvent,AuthSession,AwsAccountContext,AwsResource,ConnectionStatus,IamIdentity,IamPolicyDetail,IamPolicySummary,Page,PermissionRequest } from '../types';
 import {buildReviewPayload,type LiveConfirmation,type ReviewAction} from './review';
-import { getAccessToken } from './cognito';
+import { ensureAccessToken } from './cognito';
+export interface OrganizationMembers {members:{id:string;role:string;status:string;user:{id:string;email:string;displayName:string}}[];invitations:{id:string;email:string;role:string;status:string;expiresAt:string;deliveryStatus:string}[]}
 
 export const http=axios.create({baseURL:import.meta.env.VITE_API_BASE_URL||'/api',withCredentials:true});
 let csrfToken='';
@@ -27,7 +28,7 @@ function normaliseApiError(error:any){
  if(payload)return new ClientApiError({message:payload.message??'Request failed.',status:error.response?.status,code:payload.code,correlationId:payload.correlationId,details:payload.details??payload.blockingFields,response:error.response});
  return new ClientApiError({message:error?.message??'Network request failed.',status:error?.response?.status,response:error?.response});
 }
-http.interceptors.request.use(config=>{const token=getAccessToken();if(token)config.headers.Authorization=`Bearer ${token}`;if(config.method&&!['get','head','options'].includes(config.method.toLowerCase())&&csrfToken)config.headers['X-CSRF-Token']=csrfToken;return config});
+http.interceptors.request.use(async config=>{const token=await ensureAccessToken();if(token)config.headers.Authorization=`Bearer ${token}`;if(config.method&&!['get','head','options'].includes(config.method.toLowerCase())&&csrfToken)config.headers['X-CSRF-Token']=csrfToken;return config});
 http.interceptors.response.use(response=>response,error=>{if(error?.response?.status===401&&!String(error?.config?.url??'').includes('/auth/session')&&!location.pathname.startsWith('/login'))location.assign('/session-expired');return Promise.reject(normaliseApiError(error))});
 const unwrap=<T>(value:{data:{data:T}})=>value.data.data;
 const unwrapPage=<T>(value:{data:Page<T>})=>value.data;
@@ -39,6 +40,17 @@ export const api={
  logout:()=>http.post('/auth/logout').then(unwrap<{redirectUrl:string}>),
  selectTenant:(tenantId:string)=>http.post('/auth/select-tenant',{tenantId}).then(unwrap<AuthSession>),
  setOrganization:(companyName:string)=>http.post('/auth/organization',{companyName}).then(unwrap<AuthSession>),
+ saveProfile:(displayName:string)=>http.patch('/auth/profile',{displayName}).then(unwrap<AuthSession>),
+ inspectInvitation:(proof:string)=>http.post('/auth/invitations/inspect',{proof}).then(unwrap<{organizationName:string;role:string;expiresAt:string}>),
+ acceptInvitation:(proof:string)=>http.post('/auth/invitations/accept',{proof}).then(unwrap<AuthSession>),
+ startIdentityLink:()=>http.post('/auth/link/start').then(unwrap<{proof:string}>),
+ acceptIdentityLink:(proof:string)=>http.post('/auth/link/accept',{proof}).then(unwrap<AuthSession>),
+ organizationMembers:()=>http.get('/admin/members').then(unwrap<OrganizationMembers>),
+ inviteMember:(input:{email:string;role:string})=>http.post('/admin/invitations',input).then(unwrap<{message:string;deliveryStatus:string}>),
+ resendInvitation:(id:string)=>http.post(`/admin/invitations/${encodeURIComponent(id)}/resend`).then(unwrap<{message:string;deliveryStatus:string}>),
+ revokeInvitation:(id:string)=>http.delete(`/admin/invitations/${encodeURIComponent(id)}`).then(unwrap<unknown>),
+ changeMember:(id:string,role:string)=>http.patch(`/admin/members/${encodeURIComponent(id)}`,{role}).then(unwrap<unknown>),
+ removeMember:(id:string)=>http.delete(`/admin/members/${encodeURIComponent(id)}`).then(unwrap<unknown>),
  selectAccount:async(accountRecordId:string)=>{await http.post('/aws/active-account',{accountRecordId});return http.get('/auth/session').then(unwrap<AuthSession>)},
  clearAccount:()=>http.post('/auth/clear-account').then(unwrap<AuthSession>),
  context:()=>http.get('/auth/context').then(unwrap<AppContext>),

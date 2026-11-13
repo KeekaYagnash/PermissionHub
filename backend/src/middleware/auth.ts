@@ -12,7 +12,7 @@ export async function authenticate(req:AuthenticatedRequest,_res:Response,next:N
  try{
  if(!env.AUTH_ENABLED&&!env.ENABLE_DEV_AUTH)return next(new ApiError(503,'Authentication is disabled without a configured development identity.','AUTH_CONFIGURATION_REQUIRED'));
  if(!req.session.user&&!env.AUTH_ENABLED&&env.NODE_ENV!=='production'&&env.DEV_AUTH_USER_ID){const selected=identityDomain.findDevelopmentUser(env.DEV_AUTH_USER_ID);if(selected)req.session.user=identityDomain.sessionUser(selected,'development')}
- const jwtUser=cognitoUser(req),existing=req.session.user;if(jwtUser&&!existing)req.session.user=jwtUser;else if(jwtUser&&existing?.provider==='cognito'){existing.email=jwtUser.email;existing.displayName=jwtUser.displayName;existing.providerSubject=jwtUser.providerSubject}
+ const jwtUser=cognitoUser(req);if(jwtUser)req.session.user=jwtUser;
  if(req.session.user){await persistSessionUser(req.session.user);await hydrateSessionPreferences(req.session.user);await loadDevelopmentRoleGrants(req.session.user);req.session.user=req.session.user}
  const user=req.session.user;if(!user)return next(new ApiError(401,'Authentication required','UNAUTHENTICATED'));
  req.sessionUser=user;
@@ -58,5 +58,5 @@ function cognitoUser(req:AuthenticatedRequest){
  if(!claims?.sub)return undefined;
  const rawGroups=claims['cognito:groups'];
  const groups=Array.isArray(rawGroups)?rawGroups:typeof rawGroups==='string'?rawGroups.split(',').map(item=>item.trim()).filter(Boolean):[];
- return identityDomain.sessionUserFromCognito({sub:String(claims.sub),email:claims.email?String(claims.email):undefined,emailVerified:claims.email_verified===true||claims.email_verified==='true',name:claims.name?String(claims.name):undefined,groups});
+ return identityDomain.sessionUserFromCognito({sub:String(claims.sub),email:claims.email?String(claims.email):undefined,authTime:claims.auth_time?Number(claims.auth_time):undefined,emailVerified:claims.email_verified===true||claims.email_verified==='true',name:claims.name?String(claims.name):undefined,groups});
 }

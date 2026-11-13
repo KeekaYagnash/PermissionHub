@@ -68,8 +68,9 @@ test('fresh public frontend outputs are allowlisted; no credentials or state for
  const names=['api_gateway_endpoint','frontend_url','frontend_bucket_name','frontend_cloudfront_distribution_id','cognito_app_client_id','cognito_domain'];
  const outputs=Object.fromEntries(names.map(name=>[name,{value:name}]));
  outputs.database_secret_arn={value:'not public'}; outputs.password={value:'not public'};
+ outputs.cognito_providers={value:[{name:'Google',label:'Google',client_secret:'not public'}]};
  const config=publicFrontendConfig(outputs);
- assert.equal(Object.keys(config).length,6);assert.equal(config.FRONTEND_URL,'frontend_url');
+ assert.equal(Object.keys(config).length,7);assert.equal(config.FRONTEND_URL,'frontend_url');
  assert.equal(JSON.stringify(config).includes('not public'),false);
  assert.throws(()=>publicFrontendConfig({}));
  assert.throws(()=>publicFrontendConfig({...outputs,frontend_url:{value:'invalid\nvalue'}}));

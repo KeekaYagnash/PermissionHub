@@ -18,6 +18,9 @@ const SelectTenant=lazy(()=>import('./pages/SelectTenant'));
 const Unauthorised=lazy(()=>import('./pages/Unauthorised'));
 const SessionExpired=lazy(()=>import('./pages/SessionExpired'));
 const Administration=lazy(()=>import('./pages/Administration'));
+const AcceptInvitation=lazy(()=>import('./pages/AcceptInvitation'));
+const Profile=lazy(()=>import('./pages/Profile'));
+const CompleteProfile=lazy(()=>import('./pages/CompleteProfile'));
 
 export default function App(){
  return <Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
@@ -25,10 +28,13 @@ export default function App(){
    <Route path="login" element={<Login/>}/>
    <Route path="auth/callback" element={<Login/>}/>
    <Route path="select-tenant" element={<SelectTenant/>}/>
+   <Route path="accept-invitation" element={<AcceptInvitation/>}/>
+   <Route path="complete-profile" element={<CompleteProfile/>}/>
    <Route path="unauthorised" element={<Unauthorised/>}/>
    <Route path="session-expired" element={<SessionExpired/>}/>
    <Route element={<AuthGate/>}>
    <Route element={<Layout/>}>
+    <Route path="profile" element={<Profile/>}/>
     <Route index element={<Overview/>}/>
     <Route path="requests" element={<Requests/>}/>
     <Route path="requests/:id" element={<RequestDetail/>}/>

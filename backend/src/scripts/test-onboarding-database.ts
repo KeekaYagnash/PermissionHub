@@ -1,0 +1,76 @@
+// Explicit isolated-local integration test. Never creates users in Cognito/AWS.
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {prisma} from '../config/database.js';
+import {OrganizationService} from '../services/organization.service.js';
+import {identityDomain,bindCognitoIdentity} from '../services/identity-domain.service.js';
+import {acceptIdentityLink,startIdentityLink} from '../services/identity-link.service.js';
+
+const value=process.env.MIGRATION_TEST_DATABASE_URL;
+if(!value||process.env.DATABASE_URL!==value)throw Error('Explicit test URL and application test URL must match.');
+const url=new URL(value);
+if(!['127.0.0.1','localhost','[::1]'].includes(url.hostname)||!/^\/permissionhub_migration_test_[a-z0-9_]+$/.test(url.pathname))throw Error('Only isolated local migration-test databases are permitted.');
+const sent:{to:string;body:string}[]=[],mailer={send:async(to:string,_subject:string,body:string)=>{sent.push({to,body})}};
+const service=new OrganizationService(prisma,mailer,'https://permissionhub.example.invalid');
+const suffix=randomUUID(),email=(name:string)=>`${name}-${suffix}@example.invalid`;
+const identity=(address:string,sub:string=randomUUID(),emailVerified=true)=>identityDomain.sessionUserFromCognito({sub,email:address,emailVerified,name:'Test person'});
+const register=async(address:string)=>{const user=identity(address);await bindCognitoIdentity(user);return user};
+const proofFor=(address:string)=>{const item=sent.filter(s=>s.to===address&&s.body.includes('#token=')).at(-1);assert.ok(item);const token=item.body.match(/#token=([\w-]{43})/)?.[1];assert.ok(token);return token};
+const rejected=async(work:Promise<unknown>,code:string)=>assert.rejects(work,(error:unknown)=>Boolean(error&&typeof error==='object'&&'code' in error&&error.code===code));
+try{
+ const owner=await register(email('owner')),tenant=await service.create(owner,'Onboarding Company');
+ assert.equal((await service.create(owner,'Onboarding Company')).id,tenant.id);
+ const concurrentOrganizations=await Promise.all(Array.from({length:3},()=>service.create(owner,'Concurrent Company')));assert.equal(new Set(concurrentOrganizations.map(item=>item.id)).size,1);assert.equal(await prisma.tenantMembership.count({where:{tenantId:concurrentOrganizations[0]!.id,userId:owner.id}}),1);
+ const ownerMembership=await prisma.tenantMembership.findUniqueOrThrow({where:{tenantId_userId:{tenantId:tenant.id,userId:owner.id}}});assert.equal(ownerMembership.role,'ORGANISATION_ADMIN');
+ owner.activeTenantId=tenant.id;
+ assert.equal(await prisma.tenantMembership.count({where:{tenantId:tenant.id,userId:owner.id}}),1);
+ const invitedEmail=email('new');await service.invite(owner,tenant.id,invitedEmail,'REQUESTER');const firstProof=proofFor(invitedEmail);
+ assert.equal(await prisma.user.count({where:{email:invitedEmail}}),0,'Inviting must not pre-create a user or active membership.');
+ const pending=await prisma.organizationInvitation.findUniqueOrThrow({where:{tenantId_email:{tenantId:tenant.id,email:invitedEmail}}});assert.notEqual(pending.tokenHash,firstProof);assert.equal(pending.tokenHash.length,64);
+ const member=await register(invitedEmail);await service.inspect(member,firstProof);await service.accept(member,firstProof);
+ assert.equal(await prisma.tenantMembership.count({where:{tenantId:tenant.id,userId:member.id,status:'ACTIVE'}}),1);
+ await rejected(service.accept(member,firstProof),'INVITATION_UNAVAILABLE');
+ const concurrentInvitee=await register(email('accept-race'));await service.invite(owner,tenant.id,concurrentInvitee.email,'REQUESTER');const raceProof=proofFor(concurrentInvitee.email);const acceptedRace=await Promise.allSettled([service.accept(concurrentInvitee,raceProof),service.accept(concurrentInvitee,raceProof)]);assert.equal(acceptedRace.filter(item=>item.status==='fulfilled').length,1);assert.equal(await prisma.tenantMembership.count({where:{tenantId:tenant.id,userId:concurrentInvitee.id}}),1);
+ const other=await service.create(owner,'Second Company');await service.invite(owner,other.id,member.email,'SECURITY_REVIEWER');await service.accept(member,proofFor(member.email));
+ assert.equal(await prisma.user.count({where:{email:member.email}}),1);assert.equal(await prisma.tenantMembership.count({where:{userId:member.id}}),2);
+ const oldId=member.id;const again=identity(member.email,member.providerSubject);await bindCognitoIdentity(again);assert.equal(again.id,oldId);
+ const mismatched=await register(email('mismatch'));await service.invite(owner,tenant.id,email('recipient'),'REQUESTER');const wrongProof=proofFor(email('recipient'));
+ await rejected(service.accept(mismatched,wrongProof),'INVITATION_EMAIL_MISMATCH');
+ await rejected(service.accept({...mismatched,emailVerified:false},wrongProof),'EMAIL_VERIFICATION_REQUIRED');
+ const expiredUser=await register(email('expired'));const expired=await service.invite(owner,tenant.id,expiredUser.email,'REQUESTER'),expiredProof=proofFor(expiredUser.email);
+ await prisma.organizationInvitation.update({where:{id:expired.id},data:{expiresAt:new Date(Date.now()-1000)}});
+ await rejected(service.inspect(expiredUser,expiredProof),'INVITATION_EXPIRED');
+ await rejected(service.accept(expiredUser,expiredProof),'INVITATION_UNAVAILABLE');
+ await service.resend(owner,tenant.id,expired.id);const resentProof=proofFor(expiredUser.email);assert.notEqual(resentProof,expiredProof);await rejected(service.accept(expiredUser,expiredProof),'INVITATION_EMAIL_MISMATCH');await service.accept(expiredUser,resentProof);
+ const revokedUser=await register(email('revoked'));const revoked=await service.invite(owner,tenant.id,revokedUser.email,'REQUESTER');await service.revoke(owner,tenant.id,revoked.id);await rejected(service.accept(revokedUser,proofFor(revokedUser.email)),'INVITATION_UNAVAILABLE');
+ await rejected(service.invite(member,tenant.id,email('unauthorized'),'REQUESTER'),'ORGANIZATION_ADMIN_REQUIRED');
+ await rejected(service.invite(owner,tenant.id,email('platform'),'PLATFORM_ADMIN'),'ROLE_NOT_ASSIGNABLE');
+ const outside=await prisma.tenantMembership.findUniqueOrThrow({where:{tenantId_userId:{tenantId:other.id,userId:member.id}}});
+ await rejected(service.changeMember(owner,tenant.id,outside.id,'REQUESTER'),'MEMBER_NOT_FOUND');
+ await rejected(service.changeMember(owner,tenant.id,ownerMembership.id,'REQUESTER'),'LAST_ADMIN_REQUIRED');
+ const memberRow=await prisma.tenantMembership.findUniqueOrThrow({where:{tenantId_userId:{tenantId:tenant.id,userId:member.id}}});
+ await service.changeMember(owner,tenant.id,memberRow.id,'ACCOUNT_APPROVER');await service.changeMember(owner,tenant.id,memberRow.id);assert.equal((await prisma.tenantMembership.findUniqueOrThrow({where:{id:memberRow.id}})).status,'SUSPENDED');
+ const badMailer=new OrganizationService(prisma,{send:async()=>{throw Error('Mock SES failure')}},'https://permissionhub.example.invalid');const failed=await badMailer.invite(owner,tenant.id,email('mail-failure'),'REQUESTER');assert.equal(failed.deliveryStatus,'FAILED');
+ const alternate=identity(owner.email);await rejected(bindCognitoIdentity(alternate),'IDENTITY_LINK_REQUIRED');const linking=await startIdentityLink(owner);await acceptIdentityLink(alternate,linking.proof);await bindCognitoIdentity(alternate);assert.equal(alternate.id,owner.id);
+ await rejected(acceptIdentityLink(alternate,linking.proof),'IDENTITY_LINK_INVALID');
+ const wrongLink=await startIdentityLink(owner);await rejected(acceptIdentityLink(mismatched,wrongLink.proof),'IDENTITY_LINK_INVALID');
+ const expiredLink=await startIdentityLink(owner);await prisma.identityLinkChallenge.updateMany({where:{userId:owner.id,consumedAt:null},data:{expiresAt:new Date(0)}});await rejected(acceptIdentityLink(identity(owner.email),expiredLink.proof),'IDENTITY_LINK_INVALID');
+ const raceSub=randomUUID(),raceEmail=email('concurrent');const concurrent=Array.from({length:4},()=>identity(raceEmail,raceSub));await Promise.all(concurrent.map(bindCognitoIdentity));assert.equal(await prisma.user.count({where:{email:raceEmail}}),1);
+ assert.ok(await prisma.connectionAuditEvent.count({where:{tenantId:tenant.id,action:'INVITATION_ACCEPTED'}}));
+ // API Gateway's JWT verification is mocked at its trust boundary, not replaced
+ // with client-submitted identity fields. Every application DB query is real/local.
+ const {default:express}=await import('express'),{default:request}=await import('supertest'),{app}=await import('../app.js');
+ const authTime=Math.floor(Date.now()/1000)-10;
+ let claims:{sub:string;email:string;email_verified:string;auth_time:string}={sub:owner.providerSubject,email:owner.email,email_verified:'true',auth_time:String(authTime)};
+ const gateway=express();gateway.use((req,_res,next)=>{Object.assign(req,{apiGateway:{event:{requestContext:{authorizer:{jwt:{claims}}}}}});next()});gateway.use(app);
+ assert.equal((await request(gateway).get('/api/auth/session')).status,200);
+ assert.equal((await request(gateway).patch('/api/auth/profile').send({displayName:'Verified Test Owner'})).status,200);
+ assert.equal((await request(gateway).post('/api/auth/select-tenant').send({tenantId:tenant.id})).status,200);
+ assert.equal((await request(gateway).patch(`/api/admin/members/${outside.id}`).send({role:'REQUESTER'})).status,404);
+ assert.equal((await request(gateway).get('/api/admin/members').set('x-tenant-id',other.id)).status,403);
+ assert.equal((await request(gateway).post('/api/auth/logout')).status,200);
+ assert.equal((await request(gateway).get('/api/auth/session')).status,401,'Logout must reject even a previously valid Gateway JWT on a new Lambda session.');
+ claims={...claims,auth_time:String(Math.floor(Date.now()/1000)+2)};
+ assert.equal((await request(gateway).get('/api/auth/session')).status,200);
+ console.log(JSON.stringify({onboardingIntegration:'passed',newAndExistingInvitations:true,expiryReplayRevocation:true,tenantIsolation:true,lastAdminProtection:true,explicitIdentityLinking:true,concurrentIdentityDeduplication:true,emailFailuresVisible:true,awsCalls:0}));
+}finally{await prisma.$disconnect()}

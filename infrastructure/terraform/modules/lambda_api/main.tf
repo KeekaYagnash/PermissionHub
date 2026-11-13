@@ -68,7 +68,11 @@ resource "aws_iam_role_policy" "runtime" {
         Effect   = "Allow"
         Action   = ["sts:AssumeRole", "sts:TagSession", "sts:SetSourceIdentity"]
         Resource = var.assumable_role_arns
-    }] : [])
+        }] : [], var.invitation_ses_identity_arn == null ? [] : [{
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail"]
+        Resource = var.invitation_ses_identity_arn
+    }])
   })
 }
 

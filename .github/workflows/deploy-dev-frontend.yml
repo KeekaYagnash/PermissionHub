@@ -47,11 +47,12 @@ jobs:
           DISTRIBUTION: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
           DOMAIN: ${{ vars.COGNITO_DOMAIN }}
           CLIENT: ${{ vars.COGNITO_CLIENT_ID }}
+          PROVIDERS: ${{ vars.COGNITO_PROVIDERS_JSON || '[]' }}
         run: |
           node --input-type=module <<'JS'
           import {appendFileSync} from 'node:fs';
           const supplied=process.env.DEPLOYMENT_CONFIG ? JSON.parse(process.env.DEPLOYMENT_CONFIG) : {};
-          const mapping={API:'API_GATEWAY_ENDPOINT',URL:'FRONTEND_URL',BUCKET:'FRONTEND_BUCKET',DISTRIBUTION:'CLOUDFRONT_DISTRIBUTION_ID',DOMAIN:'COGNITO_DOMAIN',CLIENT:'COGNITO_CLIENT_ID'};
+          const mapping={API:'API_GATEWAY_ENDPOINT',URL:'FRONTEND_URL',BUCKET:'FRONTEND_BUCKET',DISTRIBUTION:'CLOUDFRONT_DISTRIBUTION_ID',DOMAIN:'COGNITO_DOMAIN',CLIENT:'COGNITO_CLIENT_ID',PROVIDERS:'COGNITO_PROVIDERS_JSON'};
           for(const [key,field] of Object.entries(mapping)){
             const value=supplied[field] || process.env[key];
             if(!value || /[\r\n]/.test(value))throw Error(`Missing/invalid public frontend setting: ${field}`);
@@ -78,6 +79,7 @@ jobs:
           VITE_COGNITO_REGION: ${{ env.AWS_REGION }}
           VITE_COGNITO_DOMAIN: ${{ steps.config.outputs.DOMAIN }}
           VITE_COGNITO_CLIENT_ID: ${{ steps.config.outputs.CLIENT }}
+          VITE_COGNITO_PROVIDERS: ${{ steps.config.outputs.PROVIDERS }}
           VITE_COGNITO_REDIRECT_URI: ${{ steps.config.outputs.URL }}/auth/callback
           VITE_COGNITO_LOGOUT_URI: ${{ steps.config.outputs.URL }}/login
       - name: Deploy assets first; publish HTML last

@@ -1,4 +1,8 @@
 variable "name" { type = string }
+variable "invitation_ses_identity_arn" {
+  type    = string
+  default = null
+}
 variable "permissions_boundary_arn" {
   type    = string
   default = null

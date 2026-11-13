@@ -1,4 +1,24 @@
 variable "aws_region" { type = string }
+variable "google_oauth_secret_arn" {
+  type    = string
+  default = null
+}
+variable "microsoft_oidc_providers" {
+  type    = map(object({ tenant_id = string, client_id = string, client_secret_arn = string, label = string }))
+  default = {}
+}
+variable "invitation_ses_identity_arn" {
+  type    = string
+  default = null
+  validation {
+    condition     = var.invitation_ses_identity_arn == null ? true : can(regex("^arn:aws:ses:[a-z0-9-]+:[0-9]{12}:identity/.+$", var.invitation_ses_identity_arn))
+    error_message = "Provide an existing SES verified identity ARN, not email credentials."
+  }
+}
+variable "invitation_sender_email" {
+  type    = string
+  default = ""
+}
 variable "runtime_permissions_boundary_arn" {
   type        = string
   default     = null

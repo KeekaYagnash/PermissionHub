@@ -70,6 +70,8 @@ jobs:
           terraform -chdir=infrastructure/terraform/bootstrap/github-dev test
           terraform -chdir=infrastructure/terraform/modules/rds init -backend=false
           terraform -chdir=infrastructure/terraform/modules/rds test
+          terraform -chdir=infrastructure/terraform/modules/cognito init -backend=false
+          terraform -chdir=infrastructure/terraform/modules/cognito test
       - uses: actions/upload-artifact@v4
         with:
           name: lambda-build-${{ github.sha }}

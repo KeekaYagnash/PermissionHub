@@ -67,11 +67,14 @@ export function assertDestroyPrepared(plan){
 }
 export function publicFrontendConfig(outputs){
  const mapping={API_GATEWAY_ENDPOINT:'api_gateway_endpoint',FRONTEND_URL:'frontend_url',FRONTEND_BUCKET:'frontend_bucket_name',CLOUDFRONT_DISTRIBUTION_ID:'frontend_cloudfront_distribution_id',COGNITO_CLIENT_ID:'cognito_app_client_id',COGNITO_DOMAIN:'cognito_domain'};
- return Object.fromEntries(Object.entries(mapping).map(([key,source])=>{
+ const configured=outputs.cognito_providers?.value??[];
+ if(!Array.isArray(configured))throw Error('Invalid public Cognito provider list');
+ const providers=configured.map(provider=>{if(typeof provider.name!=='string'||typeof provider.label!=='string')throw Error('Invalid public Cognito provider label');return {name:provider.name,label:provider.label}});
+ return {...Object.fromEntries(Object.entries(mapping).map(([key,source])=>{
   const value=outputs[source]?.value;
   if(typeof value!=='string'||!value||/[\r\n]/.test(value))throw Error(`Missing/invalid public Terraform output: ${source}`);
   return [key,value];
- }));
+ })),COGNITO_PROVIDERS_JSON:JSON.stringify(providers)};
 }
 export function resources(module){return [...(module?.resources??[]),...(module?.child_modules??[]).flatMap(resources)]}
 export function changes(paths){

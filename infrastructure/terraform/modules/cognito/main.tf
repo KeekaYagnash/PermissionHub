@@ -45,8 +45,9 @@ resource "aws_cognito_user_pool_client" "spa" {
   logout_urls                          = var.logout_urls
   allowed_oauth_flows_user_pool_client = true
   allowed_oauth_flows                  = ["code"]
-  allowed_oauth_scopes                 = ["openid", "email", "profile"]
-  supported_identity_providers         = ["COGNITO"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile", "aws.cognito.signin.user.admin"]
+  supported_identity_providers         = concat(["COGNITO"], var.google_oauth_secret_arn != null ? [aws_cognito_identity_provider.google[0].provider_name] : [], [for provider in aws_cognito_identity_provider.microsoft : provider.provider_name])
+  enable_token_revocation              = true
   prevent_user_existence_errors        = "ENABLED"
   explicit_auth_flows                  = ["ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_PASSWORD_AUTH", "ALLOW_USER_SRP_AUTH"]
   access_token_validity                = 60

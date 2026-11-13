@@ -118,6 +118,7 @@ model User {
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
   lastLoginAt       DateTime?
+  sessionsRevokedAfter DateTime?
   activeTenantId    String?
   activeAwsAccountRecordId String?
   identities        AuthIdentity[]
@@ -127,6 +128,10 @@ model User {
   connectionEvents  ConnectionAuditEvent[]
   developmentRoleGrants DevelopmentRoleGrant[] @relation("DevelopmentRoleGrantUser")
   grantedDevelopmentRoles DevelopmentRoleGrant[] @relation("DevelopmentRoleGrantActor")
+  createdTenants    Tenant[] @relation("TenantCreator")
+  identityLinks     IdentityLinkChallenge[]
+  sentInvitations   OrganizationInvitation[] @relation("InvitationCreator")
+  acceptedInvitations OrganizationInvitation[] @relation("InvitationAcceptor")
 }
 
 model AuthIdentity {
@@ -148,6 +153,9 @@ model Tenant {
   name             String
   slug             String                 @unique
   status           String                 @default("ACTIVE")
+  createdByUserId  String?
+  createdBy        User? @relation("TenantCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  invitations     OrganizationInvitation[]
   createdAt        DateTime               @default(now())
   updatedAt        DateTime               @updatedAt
   memberships      TenantMembership[]
@@ -158,6 +166,40 @@ model Tenant {
   connectionEvents ConnectionAuditEvent[]
   accountConnections AwsAccountConnection[]
   developmentRoleGrants DevelopmentRoleGrant[]
+}
+
+model OrganizationInvitation {
+  id              String @id @default(uuid())
+  tenantId        String
+  tenant          Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email           String
+  role            ApplicationRole
+  tokenHash       String @unique
+  status          String @default("PENDING")
+  expiresAt       DateTime
+  createdByUserId  String
+  createdBy       User @relation("InvitationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  acceptedByUserId String?
+  acceptedBy      User? @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  deliveryStatus  String @default("PENDING")
+  lastSentAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tenantId, email])
+  @@index([email, status])
+}
+
+model IdentityLinkChallenge {
+  id         String @id @default(uuid())
+  userId     String
+  user       User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
 }
 
 model TenantMembership {

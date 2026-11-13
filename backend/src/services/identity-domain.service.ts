@@ -2,6 +2,7 @@ import type { AccountType,AdminScope,AppRole,AwsAccountContext,SessionUser,Tenan
 import { env } from '../config/env.js';
 import { prisma } from '../config/database.js';
 import { createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { ApiError } from '../utils/http.js';
 
 export interface DirectoryUser {id:string;email:string;displayName:string;providerSubject:string;memberships:TenantMembership[]}
@@ -40,11 +41,11 @@ export class IdentityDomainService {
  private manualAccounts:AwsAccountContext[]=[];
  findDevelopmentUser(id:string){return developmentUsers.find(user=>user.id===id)}
  findByProviderSubject(provider:string,subject:string,email?:string){return developmentUsers.find(user=>user.providerSubject===subject||(provider!=='development'&&email&&user.email.toLowerCase()===email.toLowerCase()))}
- sessionUserFromCognito(claims:{sub:string;email?:string;emailVerified?:boolean;name?:string;groups?:string[]}):SessionUser{
+ sessionUserFromCognito(claims:{sub:string;email?:string;emailVerified?:boolean;authTime?:number;name?:string;groups?:string[]}):SessionUser{
   const matched=this.findByProviderSubject('cognito',claims.sub,claims.email);
   if(matched&&env.NODE_ENV!=='production'&&env.ENABLE_AWS_DEMO_DATA)return this.sessionUser(matched,'cognito');
   const id=`cognito_${claims.sub.replace(/[^A-Za-z0-9_-]/g,'_').slice(0,48)}`;
-  return {...this.sessionUser({id,email:claims.email??`${id}@cognito.local`,displayName:claims.name??claims.email??'Cognito demo user',providerSubject:claims.sub,memberships:[]},'cognito'),emailVerified:claims.emailVerified};
+  return {...this.sessionUser({id,email:claims.email??`${id}@cognito.local`,displayName:claims.name??claims.email??'Cognito user',providerSubject:claims.sub,memberships:[]},'cognito'),emailVerified:claims.emailVerified,authTime:claims.authTime};
  }
  sessionUser(user:DirectoryUser,provider:string):SessionUser{const memberships=user.memberships.map(membership=>({...membership,scopes:membership.scopes.map(item=>({...item}))}));if(provider==='development'&&!env.AUTH_ENABLED&&env.ENABLE_DEV_AUTH&&env.DEV_AUTH_USER_ID===user.id){const membership=memberships[0];if(membership&&!membership.scopes.some(item=>item.scopeType==='TENANT'&&item.scopeId===membership.tenantId&&item.canManageConfiguration))membership.scopes.push(scope('TENANT',membership.tenantId,{canView:true,canRequest:true,canManageConfiguration:true}))}return {id:user.id,email:user.email,displayName:user.displayName,provider,providerSubject:user.providerSubject,activeTenantId:memberships.length===1?memberships[0]!.tenantId:undefined,activeAccountId:undefined,permissions:[],memberships,roleAssignments:[]}}
  tenantsFor(user:SessionUser){return user.memberships.filter(m=>m.status==='ACTIVE').map(m=>({id:m.tenantId,name:m.tenantName,slug:m.tenantSlug,role:m.role}))}
@@ -91,27 +92,35 @@ export async function persistDevelopmentIdentity(user:SessionUser){
  })}catch{}
 }
 
-async function bindCognitoIdentity(user:SessionUser){
+export async function bindCognitoIdentity(user:SessionUser){
  if(user.provider!=='cognito')return;
  const identity=await prisma.authIdentity.findUnique({where:{provider_providerSubject:{provider:'cognito',providerSubject:user.providerSubject}},include:{user:true}});
- if(identity){if(identity.user.status!=='ACTIVE')throw new ApiError(403,'This PermissionHub user is inactive.','USER_INACTIVE');user.id=identity.userId;user.email=identity.user.email;return;}
- // Only a verified provider email may claim a pre-created organisation membership.
+ if(identity){if(identity.user.sessionsRevokedAfter&&(!user.authTime||user.authTime<=Math.floor(identity.user.sessionsRevokedAfter.getTime()/1000)))throw new ApiError(401,'Your session has expired. Sign in again.','SESSION_EXPIRED');if(identity.user.status!=='ACTIVE')throw new ApiError(403,'This PermissionHub user is inactive.','USER_INACTIVE');user.emailVerified=Boolean(user.emailVerified&&user.email.toLowerCase()===identity.user.email.toLowerCase());user.id=identity.userId;user.email=identity.user.email;user.displayName=identity.user.displayName;return;}
+ // Email verification proves an email, NOT ownership of an existing application identity.
  if(!user.emailVerified)throw new ApiError(403,'Verify your email before continuing.','EMAIL_VERIFICATION_REQUIRED');
  const stored=await prisma.$transaction(async tx=>{
-  const existing=await tx.user.findUnique({where:{email:user.email.toLowerCase()}});
-  if(existing&&!['ACTIVE','INVITED'].includes(existing.status))throw new ApiError(403,'This PermissionHub user is inactive.','USER_INACTIVE');
+  const existing=await tx.user.findFirst({where:{email:{equals:user.email.toLowerCase(),mode:'insensitive'}}});
+  if(existing){const sameIdentity=await tx.authIdentity.findUnique({where:{provider_providerSubject:{provider:'cognito',providerSubject:user.providerSubject}}});if(sameIdentity?.userId===existing.id&&existing.status==='ACTIVE')return existing;throw new ApiError(409,'This email already has an account. Sign in with the original method, then explicitly link this sign-in method from your profile.','IDENTITY_LINK_REQUIRED');}
   const record=existing??await tx.user.upsert({where:{email:user.email.toLowerCase()},create:{id:user.id,email:user.email.toLowerCase(),displayName:user.displayName,status:'ACTIVE'},update:{}});
   const bound=await tx.authIdentity.upsert({where:{provider_providerSubject:{provider:'cognito',providerSubject:user.providerSubject}},create:{provider:'cognito',providerSubject:user.providerSubject,providerEmail:user.email,userId:record.id},update:{}});
   if(bound.userId!==record.id)throw new ApiError(403,'This identity is already linked to a different user.','IDENTITY_LINK_CONFLICT');
   if(record.status==='INVITED')await tx.user.update({where:{id:record.id},data:{status:'ACTIVE'}});
   return record;
+ }).catch(async(error:unknown)=>{
+  if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2002'){
+   const winner=await prisma.authIdentity.findUnique({where:{provider_providerSubject:{provider:'cognito',providerSubject:user.providerSubject}},include:{user:true}});
+   if(winner?.user.status==='ACTIVE')return winner.user;
+   throw new ApiError(409,'Sign in with your original method and explicitly link this identity.','IDENTITY_LINK_REQUIRED');
+  }
+  throw error;
  });
- user.id=stored.id;
+ user.emailVerified=Boolean(user.emailVerified&&user.email.toLowerCase()===stored.email.toLowerCase());user.id=stored.id;user.email=stored.email;user.displayName=stored.displayName;
 }
 
 export async function persistSessionUser(user:SessionUser){
  if(process.env.VITEST)return user;
  await bindCognitoIdentity(user);
+ if(user.provider==='cognito')return user;
  const membership=user.activeTenantId?user.memberships.find(item=>item.tenantId===user.activeTenantId):user.memberships[0];
  if(!membership)return user;
  try{
@@ -130,7 +139,7 @@ export async function persistSessionUser(user:SessionUser){
 export async function hydrateSessionPreferences(user:SessionUser){
  if(process.env.VITEST)return user;
  try{
-  const memberships=await prisma.tenantMembership.findMany({where:{userId:user.id,status:'ACTIVE'},include:{tenant:true,adminScopes:true}});
+  const memberships=await prisma.tenantMembership.findMany({where:{userId:user.id,status:'ACTIVE',tenant:{status:'ACTIVE'}},include:{tenant:true,adminScopes:true}});
   user.memberships=memberships.map(item=>({id:item.id,tenantId:item.tenantId,tenantName:item.tenant.name,tenantSlug:item.tenant.slug,role:item.role,status:item.status,scopes:item.adminScopes.map(scope=>({scopeType:scope.scopeType,scopeId:scope.scopeId,includeDescendants:scope.includeDescendants,canView:scope.canView,canRequest:scope.canRequest,canApprove:scope.canApprove,canProvision:scope.canProvision,canRevoke:scope.canRevoke,canManageConfiguration:scope.canManageConfiguration}))}));
   if(!user.memberships.some(item=>item.tenantId===user.activeTenantId))user.activeTenantId=user.memberships.length===1?user.memberships[0]!.tenantId:undefined;
   const rows=await prisma.$queryRawUnsafe<Array<{activeTenantId:string|null;activeAwsAccountRecordId:string|null}>>('SELECT "activeTenantId", "activeAwsAccountRecordId" FROM "User" WHERE id = $1 LIMIT 1',user.id);
@@ -146,7 +155,7 @@ export async function saveSessionPreferences(user:SessionUser){
  try{
   await persistSessionUser(user);
   await prisma.$executeRawUnsafe('UPDATE "User" SET "activeTenantId" = $1, "activeAwsAccountRecordId" = $2, "updatedAt" = NOW() WHERE id = $3',user.activeTenantId??null,user.activeAwsAccountRecordId??user.activeAccountId??null,user.id);
- }catch{}
+ }catch{throw new ApiError(503,'Unable to save your organisation/account selection. Please retry.','SESSION_PREFERENCES_UNAVAILABLE')}
 }
 
 export async function loadDevelopmentRoleGrants(user:SessionUser){

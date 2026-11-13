@@ -8,6 +8,9 @@ locals {
   }, var.additional_tags)
 
   lambda_common_environment = {
+    INVITATION_EMAIL_MODE                  = var.invitation_ses_identity_arn == null ? "disabled" : "ses"
+    SES_FROM_EMAIL                         = var.invitation_sender_email
+    SES_REGION                             = var.invitation_ses_identity_arn == null ? var.aws_region : split(":", var.invitation_ses_identity_arn)[3]
     NODE_ENV                               = "production"
     APP_AWS_REGION                         = var.aws_region
     FRONTEND_URL                           = module.frontend_hosting.frontend_url
@@ -106,17 +109,19 @@ module "secrets" {
 }
 
 module "cognito" {
-  source                = "../../modules/cognito"
-  name                  = local.name
-  environment           = var.environment
-  callback_urls         = distinct(concat(var.callback_urls, ["${module.frontend_hosting.frontend_url}/auth/callback"]))
-  logout_urls           = distinct(concat(var.logout_urls, ["${module.frontend_hosting.frontend_url}/login"]))
-  enable_cognito_domain = var.enable_cognito_domain
-  cognito_domain_prefix = var.cognito_domain_prefix
-  deletion_protection   = var.cognito_deletion_protection
-  mfa_configuration     = "OPTIONAL"
-  create_default_groups = true
-  tags                  = local.tags
+  google_oauth_secret_arn  = var.google_oauth_secret_arn
+  microsoft_oidc_providers = var.microsoft_oidc_providers
+  source                   = "../../modules/cognito"
+  name                     = local.name
+  environment              = var.environment
+  callback_urls            = distinct(concat(var.callback_urls, ["${module.frontend_hosting.frontend_url}/auth/callback"]))
+  logout_urls              = distinct(concat(var.logout_urls, ["${module.frontend_hosting.frontend_url}/login"]))
+  enable_cognito_domain    = var.enable_cognito_domain
+  cognito_domain_prefix    = var.cognito_domain_prefix
+  deletion_protection      = var.cognito_deletion_protection
+  mfa_configuration        = "OPTIONAL"
+  create_default_groups    = true
+  tags                     = local.tags
 }
 
 module "queues" {
@@ -127,6 +132,7 @@ module "queues" {
 }
 
 module "api_lambda" {
+  invitation_ses_identity_arn = var.invitation_ses_identity_arn
   permissions_boundary_arn    = var.runtime_permissions_boundary_arn
   source                      = "../../modules/lambda_api"
   name                        = "${local.name}-api"

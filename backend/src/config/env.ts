@@ -42,6 +42,8 @@ const schema=z.object({
  ENABLE_LIVE_PROVISIONING:z.string().transform(v=>v==='true').default(false),
  PROVISIONING_CONFIRMATION:z.string().default(''),
  SES_FROM_EMAIL:z.string().default('access@permissionhub.local')
+ ,INVITATION_EMAIL_MODE:z.enum(['disabled','ses']).default('disabled')
+ ,SES_REGION:z.string().optional()
  ,ENABLE_RUNTIME_DEBUG:z.string().optional().transform(value=>value==='true').default(false)
  ,BUILD_COMMIT:z.string().default('development')
  ,AWS_ORGANISATIONS_DISCOVERY_ENABLED:z.string().transform(v=>v==='true').default(false)

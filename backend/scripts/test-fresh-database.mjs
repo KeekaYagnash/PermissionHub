@@ -38,4 +38,7 @@ try{
  const foreignKeys=await database.$queryRaw`SELECT count(*)::int AS count FROM information_schema.table_constraints WHERE constraint_schema='public' AND constraint_type='FOREIGN KEY'`;
  const version=await database.$queryRaw`SHOW server_version`;
  console.log(JSON.stringify({postgres:version[0].server_version,migrations:applied.length,tables:tables.length,indexes:indexes[0].count,foreignKeys:foreignKeys[0].count,schemaDrift:0,secondDeploy:'no-op',persistenceAndConstraints:'passed'}));
+ const onboarding=spawnSync(process.execPath,[resolve(root,'node_modules/tsx/dist/cli.mjs'),resolve(root,'backend/src/scripts/test-onboarding-database.ts')],{cwd:root,env:{...process.env,DATABASE_URL:value,MIGRATION_TEST_DATABASE_URL:value,NODE_ENV:'test',INVITATION_EMAIL_MODE:'disabled'},encoding:'utf8'});
+ if(onboarding.status!==0)throw Error(`Local onboarding integration failed: ${(onboarding.stderr+onboarding.stdout).replaceAll(value,'[local test database]')}`);
+ console.log(onboarding.stdout.split(/\r?\n/).filter(line=>line.includes('"onboardingIntegration"')).join('\n'));
 }finally{await database.$disconnect()}
