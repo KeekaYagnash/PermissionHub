@@ -2,6 +2,21 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {validateBackendConfig} from './ci-lib.mjs';
 import {resolveFreshDeployment} from './ci-lib.mjs';
+import {parseDeploymentConfig} from './ci-lib.mjs';
+import {readFileSync} from 'node:fs';
+
+test('deployment config handles empty GitHub variables with reviewed dev fallback only',()=>{
+ const fallback=JSON.parse(readFileSync(new URL('../terraform/environments/dev/ci.tfvars.json',import.meta.url),'utf8'));
+ const env={DEPLOY_ENV:'dev',AWS_REGION:'af-south-1',AWS_ACCOUNT_ID:'143671530412',LAMBDA_ARTIFACT_BUCKET:'permissionhub-dev-lambda-artifacts'};
+ for(const raw of [undefined,'','  ','\n'])assert.deepEqual(parseDeploymentConfig(raw,fallback,env),fallback);
+ const override={...fallback,cognito_domain_prefix:'permissionhub-reviewed-override'};
+ assert.equal(parseDeploymentConfig(JSON.stringify(override),fallback,env).cognito_domain_prefix,override.cognito_domain_prefix);
+ for(const raw of ['{','not-json','[]','null','true','"some-file.json"'])assert.throws(()=>parseDeploymentConfig(raw,fallback,env));
+ for(const patch of [{environment:'prod'},{aws_region:'us-east-1'},{lambda_artifact_bucket:'other'},{aws_account_id:'000000000000'},{availability_zones:[]},{private_db_subnet_cidrs:['10.0.0.0/24']}])assert.throws(()=>parseDeploymentConfig(JSON.stringify({...fallback,...patch}),fallback,env));
+ assert.throws(()=>parseDeploymentConfig('',fallback,{...env,DEPLOY_ENV:'prod'}),/required for production/);
+ const prod={...fallback,environment:'prod',lambda_artifact_bucket:'permissionhub-prod-lambda-artifacts'};
+ assert.equal(parseDeploymentConfig(JSON.stringify(prod),undefined,{...env,DEPLOY_ENV:'prod',LAMBDA_ARTIFACT_BUCKET:prod.lambda_artifact_bucket}).environment,'prod');
+});
 
 test('empty dev state bootstraps automatically; production and nonempty state keep existing safeguards',()=>{
  const empty={values:{root_module:{}}};

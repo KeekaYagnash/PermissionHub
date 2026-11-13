@@ -121,6 +121,9 @@ jobs:
       - name: Verify selected AWS identity and actual backend
         working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
         run: node ../../../scripts/ci.mjs identity
+      - name: Validate deployment configuration before uploading artifacts
+        working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
+        run: node ../../../scripts/ci.mjs config "$RUNNER_TEMP/prepare-config.tfvars.json"
       - uses: actions/download-artifact@v4
         with:
           name: lambda-build-${{ github.sha }}

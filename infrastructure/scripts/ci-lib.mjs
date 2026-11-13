@@ -8,6 +8,19 @@ export function openPlan(value,key,context){
  const envelope=JSON.parse(value),decipher=createDecipheriv('aes-256-gcm',Buffer.from(key??'','base64'),Buffer.from(envelope.iv,'base64'));decipher.setAAD(Buffer.from(context));decipher.setAuthTag(Buffer.from(envelope.tag,'base64'));return Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,'base64')),decipher.final()]);
 }
 export const lambdaModules={api:'api_lambda',provisioning:'provisioning_lambda',expiry:'expiry_lambda',migration:'migration_lambda'};
+export function parseDeploymentConfig(raw,fallback,env){
+ const text=typeof raw==='string'?raw.trim():'';
+ if(!text&&env.DEPLOY_ENV!=='dev')throw Error('CI_TF_VARS_JSON is required for production; no dev configuration fallback is allowed.');
+ let value;
+ try{value=text?JSON.parse(text):fallback;}catch{throw Error('CI_TF_VARS_JSON is invalid JSON. Supply one complete JSON object, not HCL, a file path, or truncated JSON. Configuration contents withheld.');}
+ if(!value||Array.isArray(value)||typeof value!=='object')throw Error('Terraform deployment configuration must be a JSON object.');
+ if(!value.vpc_cidr||value.environment!==env.DEPLOY_ENV||value.aws_region!==env.AWS_REGION||value.lambda_artifact_bucket!==env.LAMBDA_ARTIFACT_BUCKET||value.aws_account_id&&value.aws_account_id!==env.AWS_ACCOUNT_ID)throw Error('Terraform configuration must match DEPLOY_ENV, AWS_REGION, AWS_ACCOUNT_ID and LAMBDA_ARTIFACT_BUCKET and include vpc_cidr. Review CI_TF_VARS_JSON or the checked-in dev ci.tfvars.json.');
+ for(const key of ['availability_zones','public_subnet_cidrs','private_app_subnet_cidrs','private_db_subnet_cidrs']){
+  if(!Array.isArray(value[key])||value[key].length<2||value[key].some(item=>typeof item!=='string'||!item.trim()))throw Error(`Terraform configuration requires at least two non-empty entries for ${key}.`);
+ }
+ if(['public_subnet_cidrs','private_app_subnet_cidrs','private_db_subnet_cidrs'].some(key=>value[key].length!==value.availability_zones.length))throw Error('Subnet counts must match availability_zones.');
+ return value;
+}
 export function validateBackendConfig(env){
  const required=['STATE_BUCKET','STATE_KEY','LOCK_TABLE','AWS_REGION','AWS_ACCOUNT_ID','LAMBDA_ARTIFACT_BUCKET'];
  const invalid=required.filter(key=>typeof env[key]!=='string'||!env[key].trim()||env[key]!==env[key].trim());
