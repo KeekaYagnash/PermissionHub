@@ -21,7 +21,7 @@ run "exact_trust_and_three_roles" {
     error_message = "Bootstrap must create exactly the three requested roles."
   }
   assert {
-    condition     = local.trust_policy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == "repo:KeekaYagnash/PermissionHub:environment:development" && local.trust_policy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:aud"] == "sts.amazonaws.com"
+    condition     = local.trust_policy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == "repo:KeekaYagnash@134513323/PermissionHub@1321706781:environment:development" && local.trust_policy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:aud"] == "sts.amazonaws.com"
     error_message = "Trust must be exact repository/environment and audience, never a wildcard."
   }
   assert {
@@ -49,6 +49,10 @@ run "reuse_existing_prerequisites" {
   assert {
     condition     = length(data.aws_iam_openid_connect_provider.github) == 1 && alltrue([for role in values(aws_iam_role.deploy) : jsondecode(role.assume_role_policy).Statement[0].Principal.Federated == "arn:aws:iam::143671530412:oidc-provider/token.actions.githubusercontent.com"])
     error_message = "All three deployment roles must trust the existing account GitHub provider, read through a data source rather than managed or replaced."
+  }
+  assert {
+    condition     = alltrue([for role in values(aws_iam_role.deploy) : jsondecode(role.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == "repo:KeekaYagnash@134513323/PermissionHub@1321706781:environment:development"])
+    error_message = "Every deployment role must use the immutable repository subject, not a legacy, wildcard, or pull-request subject."
   }
   assert {
     condition     = length(aws_iam_openid_connect_provider.github) == 0 && length(aws_s3_bucket.state) == 0 && length(aws_s3_bucket.artifacts) == 0 && length(aws_dynamodb_table.locks) == 0

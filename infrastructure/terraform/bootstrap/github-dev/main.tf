@@ -13,6 +13,22 @@ provider "aws" {
 variable "aws_account_id" { default = "143671530412" }
 variable "aws_region" { default = "af-south-1" }
 variable "github_repository" { default = "KeekaYagnash/PermissionHub" }
+variable "github_repository_owner_id" {
+  type    = string
+  default = "134513323"
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_owner_id))
+    error_message = "GitHub repository owner ID must be numeric."
+  }
+}
+variable "github_repository_id" {
+  type    = string
+  default = "1321706781"
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "GitHub repository ID must be numeric."
+  }
+}
 variable "github_environment" {
   default = "development"
   validation {
@@ -34,8 +50,9 @@ variable "create_artifact_bucket" { default = false }
 variable "create_lock_table" { default = false }
 
 locals {
-  provider_arn = "arn:aws:iam::${var.aws_account_id}:oidc-provider/token.actions.githubusercontent.com"
-  boundary_arn = "arn:aws:iam::${var.aws_account_id}:policy/permissionhub-github-runtime-boundary-dev"
+  github_immutable_repository = "${split("/", var.github_repository)[0]}@${var.github_repository_owner_id}/${split("/", var.github_repository)[1]}@${var.github_repository_id}"
+  provider_arn                = "arn:aws:iam::${var.aws_account_id}:oidc-provider/token.actions.githubusercontent.com"
+  boundary_arn                = "arn:aws:iam::${var.aws_account_id}:policy/permissionhub-github-runtime-boundary-dev"
   template_variables = {
     account_id      = var.aws_account_id, region = var.aws_region,
     state_bucket    = var.state_bucket, state_key = var.state_key, lock_table = var.lock_table,
@@ -48,7 +65,7 @@ locals {
       Principal = { Federated = local.provider_arn },
       Condition = { StringEquals = {
         "token.actions.githubusercontent.com:aud"         = "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub"         = "repo:${var.github_repository}:environment:${var.github_environment}",
+        "token.actions.githubusercontent.com:sub"         = "repo:${local.github_immutable_repository}:environment:${var.github_environment}",
         "token.actions.githubusercontent.com:ref"         = "refs/heads/dev",
         "token.actions.githubusercontent.com:environment" = var.github_environment
       } }

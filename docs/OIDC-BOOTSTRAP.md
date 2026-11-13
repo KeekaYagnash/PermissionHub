@@ -25,14 +25,15 @@ The bootstrap now restricts these dev roles to `refs/heads/dev` and the
 an operator reviews and applies the independent bootstrap plan. The main-only
 instructions further below are historical; use the current deployment guide.
 
-**Historical bootstrap guide:** the infrastructure in this root is intentionally
-unchanged by the dev/prod CI/CD update. Its current trust still requires main.
-The operator must separately change dev trust to refs/heads/dev, retaining the
-development environment and exact repository restriction, and supply production
-and read-only planning roles. Do not use the old main-only dev workflow commands
-below. See [DEPLOYMENT-OPERATIONS.md](DEPLOYMENT-OPERATIONS.md) for current commands.
+The observed GitHub claims use immutable subjects: owner ID `134513323` and
+repository ID `1321706781`. All three roles require
+`repo:KeekaYagnash@134513323/PermissionHub@1321706781:environment:development`,
+not the legacy name-only subject or the diagnostic PR subject. Changing source
+alone does not update AWS. Review and apply the independent bootstrap trust
+update before retrying deployment. Production and read-only PR planning roles
+remain separately configured. See [DEPLOYMENT-OPERATIONS.md](DEPLOYMENT-OPERATIONS.md).
 
-Account **143671530412**, region **af-south-1**, repository **KeekaYagnash/PermissionHub**. Logical dev maps to the EXISTING GitHub Environment **development**, not a new environment named dev. Deployment jobs and all three trust policies now agree on that name. Only **main** can assume these roles; branch work/PR validation stays credential-free. Leave ENABLE_PR_TERRAFORM_PLAN=false with this three-role setup (there is no additional untrusted-PR read role).
+Account **143671530412**, region **af-south-1**, repository **KeekaYagnash/PermissionHub**. Logical dev maps to the EXISTING GitHub Environment **development**, not a new environment named dev. Only **dev** deployment jobs in that environment can assume these roles. PR diagnostics can request a GitHub token but cannot assume deployment roles. Leave ENABLE_PR_TERRAFORM_PLAN=false with this three-role setup (there is no additional untrusted-PR read role).
 
 ## Separate ownership and repeatability
 
@@ -48,7 +49,7 @@ Account **143671530412**, region **af-south-1**, repository **KeekaYagnash/Permi
 | permissionhub-github-backend-dev | AWS_BACKEND_ROLE_ARN, AWS_ARTIFACT_ROLE_ARN |
 | permissionhub-github-frontend-dev | AWS_FRONTEND_ROLE_ARN |
 
-ARN prefix: `arn:aws:iam::143671530412:role/`. Exactly three deployment roles are created, not five. Because plan/apply share the Terraform role, its main-only trust and development environment restrictions are essential. Never grant it to pull-request code. These are privileged trusted-code deployment identities, not IAM identities managed by access requests.
+ARN prefix: `arn:aws:iam::143671530412:role/`. Exactly three deployment roles are created, not five. Because plan/apply share the Terraform role, its dev-only trust and development environment restrictions are essential. Never grant it to pull-request code. These are privileged trusted-code deployment identities, not IAM identities managed by access requests.
 
 Every role trusts only the existing GitHub provider and requires ALL of:
 
@@ -61,8 +62,8 @@ Every role trusts only the existing GitHub provider and requires ALL of:
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {"StringEquals": {
       "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-      "token.actions.githubusercontent.com:sub": "repo:KeekaYagnash/PermissionHub:environment:development",
-      "token.actions.githubusercontent.com:ref": "refs/heads/main",
+      "token.actions.githubusercontent.com:sub": "repo:KeekaYagnash@134513323/PermissionHub@1321706781:environment:development",
+      "token.actions.githubusercontent.com:ref": "refs/heads/dev",
       "token.actions.githubusercontent.com:environment": "development"
     }}
   }]

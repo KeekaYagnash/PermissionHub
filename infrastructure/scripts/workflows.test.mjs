@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=name=>readFileSync(new URL(`../../.github/workflows/${name}`,import.meta.url),'utf8');
 
+test('OIDC diagnostics cannot deploy, assume a role, or execute PR repository code',()=>{
+ const diagnostic=read('diagnose-oidc.yml');
+ assert.match(diagnostic,/pull_request:\s*\n\s*branches: \[dev\]/);
+ assert.doesNotMatch(diagnostic,/pull_request_target:|actions\/checkout|configure-aws-credentials|uses:|secrets\.|terraform apply|aws sts/);
+ assert.match(diagnostic,/head\.repo\.full_name == github\.repository/);
+ assert.match(diagnostic,/workflow_dispatch' && github.ref == 'refs\/heads\/dev'/);
+ assert.match(diagnostic,/const keys=\['iss','aud','sub'/);
+ assert.match(diagnostic,/::add-mask::/);
+ assert.doesNotMatch(diagnostic,/console\.log\(payload|JSON\.stringify\(payload/);
+});
+
 test('dev deployment uses supplied OIDC role ARNs without a production or PR fallback',()=>{
  for(const file of ['deploy-dev-backend.yml','deploy-dev-frontend.yml','verify-aws-oidc.yml','destroy-infrastructure.yml']){
   const code=read(file);
