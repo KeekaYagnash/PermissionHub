@@ -2,6 +2,9 @@ name: PermissionHub Terraform-managed backend
 on:
   workflow_call:
     outputs:
+      fresh_deployment:
+        description: Whether verified empty state selected the initial infrastructure deployment path
+        value: ${{ jobs.prepare.outputs.fresh_deployment }}
       public_config:
         description: Public frontend configuration from this deployment (no secrets or state access required)
         value: ${{ jobs.apply.outputs.public_config || jobs.context.outputs.public_config }}
@@ -70,6 +73,8 @@ jobs:
     if: inputs.backend || inputs.infrastructure
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment == 'dev' && 'development' || 'production' }}
+    outputs:
+      fresh_deployment: ${{ steps.references.outputs.fresh_deployment }}
     env: &deployment-env
       AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
       AWS_ACCOUNT_ID: ${{ (vars.AWS_ACCOUNT_ID || (inputs.environment == 'dev' && '143671530412' || '')) }}
@@ -113,18 +118,21 @@ jobs:
         working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
         run: node ../../../scripts/ci.mjs identity
       - uses: actions/download-artifact@v4
-        if: inputs.backend
         with:
           name: lambda-build-${{ github.sha }}
           path: artifacts
       - name: Resolve existing or immutable new artifact references
+        id: references
         working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
         env:
           ALLOW_FRESH_DEPLOYMENT: ${{ inputs.fresh_deployment }}
+          AUTO_BOOTSTRAP_DEV: ${{ inputs.environment == 'dev' && 'true' || 'false' }}
+          DEPLOY_APPLY: ${{ inputs.apply }}
+          CI_MIGRATIONS_READY: ${{ vars.CI_MIGRATIONS_READY }}
           ARTIFACT_MODE: ${{ inputs.backend && 'built' || 'state' }}
         run: node ../../../scripts/ci.mjs refs "$RUNNER_TEMP/artifacts.tfvars.json" "$ARTIFACT_MODE"
       - name: Upload only changed artifacts with create-only S3 writes
-        if: inputs.backend
+        if: inputs.backend || steps.references.outputs.fresh_deployment == 'true'
         run: node infrastructure/scripts/ci.mjs upload "$RUNNER_TEMP/artifacts.tfvars.json"
       - uses: actions/upload-artifact@v4
         with:
@@ -132,7 +140,7 @@ jobs:
           path: ${{ runner.temp }}/artifacts.tfvars.json
           retention-days: 1
   migrate:
-    if: (inputs.backend || inputs.migrations) && inputs.apply && !inputs.fresh_deployment
+    if: (inputs.backend || inputs.migrations) && inputs.apply && needs.prepare.outputs.fresh_deployment != 'true'
     needs: prepare
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment == 'dev' && 'development' || 'production' }}
@@ -211,7 +219,7 @@ jobs:
       - name: Create and inspect saved deployment plan
         working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
         env:
-          PLAN_MODE: ${{ inputs.infrastructure && 'infrastructure' || 'backend' }}
+          PLAN_MODE: ${{ (inputs.infrastructure || needs.prepare.outputs.fresh_deployment == 'true') && 'infrastructure' || 'backend' }}
         run: |
           node ../../../scripts/ci.mjs identity
           node ../../../scripts/ci.mjs config "$RUNNER_TEMP/config.tfvars.json"
@@ -231,7 +239,7 @@ jobs:
       - run: echo "Saved plan passed the destruction/replacement guard. Apply requires the deployment environment gate." >> "$GITHUB_STEP_SUMMARY"
   apply:
     if: inputs.apply
-    needs: plan
+    needs: [plan, prepare]
     runs-on: ubuntu-latest
     outputs:
       public_config: ${{ steps.frontend.outputs.public_config }}
@@ -244,7 +252,7 @@ jobs:
           node-version: 22
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ inputs.infrastructure && (vars.AWS_INFRA_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) || (vars.AWS_BACKEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' || '')) }}
+          role-to-assume: ${{ (inputs.infrastructure || needs.prepare.outputs.fresh_deployment == 'true') && (vars.AWS_INFRA_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) || (vars.AWS_BACKEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - run: aws sts get-caller-identity
       - uses: hashicorp/setup-terraform@v3
@@ -273,16 +281,16 @@ jobs:
           node ../../../scripts/ci.mjs identity
           terraform apply -input=false -lock-timeout=5m "$RUNNER_TEMP/deployment.tfplan"
       - name: Use backend deployment identity for approved fresh database initialization
-        if: inputs.fresh_deployment
+        if: needs.prepare.outputs.fresh_deployment == 'true'
         uses: ./.github/actions/aws-oidc
         with:
           role-to-assume: ${{ (vars.AWS_BACKEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Initialize a fresh database only after infrastructure exists
-        if: inputs.fresh_deployment
+        if: needs.prepare.outputs.fresh_deployment == 'true'
         working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
         env:
-          RUN_MIGRATIONS: ${{ inputs.migrations }}
+          RUN_MIGRATIONS: 'true'
           CI_MIGRATIONS_READY: ${{ vars.CI_MIGRATIONS_READY }}
         run: node ../../../scripts/ci.mjs migrate
       - name: Verify API and report frontend outputs

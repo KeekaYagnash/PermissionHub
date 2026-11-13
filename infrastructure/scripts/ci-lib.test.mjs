@@ -1,6 +1,23 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {validateBackendConfig} from './ci-lib.mjs';
+import {resolveFreshDeployment} from './ci-lib.mjs';
+
+test('empty dev state bootstraps automatically; production and nonempty state keep existing safeguards',()=>{
+ const empty={values:{root_module:{}}};
+ const partial={values:{root_module:{child_modules:[{resources:[{mode:'managed',address:'module.networking.aws_vpc.this'}]}]}}};
+ assert.equal(resolveFreshDeployment(empty,{environment:'dev',autoBootstrapDev:true}),true);
+ assert.equal(resolveFreshDeployment(empty,{environment:'prod',autoBootstrapDev:true}),false);
+ assert.equal(resolveFreshDeployment(empty,{environment:'prod',requestedFresh:true}),true);
+ assert.equal(resolveFreshDeployment(empty,{environment:'dev'}),false);
+ assert.equal(resolveFreshDeployment(partial,{environment:'dev',autoBootstrapDev:true}),false);
+ assert.throws(()=>resolveFreshDeployment(partial,{environment:'dev',requestedFresh:true}),/empty application state/);
+ const manifest=Object.fromEntries(['api','provisioning','expiry','migration'].map(name=>[name,{key:`lambda/${name}/built.zip`,sourceHash:'digest'}]));
+ const fresh=resolveFreshDeployment(empty,{environment:'dev',autoBootstrapDev:true});
+ const refs=artifactReferences(empty,manifest,'permissionhub-dev-lambda-artifacts',fresh);
+ assert.equal(refs.api_lambda_artifact_key,'lambda/api/built.zip');
+ assert.throws(()=>artifactReferences(partial,manifest,'permissionhub-dev-lambda-artifacts'),/missing from state/);
+});
 
 test('Terraform backend preflight rejects blank/whitespace values with exact missing field names',()=>{
  const env={STATE_BUCKET:'permissionhub-dev-bucket',STATE_KEY:'permisionhub/dev/backend',LOCK_TABLE:'permissionhub-state-lock',AWS_REGION:'af-south-1',AWS_ACCOUNT_ID:'143671530412',LAMBDA_ARTIFACT_BUCKET:'permissionhub-dev-lambda-artifacts'};

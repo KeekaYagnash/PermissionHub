@@ -1,7 +1,7 @@
 import {readFile,writeFile,appendFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations,validateBackendConfig} from './ci-lib.mjs';
+import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations,validateBackendConfig,resolveFreshDeployment} from './ci-lib.mjs';
 const [command,...args]=process.argv.slice(2);
 function run(tool,argv,options={}){const result=spawnSync(tool,argv,{encoding:'utf8',maxBuffer:40*1024*1024,...options});if(result.status!==0)throw Error(`${tool} failed: ${result.stderr}`);return result.stdout}
 const json=async path=>JSON.parse(await readFile(path,'utf8'));
@@ -59,9 +59,14 @@ if(command==='backend-config'){
  if(!value.vpc_cidr||value.environment!==process.env.DEPLOY_ENV||value.aws_region!==process.env.AWS_REGION||value.lambda_artifact_bucket!==process.env.LAMBDA_ARTIFACT_BUCKET||value.aws_account_id&&value.aws_account_id!==process.env.AWS_ACCOUNT_ID)throw Error('CI_TF_VARS_JSON must contain reviewed configuration matching selected environment/account/region/artifact bucket. Do not use example defaults.');
  await writeFile(args[0],JSON.stringify(value));
 }else if(command==='refs'){
- const state=JSON.parse(run('terraform',['show','-json'])),manifest=args[1]==='built'?await json(resolve(process.env.GITHUB_WORKSPACE??'.','artifacts/lambda-manifest.json')):undefined;
+ const state=JSON.parse(run('terraform',['show','-json']));
  const prFreshPlan=process.env.GITHUB_EVENT_NAME==='pull_request'&&!resources(state.values?.root_module).some(r=>r.mode!=='data');
- await writeFile(args[0],JSON.stringify(artifactReferences(state,manifest,process.env.LAMBDA_ARTIFACT_BUCKET,process.env.ALLOW_FRESH_DEPLOYMENT==='true'||prFreshPlan),null,2));
+ const fresh=resolveFreshDeployment(state,{environment:process.env.DEPLOY_ENV,requestedFresh:process.env.ALLOW_FRESH_DEPLOYMENT==='true'||prFreshPlan,autoBootstrapDev:process.env.AUTO_BOOTSTRAP_DEV==='true'});
+ if(fresh&&process.env.DEPLOY_APPLY==='true'&&process.env.CI_MIGRATIONS_READY!=='true')throw Error('Initial deployment needs CI_MIGRATIONS_READY=true in the selected GitHub Environment after reviewing migrations. No artifacts uploaded or infrastructure applied.');
+ const manifest=args[1]==='built'||fresh?await json(resolve(process.env.GITHUB_WORKSPACE??'.','artifacts/lambda-manifest.json')):undefined;
+ await writeFile(args[0],JSON.stringify(artifactReferences(state,manifest,process.env.LAMBDA_ARTIFACT_BUCKET,fresh),null,2));
+ await output('fresh_deployment',String(fresh));
+ console.log(fresh?'Initial deployment: empty verified application state; create infrastructure before running database migrations.':'Existing environment: preserving normal deployment safeguards.');
 }else if(command==='upload'){
  const refs=await json(args[0]),manifest=await json('artifacts/lambda-manifest.json'),bucket=refs.lambda_artifact_bucket;
  const versioning=JSON.parse(run('aws',['s3api','get-bucket-versioning','--bucket',bucket]));if(versioning.Status!=='Enabled')throw Error('Enable versioning on the existing artifact bucket before deploying.');
