@@ -48,7 +48,7 @@ jobs:
             const payload=JSON.parse(Buffer.from(value.split('.')[1],'base64url').toString());
             const keys=['iss','aud','sub','repository','repository_id','repository_owner','repository_owner_id','ref','base_ref','head_ref','environment','event_name','workflow_ref','job_workflow_ref'];
             const claims=Object.fromEntries(keys.map(key=>[key,payload[key] ?? '(not set)']));
-            const expected={provider:'arn:aws:iam::143671530412:oidc-provider/token.actions.githubusercontent.com',aud:'sts.amazonaws.com',sub:'repo:KeekaYagnash/PermissionHub:environment:development',ref:'refs/heads/dev',environment:'development'};
+            const expected={provider:'arn:aws:iam::143671530412:oidc-provider/token.actions.githubusercontent.com',aud:'sts.amazonaws.com',sub:'repo:KeekaYagnash@134513323/PermissionHub@1321706781:environment:development',ref:'refs/heads/dev',environment:'development'};
             const comparison=Object.fromEntries(['aud','sub','ref','environment'].map(key=>[key,{actual:claims[key],expected:expected[key],matches:claims[key]===expected[key]}]));
             const report={claims,expectedDevDeployment:expected,comparison};
             console.log(JSON.stringify(report,null,2));
