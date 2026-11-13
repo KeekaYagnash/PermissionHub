@@ -1,0 +1,164 @@
+name: PermissionHub dev infrastructure then backend
+on:
+  workflow_call:
+    inputs:
+      apply:
+        type: boolean
+        default: false
+      migrations_validated:
+        type: boolean
+        required: true
+      defer_frontend:
+        type: boolean
+        default: false
+    outputs:
+      public_config:
+        value: ${{ jobs.backend.outputs.public_config }}
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  infrastructure:
+    name: Plan and apply foundational infrastructure
+    runs-on: ubuntu-latest
+    environment: development
+    env: &dev-env
+      DEPLOY_ENV: dev
+      AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID || '143671530412' }}
+      STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'permissionhub-dev-bucket' }}
+      STATE_KEY: ${{ vars.TF_STATE_KEY || 'permisionhub/dev/backend' }}
+      LOCK_TABLE: ${{ vars.TF_LOCK_TABLE || 'permissionhub-state-lock' }}
+      LAMBDA_ARTIFACT_BUCKET: ${{ vars.LAMBDA_ARTIFACT_BUCKET || 'permissionhub-dev-lambda-artifacts' }}
+      CI_TF_VARS_JSON: ${{ vars.CI_TF_VARS_JSON }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require validated migration history before creating a database
+        env:
+          VALIDATED: ${{ inputs.migrations_validated }}
+          OVERRIDE: ${{ vars.CI_MIGRATIONS_READY }}
+        run: test "$VALIDATED" = true && test "$OVERRIDE" != false
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN || 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: Initialize and verify the application backend
+        working-directory: infrastructure/terraform/environments/dev
+        run: |
+          node ../../../scripts/ci.mjs backend-config
+          terraform init -reconfigure -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="dynamodb_table=$LOCK_TABLE" -backend-config="encrypt=true"
+          node ../../../scripts/ci.mjs identity
+          node ../../../scripts/ci.mjs config "$RUNNER_TEMP/config.tfvars.json"
+          terraform validate
+      - name: Plan infrastructure without Lambda artifact dependencies
+        working-directory: infrastructure/terraform/environments/dev
+        run: |
+          umask 077
+          terraform plan -input=false -lock-timeout=5m -var-file="$RUNNER_TEMP/config.tfvars.json" -target=module.networking -target=module.security -target=module.rds -target=module.rds_proxy -target=module.secrets -target=module.cognito -target=module.queues -target=module.frontend_hosting -target=aws_vpc_endpoint.interface -out="$RUNNER_TEMP/foundation.tfplan"
+          terraform show -json "$RUNNER_TEMP/foundation.tfplan" > "$RUNNER_TEMP/foundation-plan.json"
+          node ../../../scripts/ci.mjs foundation-guard "$RUNNER_TEMP/foundation-plan.json"
+      - name: Apply the exact runner-local infrastructure plan
+        if: inputs.apply
+        working-directory: infrastructure/terraform/environments/dev
+        run: terraform apply -input=false -lock-timeout=5m "$RUNNER_TEMP/foundation.tfplan"
+      - name: Explain plan-only completion
+        if: ${{ !inputs.apply }}
+        run: echo 'Foundation plan only. No apply, backend packaging/upload or frontend deployment executed.' >> "$GITHUB_STEP_SUMMARY"
+  backend:
+    name: Bundle and deploy backend, then migrate
+    needs: infrastructure
+    if: inputs.apply
+    runs-on: ubuntu-latest
+    environment: development
+    env: *dev-env
+    outputs:
+      public_config: ${{ steps.frontend.outputs.public_config }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate --workspace backend
+      - run: npm run build --workspace backend
+      - run: npm run build:lambda --workspace backend
+      - run: npm run package:lambda --workspace backend
+      - name: Validate real backend ZIPs before AWS access
+        run: node infrastructure/scripts/ci.mjs prepare-check
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ vars.AWS_ARTIFACT_ROLE_ARN || vars.AWS_BACKEND_ROLE_ARN || 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: Verify state and upload real immutable artifacts
+        working-directory: infrastructure/terraform/environments/dev
+        run: |
+          node ../../../scripts/ci.mjs backend-config
+          terraform init -reconfigure -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="dynamodb_table=$LOCK_TABLE" -backend-config="encrypt=true"
+          node ../../../scripts/ci.mjs identity
+          node ../../../scripts/ci.mjs config "$RUNNER_TEMP/config.tfvars.json"
+          node ../../../scripts/ci.mjs bootstrap-refs "$RUNNER_TEMP/artifacts.tfvars.json"
+          cd "$GITHUB_WORKSPACE"
+          node infrastructure/scripts/ci.mjs upload "$RUNNER_TEMP/artifacts.tfvars.json"
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN || 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Create or update migration Lambda before updating the API
+        working-directory: infrastructure/terraform/environments/dev
+        run: |
+          umask 077
+          node ../../../scripts/ci.mjs identity
+          terraform plan -input=false -lock-timeout=5m -target=module.migration_lambda -var-file="$RUNNER_TEMP/config.tfvars.json" -var-file="$RUNNER_TEMP/artifacts.tfvars.json" -out="$RUNNER_TEMP/migration.tfplan"
+          terraform show -json "$RUNNER_TEMP/migration.tfplan" > "$RUNNER_TEMP/migration-plan.json"
+          node ../../../scripts/ci.mjs guard "$RUNNER_TEMP/migration-plan.json" infrastructure
+          terraform apply -input=false -lock-timeout=5m "$RUNNER_TEMP/migration.tfplan"
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ vars.AWS_BACKEND_ROLE_ARN || 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Initialize or upgrade database before API release
+        working-directory: infrastructure/terraform/environments/dev
+        env:
+          RUN_MIGRATIONS: 'true'
+          CI_MIGRATIONS_READY: ${{ vars.CI_MIGRATIONS_READY || (inputs.migrations_validated && 'true' || 'false') }}
+        run: node ../../../scripts/ci.mjs migrate
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN || 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Plan and apply Lambda, API and remaining infrastructure on the same runner
+        working-directory: infrastructure/terraform/environments/dev
+        run: |
+          umask 077
+          node ../../../scripts/ci.mjs identity
+          terraform plan -input=false -lock-timeout=5m -var-file="$RUNNER_TEMP/config.tfvars.json" -var-file="$RUNNER_TEMP/artifacts.tfvars.json" -out="$RUNNER_TEMP/backend.tfplan"
+          terraform show -json "$RUNNER_TEMP/backend.tfplan" > "$RUNNER_TEMP/backend-plan.json"
+          node ../../../scripts/ci.mjs guard "$RUNNER_TEMP/backend-plan.json" infrastructure
+          terraform apply -input=false -lock-timeout=5m "$RUNNER_TEMP/backend.tfplan"
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ vars.AWS_BACKEND_ROLE_ARN || 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Verify API health
+        working-directory: infrastructure/terraform/environments/dev
+        run: node ../../../scripts/ci.mjs health
+      - name: Provide public configuration to frontend deployment
+        id: frontend
+        working-directory: infrastructure/terraform/environments/dev
+        env:
+          DEFER_FRONTEND: ${{ inputs.defer_frontend }}
+        run: node ../../../scripts/ci.mjs frontend

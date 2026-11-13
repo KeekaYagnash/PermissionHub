@@ -5,6 +5,26 @@ import {resolveFreshDeployment} from './ci-lib.mjs';
 import {parseDeploymentConfig} from './ci-lib.mjs';
 import {readFileSync} from 'node:fs';
 import {validatePlanEncryptionKey} from './ci-lib.mjs';
+import {guardFoundationPlan,stagedArtifactReferences} from './ci-lib.mjs';
+
+test('infrastructure-first plans exclude code and reject replacement or unrelated resources',()=>{
+ const change=(address,actions=['create'])=>({resource_changes:[{mode:'managed',address,change:{actions}}]});
+ guardFoundationPlan(change('module.networking.aws_vpc.this'));
+ guardFoundationPlan(change('module.rds.aws_db_instance.this'));
+ guardFoundationPlan(change('aws_vpc_endpoint.interface["sts"]'));
+ for(const address of ['module.api_lambda.aws_lambda_function.this','module.migration_lambda.aws_lambda_function.this','aws_vpc_endpoint.unrelated','module.unrelated.aws_s3_bucket.this'])assert.throws(()=>guardFoundationPlan(change(address)));
+ assert.throws(()=>guardFoundationPlan(change('module.rds.aws_db_instance.this',['delete','create'])));
+});
+
+test('backend artifacts support first deployment and partial retry without assuming missing Lambdas exist',()=>{
+ const manifest=Object.fromEntries(['api','provisioning','expiry','migration'].map(name=>[name,{key:`lambda/${name}/real.zip`,sourceHash:'digest'}]));
+ const state={values:{root_module:{resources:[{mode:'managed',address:'module.rds.aws_db_instance.this'}]}}};
+ assert.equal(stagedArtifactReferences(state,manifest,'bucket').api_lambda_artifact_key,'lambda/api/real.zip');
+ state.values.root_module.resources.push({address:'module.migration_lambda.aws_lambda_function.this',values:{s3_bucket:'bucket'}});
+ assert.equal(stagedArtifactReferences(state,manifest,'bucket').migration_lambda_artifact_key,'lambda/migration/real.zip');
+ assert.throws(()=>stagedArtifactReferences(state,manifest,'other-bucket'));
+ assert.throws(()=>stagedArtifactReferences(state,{api:manifest.api},'bucket'));
+});
 
 test('plan encryption requires canonical base64 for 32 bytes without echoing secret input',()=>{
  const key=Buffer.alloc(32,7).toString('base64');
