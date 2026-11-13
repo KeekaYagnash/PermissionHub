@@ -1,5 +1,36 @@
 # PermissionHub dev/prod deployment and reviewed destruction
 
+## Recover the healthy but tainted dev Cognito domain in Actions
+
+A failed creation waiter can leave `permissionhub-demo-dev` tainted even when the
+AWS domain is ACTIVE. Repeating deployment does not clear that marker. Keep the
+replacement guard enabled; do not delete state or the domain.
+
+After merging the recovery implementation into dev, use the existing deployment
+workflow's manual inputs: branch `dev`, environment `dev`,
+`recover_cognito_domain=true`, `apply=true`, and confirmation
+`RECOVER DEV COGNITO DOMAIN`. This is **recovery-only**, not an application apply.
+For inspection without writing state, select `apply=false`.
+
+The existing workflow can also be dispatched with GitHub CLI (no local Terraform):
+
+```powershell
+gh workflow run deploy.yml --repo KeekaYagnash/PermissionHub --ref dev -f environment=dev -f recover_cognito_domain=true -f apply=true -f recovery_confirmation='RECOVER DEV COGNITO DOMAIN'
+```
+
+The reusable recovery workflow checks branch/account/region/backend identity,
+finds both pool and domain in raw state, requires the AWS domain to be ACTIVE in
+that exact pool, and requires versioned state backups. Only then does it call
+`terraform untaint` for the single fixed domain address under the normal state
+lock. It neither changes AWS resources nor runs apply/import/destroy. It shares
+the deployment concurrency group. Coordinate with any local Terraform users;
+do not run competing state operations manually. Recovery is idempotent if the
+domain is already untainted. Failed checks leave state unchanged.
+
+After recovery succeeds, start a new normal dev deployment with recovery disabled.
+PRs and ordinary pushes never clear taint automatically. No recovery was executed
+against AWS or remote state during implementation.
+
 ## Current dev deployment: infrastructure first, no plan-encryption secret
 
 Dev now routes through `deploy-dev-staged.yml`, superseding the older encrypted

@@ -1,0 +1,57 @@
+name: Recover verified healthy dev Cognito domain
+on:
+  workflow_call:
+    inputs:
+      execute:
+        type: boolean
+        default: false
+      confirmation:
+        type: string
+        default: ''
+permissions:
+  contents: read
+  id-token: write
+# The caller's deployment concurrency group serializes state operations.
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    environment: development
+    env:
+      DEPLOY_ENV: dev
+      AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID || '143671530412' }}
+      STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'permissionhub-dev-bucket' }}
+      STATE_KEY: ${{ vars.TF_STATE_KEY || 'permisionhub/dev/backend' }}
+      LOCK_TABLE: ${{ vars.TF_LOCK_TABLE || 'permissionhub-state-lock' }}
+      LAMBDA_ARTIFACT_BUCKET: ${{ vars.LAMBDA_ARTIFACT_BUCKET || 'permissionhub-dev-lambda-artifacts' }}
+      TF_INPUT: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require dev branch and explicit confirmation before AWS access
+        env:
+          EXECUTE: ${{ inputs.execute }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/dev
+          if [ "$EXECUTE" = true ]; then test "$CONFIRMATION" = 'RECOVER DEV COGNITO DOMAIN'; fi
+      - uses: ./.github/actions/aws-oidc
+        with:
+          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN || 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: Verify backend, inspect AWS domain, and recover only when authorised
+        working-directory: infrastructure/terraform/environments/dev
+        env:
+          RECOVERY_EXECUTE: ${{ inputs.execute }}
+          RECOVERY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          node ../../../scripts/ci.mjs backend-config
+          terraform init -reconfigure -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="dynamodb_table=$LOCK_TABLE" -backend-config="encrypt=true"
+          node ../../../scripts/ci.mjs identity
+          node ../../../scripts/ci.mjs recover-cognito-domain

@@ -3,6 +3,19 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=name=>readFileSync(new URL(`../../.github/workflows/${name}`,import.meta.url),'utf8');
 
+test('Cognito recovery is explicitly dispatched and cannot deploy or weaken replacement guards',()=>{
+ const deploy=read('deploy.yml'),recover=read('recover-dev-cognito.yml');
+ assert.match(deploy,/recover_cognito_domain:[\s\S]*?default: false/);
+ assert.match(deploy,/github.event_name == 'workflow_dispatch' && inputs.recover_cognito_domain && inputs.environment == 'dev'/);
+ assert.match(deploy,/changes:\s*\n\s*if: \$\{\{ !inputs.recover_cognito_domain \}\}/);
+ assert.match(recover,/RECOVER DEV COGNITO DOMAIN/);
+ assert.match(recover,/test "\$GITHUB_REF" = refs\/heads\/dev/);
+ assert.doesNotMatch(recover,/terraform apply|terraform destroy|force-unlock|lock=false/);
+ const cli=readFileSync(new URL('./ci.mjs',import.meta.url),'utf8');
+ assert.match(cli,/versioning.Status!=='Enabled'/);
+ assert.match(cli,/\['untaint','-lock-timeout=5m',cognitoDomainAddress\]/);
+});
+
 test('dev applies same-runner plans before packaging and never needs cross-job plan encryption',()=>{
  const deploy=read('deploy.yml'),staged=read('deploy-dev-staged.yml');
  assert.match(deploy,/backend-dev:[\s\S]*uses: \.\/\.github\/workflows\/deploy-dev-staged.yml/);

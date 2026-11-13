@@ -5,6 +5,14 @@ on:
     paths: ['frontend/**', 'backend/**', 'package.json', 'package-lock.json', '.github/**', 'infrastructure/**']
   workflow_dispatch:
     inputs:
+      recover_cognito_domain:
+        description: Recovery-only mode; verify existing dev Cognito domain and optionally clear its taint
+        type: boolean
+        default: false
+      recovery_confirmation:
+        description: For recovery with apply=true, type RECOVER DEV COGNITO DOMAIN
+        type: string
+        default: ''
       fresh_deployment:
         description: Explicit one-time creation into empty selected state (not routine deployment)
         type: boolean
@@ -14,7 +22,7 @@ on:
         options: [dev, prod]
         default: dev
       apply:
-        description: Apply the guarded saved plan and deploy frontend
+        description: Apply deployment; in recovery-only mode, clear the verified domain taint only
         type: boolean
         default: false
       run_migrations:
@@ -54,7 +62,19 @@ concurrency:
   group: permissionhub-state-${{ inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
   cancel-in-progress: false
 jobs:
+  invalid-recovery:
+    if: github.event_name == 'workflow_dispatch' && inputs.recover_cognito_domain && inputs.environment != 'dev'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Cognito recovery is dev-only. Select environment dev and branch dev.'; exit 1
+  recover-cognito:
+    if: github.event_name == 'workflow_dispatch' && inputs.recover_cognito_domain && inputs.environment == 'dev'
+    uses: ./.github/workflows/recover-dev-cognito.yml
+    with:
+      execute: ${{ inputs.apply }}
+      confirmation: ${{ inputs.recovery_confirmation }}
   changes:
+    if: ${{ !inputs.recover_cognito_domain }}
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.context.outputs.environment }}
