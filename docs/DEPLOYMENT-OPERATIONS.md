@@ -1,5 +1,33 @@
 # PermissionHub dev/prod deployment and reviewed destruction
 
+## Recover a tainted migration Lambda log group without deleting logs
+
+If a failed log-tag read leaves
+`module.migration_lambda.aws_cloudwatch_log_group.this` tainted, the deployment
+guard correctly blocks replacement. After applying the corrected Logs tag-read
+permissions, use the existing deployment workflow's recovery-only mode:
+
+* Branch/environment: `dev`.
+* `recover_migration_logs=true`, `recover_cognito_domain=false`.
+* `apply=true`, confirmation `RECOVER DEV MIGRATION LOG GROUP`.
+
+The recovery verifies the raw state record, exact log-group name, account/region
+ARN, STANDARD class, and live PermissionHub/dev ownership tags. With versioned
+state backups enabled, it clears only that one taint under the Terraform lock.
+It does not delete log groups/streams or perform resource apply. Setting
+`apply=false` inspects without changing state. Selecting both recovery targets
+is rejected. The existing deployment concurrency group serializes recovery.
+
+After merging these changes, an operator may alternatively dispatch via GitHub CLI:
+
+```powershell
+gh workflow run deploy.yml --repo KeekaYagnash/PermissionHub --ref dev -f environment=dev -f recover_migration_logs=true -f apply=true -f recovery_confirmation='RECOVER DEV MIGRATION LOG GROUP'
+```
+
+After recovery succeeds, start a normal deployment with both recovery flags false.
+Do not bypass the replacement guard or delete state. The implementation/tests
+did not run recovery against AWS or change remote state.
+
 ## Recover the healthy but tainted dev Cognito domain in Actions
 
 A failed creation waiter can leave `permissionhub-demo-dev` tainted even when the

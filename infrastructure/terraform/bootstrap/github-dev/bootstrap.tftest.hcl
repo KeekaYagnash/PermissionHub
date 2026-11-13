@@ -15,6 +15,13 @@ run "exact_trust_and_three_roles" {
   assert {
     condition = alltrue([for name in ["terraform-discovery", "backend"] : length([
       for statement in local.role_policies[name].Statement : statement
+      if try(statement.Sid == "LogRead" && contains(statement.Action, "logs:ListTagsForResource") && contains(statement.Action, "logs:ListTagsLogGroup") && contains(statement.Resource, "arn:aws:logs:af-south-1:143671530412:log-group:/aws/lambda/permissionhub-dev-*") && contains(statement.Resource, "arn:aws:logs:af-south-1:143671530412:log-group:/aws/apigateway/permissionhub-dev-*"), false)
+    ]) == 1])
+    error_message = "Terraform/backend log tag reads must support the modern API and bare log-group ARNs for Lambda and API Gateway."
+  }
+  assert {
+    condition = alltrue([for name in ["terraform-discovery", "backend"] : length([
+      for statement in local.role_policies[name].Statement : statement
       if try(statement.Sid == "CognitoDomainRead" && statement.Resource == "*" && contains(statement.Action, "cognito-idp:DescribeUserPoolDomain") && statement.Condition.StringEquals["aws:RequestedRegion"] == "af-south-1", false)
     ]) == 1])
     error_message = "Cognito domain polling requires a dedicated Resource:* read allow restricted to the deployment region for Terraform and backend roles."

@@ -1,7 +1,10 @@
-name: Recover verified healthy dev Cognito domain
+name: Recover verified existing dev resource
 on:
   workflow_call:
     inputs:
+      target:
+        type: string
+        default: cognito
       execute:
         type: boolean
         default: false
@@ -34,9 +37,15 @@ jobs:
         env:
           EXECUTE: ${{ inputs.execute }}
           CONFIRMATION: ${{ inputs.confirmation }}
+          TARGET: ${{ inputs.target }}
         run: |
           test "$GITHUB_REF" = refs/heads/dev
-          if [ "$EXECUTE" = true ]; then test "$CONFIRMATION" = 'RECOVER DEV COGNITO DOMAIN'; fi
+          case "$TARGET" in
+            cognito) expected='RECOVER DEV COGNITO DOMAIN' ;;
+            migration-logs) expected='RECOVER DEV MIGRATION LOG GROUP' ;;
+            *) echo 'Unsupported recovery target'; exit 1 ;;
+          esac
+          if [ "$EXECUTE" = true ]; then test "$CONFIRMATION" = "$expected"; fi
       - uses: ./.github/actions/aws-oidc
         with:
           role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN || 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' }}
@@ -45,13 +54,18 @@ jobs:
         with:
           terraform_version: 1.9.8
           terraform_wrapper: false
-      - name: Verify backend, inspect AWS domain, and recover only when authorised
+      - name: Verify backend, inspect the selected AWS resource, and recover only when authorised
         working-directory: infrastructure/terraform/environments/dev
         env:
           RECOVERY_EXECUTE: ${{ inputs.execute }}
           RECOVERY_CONFIRMATION: ${{ inputs.confirmation }}
+          RECOVERY_TARGET: ${{ inputs.target }}
         run: |
           node ../../../scripts/ci.mjs backend-config
           terraform init -reconfigure -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="dynamodb_table=$LOCK_TABLE" -backend-config="encrypt=true"
           node ../../../scripts/ci.mjs identity
-          node ../../../scripts/ci.mjs recover-cognito-domain
+          case "$RECOVERY_TARGET" in
+            cognito) node ../../../scripts/ci.mjs recover-cognito-domain ;;
+            migration-logs) node ../../../scripts/ci.mjs recover-migration-logs ;;
+            *) exit 1 ;;
+          esac
