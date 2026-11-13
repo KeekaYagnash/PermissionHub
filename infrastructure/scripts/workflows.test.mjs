@@ -3,6 +3,21 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=name=>readFileSync(new URL(`../../.github/workflows/${name}`,import.meta.url),'utf8');
 
+test('backend init defaults match dev Terraform and step overrides cannot erase them',()=>{
+ const code=read('deploy-dev-backend.yml');
+ const expected={TF_STATE_BUCKET:'permissionhub-dev-bucket',TF_STATE_KEY:'permisionhub/dev/backend',TF_LOCK_TABLE:'permissionhub-state-lock',AWS_ACCOUNT_ID:'143671530412',LAMBDA_ARTIFACT_BUCKET:'permissionhub-dev-lambda-artifacts'};
+ for(const [key,value] of Object.entries(expected)){
+  const bindings=code.split('\n').filter(line=>line.includes(`vars.${key}`));
+  assert.ok(bindings.length>0);
+  for(const line of bindings)assert.ok(line.includes(`vars.${key} || (inputs.environment == 'dev' && '${value}' || `),`Missing guarded dev default: ${line}`);
+ }
+ assert.equal((code.match(/ci\.mjs" backend-config/g)||[]).length,5);
+ assert.doesNotMatch(code,/test -n "\$STATE_BUCKET" &&/);
+ const terraform=readFileSync(new URL('../terraform/environments/dev/versions.tf',import.meta.url),'utf8');
+ for(const key of ['TF_STATE_BUCKET','TF_STATE_KEY','TF_LOCK_TABLE'])assert.ok(terraform.includes(`"${expected[key]}"`));
+ assert.match(code,/inputs.environment == 'prod' && 'permisionhub\/prod\/backend'/);
+});
+
 test('OIDC diagnostics cannot deploy, assume a role, or execute PR repository code',()=>{
  const diagnostic=read('diagnose-oidc.yml');
  assert.match(diagnostic,/pull_request:\s*\n\s*branches: \[dev\]/);

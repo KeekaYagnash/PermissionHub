@@ -37,7 +37,7 @@ variable "github_environment" {
   }
 }
 variable "state_bucket" { default = "permissionhub-dev-bucket" }
-variable "state_key" { default = "permissionhub/dev/terraform.tfstate" }
+variable "state_key" { default = "permisionhub/dev/backend" }
 variable "lock_table" { default = "permissionhub-state-lock" }
 variable "artifact_bucket" { default = "permissionhub-dev-lambda-artifacts" }
 variable "create_oidc_provider" {

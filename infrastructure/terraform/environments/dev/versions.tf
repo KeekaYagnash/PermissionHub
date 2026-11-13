@@ -14,7 +14,7 @@ terraform {
 
   backend "s3" {
     bucket         = "permissionhub-dev-bucket"
-    key            = "permissionhub/dev/terraform.tfstate"
+    key            = "permisionhub/dev/backend"
     region         = "af-south-1"
     dynamodb_table = "permissionhub-state-lock"
     encrypt        = true

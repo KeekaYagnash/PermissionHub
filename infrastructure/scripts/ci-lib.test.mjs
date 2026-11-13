@@ -1,5 +1,17 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {validateBackendConfig} from './ci-lib.mjs';
+
+test('Terraform backend preflight rejects blank/whitespace values with exact missing field names',()=>{
+ const env={STATE_BUCKET:'permissionhub-dev-bucket',STATE_KEY:'permisionhub/dev/backend',LOCK_TABLE:'permissionhub-state-lock',AWS_REGION:'af-south-1',AWS_ACCOUNT_ID:'143671530412',LAMBDA_ARTIFACT_BUCKET:'permissionhub-dev-lambda-artifacts'};
+ assert.deepEqual(validateBackendConfig(env),env);
+ assert.deepEqual(validateBackendConfig({...env,DEPLOY_ENV:'dev'}),env);
+ assert.throws(()=>validateBackendConfig({...env,DEPLOY_ENV:'prod'}),/permisionhub\/prod\/backend/);
+ assert.throws(()=>validateBackendConfig({...env,DEPLOY_ENV:'dev',STATE_KEY:'permissionhub/dev/terraform.tfstate'}),/TF_STATE_KEY/);
+ for(const key of Object.keys(env))for(const value of [undefined,'','   ',' padded ']){
+  assert.throws(()=>validateBackendConfig({...env,[key]:value}),new RegExp(key));
+ }
+});
 import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,controlledMigrations} from './ci-lib.mjs';
 test('approved destroy cannot disable RDS or Cognito deletion protection itself',()=>{
  for(const protection of [true,'ACTIVE'])assert.throws(()=>assertDestroyPrepared({resource_changes:[{address:'protected',change:{actions:['delete'],before:{deletion_protection:protection}}}]}));
@@ -29,9 +41,10 @@ test('merges/manual deployment cannot cross branch/environment boundaries',()=>{
  assert.throws(()=>deploymentEnvironment('refs/heads/demo_ready_2','dev'));
 });
 test('backend identity rejects wrong accounts, state keys, workspaces and artifact environments',()=>{
- const value={environment:'prod',account:'123456789012',expectedAccount:'123456789012',region:'af-south-1',expectedRegion:'af-south-1',stateKey:'permissionhub/prod/terraform.tfstate',bucket:'permissionhub-prod-state',artifactBucket:'permissionhub-prod-lambda-artifacts'};
+ const value={environment:'prod',account:'123456789012',expectedAccount:'123456789012',region:'af-south-1',expectedRegion:'af-south-1',stateKey:'permisionhub/prod/backend',bucket:'permissionhub-prod-state',artifactBucket:'permissionhub-prod-lambda-artifacts'};
  assert.equal(validateIdentity(value),true);
- for(const patch of [{account:'111111111111'},{expectedAccount:''},{workspace:'dev'},{stateKey:'permissionhub/dev/terraform.tfstate'},{bucket:'permissionhub-dev-state'},{artifactBucket:'permissionhub-dev-lambda-artifacts'},{region:'us-east-1'}])assert.throws(()=>validateIdentity({...value,...patch}));
+ assert.throws(()=>validateIdentity({...value,stateKey:'permissionhub/prod/terraform.tfstate'}));
+ for(const patch of [{account:'111111111111'},{expectedAccount:''},{workspace:'dev'},{stateKey:'permisionhub/dev/backend'},{bucket:'permissionhub-dev-state'},{artifactBucket:'permissionhub-dev-lambda-artifacts'},{region:'us-east-1'}])assert.throws(()=>validateIdentity({...value,...patch}));
 });
 test('destroy requires human review; production also forbids self-review and admin bypass',()=>{
  assert.throws(()=>requireProtection({}));

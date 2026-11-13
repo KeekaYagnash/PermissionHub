@@ -13,6 +13,10 @@ run "exact_trust_and_three_roles" {
     create_lock_table      = true
   }
   assert {
+    condition     = contains(local.role_policies["terraform-state"].Statement[1].Resource, "arn:aws:s3:::permissionhub-dev-bucket/permisionhub/dev/backend") && contains(local.role_policies["backend"].Statement[1].Resource, "arn:aws:s3:::permissionhub-dev-bucket/permisionhub/dev/backend")
+    error_message = "Deployment role state permissions must follow the exact dev backend key."
+  }
+  assert {
     condition     = local.trust_policy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:ref"] == "refs/heads/dev"
     error_message = "Dev deployment roles must trust the dev deployment branch, not main or a PR ref."
   }

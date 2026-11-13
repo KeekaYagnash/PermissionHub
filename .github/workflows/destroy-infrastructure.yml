@@ -27,12 +27,12 @@ jobs:
     environment: ${{ inputs.environment == 'dev' && 'development' || 'production' }}
     env: &destroy-env
       DEPLOY_ENV: ${{ inputs.environment }}
-      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_ACCOUNT_ID: ${{ (vars.AWS_ACCOUNT_ID || (inputs.environment == 'dev' && '143671530412' || '')) }}
       AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
-      STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-      STATE_KEY: ${{ vars.TF_STATE_KEY }}
-      LOCK_TABLE: ${{ vars.TF_LOCK_TABLE }}
-      LAMBDA_ARTIFACT_BUCKET: ${{ vars.LAMBDA_ARTIFACT_BUCKET }}
+      STATE_BUCKET: ${{ (vars.TF_STATE_BUCKET || (inputs.environment == 'dev' && 'permissionhub-dev-bucket' || '')) }}
+      STATE_KEY: ${{ (vars.TF_STATE_KEY || (inputs.environment == 'dev' && 'permisionhub/dev/backend' || (inputs.environment == 'prod' && 'permisionhub/prod/backend' || ''))) }}
+      LOCK_TABLE: ${{ (vars.TF_LOCK_TABLE || (inputs.environment == 'dev' && 'permissionhub-state-lock' || '')) }}
+      LAMBDA_ARTIFACT_BUCKET: ${{ (vars.LAMBDA_ARTIFACT_BUCKET || (inputs.environment == 'dev' && 'permissionhub-dev-lambda-artifacts' || '')) }}
       CI_TF_VARS_JSON: ${{ vars.CI_TF_VARS_JSON }}
       TF_IN_AUTOMATION: 'true'
       TF_INPUT: 'false'
@@ -67,7 +67,7 @@ jobs:
       - name: Initialize and authenticate exact application state
         working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
         run: |
-          test -n "$STATE_BUCKET" && test -n "$STATE_KEY" && test -n "$LOCK_TABLE"
+          node "$GITHUB_WORKSPACE/infrastructure/scripts/ci.mjs" backend-config
           terraform init -reconfigure -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="dynamodb_table=$LOCK_TABLE" -backend-config="encrypt=true"
           node ../../../scripts/ci.mjs identity
           node ../../../scripts/ci.mjs config "$RUNNER_TEMP/config.tfvars.json"

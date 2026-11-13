@@ -8,6 +8,17 @@ export function openPlan(value,key,context){
  const envelope=JSON.parse(value),decipher=createDecipheriv('aes-256-gcm',Buffer.from(key??'','base64'),Buffer.from(envelope.iv,'base64'));decipher.setAAD(Buffer.from(context));decipher.setAuthTag(Buffer.from(envelope.tag,'base64'));return Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,'base64')),decipher.final()]);
 }
 export const lambdaModules={api:'api_lambda',provisioning:'provisioning_lambda',expiry:'expiry_lambda',migration:'migration_lambda'};
+export function validateBackendConfig(env){
+ const required=['STATE_BUCKET','STATE_KEY','LOCK_TABLE','AWS_REGION','AWS_ACCOUNT_ID','LAMBDA_ARTIFACT_BUCKET'];
+ const invalid=required.filter(key=>typeof env[key]!=='string'||!env[key].trim()||env[key]!==env[key].trim());
+ if(invalid.length)throw Error(`Missing or whitespace-padded workflow configuration: ${invalid.join(', ')}. Configure the selected GitHub Environment variables; Terraform init was not started.`);
+ if(env.DEPLOY_ENV){
+  if(!['dev','prod'].includes(env.DEPLOY_ENV))throw Error('Invalid DEPLOY_ENV; expected dev or prod.');
+  const expected=`permisionhub/${env.DEPLOY_ENV}/backend`;
+  if(env.STATE_KEY!==expected)throw Error(`TF_STATE_KEY must be ${expected}. Review any existing state migration before changing the GitHub Variable; Terraform init was not started.`);
+ }
+ return Object.fromEntries(required.map(key=>[key,env[key]]));
+}
 export function deploymentEnvironment(ref,requested){
  const environment=requested || (ref==='refs/heads/dev'?'dev':ref==='refs/heads/main'?'prod':undefined);
  if(!['dev','prod'].includes(environment)||ref!==`refs/heads/${environment==='dev'?'dev':'main'}`)throw Error('Deployment requires dev branch for dev, main branch for prod.');
@@ -15,7 +26,7 @@ export function deploymentEnvironment(ref,requested){
 }
 export function validateIdentity({environment,account,expectedAccount,region,expectedRegion,stateKey,bucket,artifactBucket,workspace='default'}){
  if(!['dev','prod'].includes(environment)||!/^\d{12}$/.test(expectedAccount??'')||account!==expectedAccount||region!==expectedRegion||!region)throw Error('AWS account/region/environment mismatch; configure AWS_ACCOUNT_ID and AWS_REGION.');
- if(workspace!=='default'||stateKey!==`permissionhub/${environment}/terraform.tfstate`||!bucket||!artifactBucket)throw Error('Wrong workspace/backend; use default workspace and the exact environment state key.');
+ if(workspace!=='default'||stateKey!==`permisionhub/${environment}/backend`||!bucket||!artifactBucket)throw Error('Wrong workspace/backend; use default workspace and the exact environment state key.');
  const other=environment==='dev'?'prod':'dev';
  if(new RegExp(`(^|[-/])${other}($|[-/])`).test(bucket)||!new RegExp(`(^|-)${environment}(-|$)`).test(artifactBucket))throw Error('Cross-environment state/artifact bucket configuration refused.');
  return true;

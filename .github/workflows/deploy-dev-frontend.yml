@@ -63,7 +63,7 @@ jobs:
         env:
           BUCKET: ${{ steps.config.outputs.BUCKET }}
           DISTRIBUTION: ${{ steps.config.outputs.DISTRIBUTION }}
-          EXPECTED_ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+          EXPECTED_ACCOUNT: ${{ (vars.AWS_ACCOUNT_ID || (inputs.environment == 'dev' && '143671530412' || '')) }}
           DEPLOY_ENV: ${{ inputs.environment }}
         run: |
           set -euo pipefail
