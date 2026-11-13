@@ -1,5 +1,45 @@
 # PermissionHub dev/prod deployment and reviewed destruction
 
+## Current dev deployment: infrastructure first, no plan-encryption secret
+
+Dev now routes through `deploy-dev-staged.yml`, superseding the older encrypted
+cross-job backend workflow described below. `TF_PLAN_ENCRYPTION_KEY` is **not
+required for dev deployment**. Production and the separate destroy workflow retain
+their existing encrypted-plan requirements.
+
+After validation, dev executes these ordered stages:
+
+1. Plan/apply foundation networking, security, RDS, Secrets Manager, Cognito,
+   queues, VPC endpoints and frontend hosting. This narrow bootstrap plan cannot
+   create/update Lambda code and refuses destructive or unrelated changes.
+2. Build/package all four real Lambda handlers, validate hashes/sizes/handlers,
+   and upload immutable ZIPs using the backend artifact role.
+3. Create/update the migration Lambda and run migration status/deploy/status.
+4. Plan/apply the full configuration (including API Gateway, Lambda and monitoring),
+   then check API health. Migration failure stops the API release and frontend.
+5. Deploy frontend assets using the frontend role and invalidate CloudFront.
+
+Every saved plan is applied in the **same job and runner** that created it. Plans
+are not uploaded as GitHub artifacts or forwarded to another job. Runner-local
+plan files are restricted with `umask 077`. Targeting is limited to the ordered
+foundation/migration stages; a full untargeted plan completes the deployment.
+Lambda creation necessarily follows packaging because AWS requires real code.
+
+Partial dev deployments can resume from the existing state; never erase state or
+change its key to retry. Existing Lambda artifact-bucket mismatches and destructive
+plans remain blocked. `apply=false` produces only the foundation plan and does
+not bundle/upload/deploy application code. Explicit migration validation must
+pass, and `CI_MIGRATIONS_READY=false` remains an operator stop switch. No live IAM
+provisioning operation is run as part of these implementation tests.
+
+After merging this implementation to dev, an operator can start deployment:
+
+```powershell
+gh workflow run deploy.yml --repo KeekaYagnash/PermissionHub --ref dev -f environment=dev -f apply=true -f run_migrations=true
+```
+
+This command creates/modifies AWS resources; it was not executed during development.
+
 Implementation branch: `demo_ready_2`. No AWS deployment/destruction, role/provider
 changes, AWS migration, push or merge was performed during implementation.
 This guide supersedes the old main-only development instructions.

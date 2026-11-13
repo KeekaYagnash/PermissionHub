@@ -3,6 +3,7 @@ import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {validatePlanEncryptionKey} from './ci-lib.mjs';
+import {guardFoundationPlan,stagedArtifactReferences} from './ci-lib.mjs';
 import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations,validateBackendConfig,resolveFreshDeployment,parseDeploymentConfig} from './ci-lib.mjs';
 const [command,...args]=process.argv.slice(2);
 function run(tool,argv,options={}){const result=spawnSync(tool,argv,{encoding:'utf8',maxBuffer:40*1024*1024,...options});if(result.status!==0)throw Error(`${tool} failed: ${result.stderr}`);return result.stdout}
@@ -19,13 +20,14 @@ if(command==='preflight'){
  const errors=[];
  try{validateBackendConfig(process.env);}catch(error){errors.push(error.message);}
  try{await deploymentConfig();}catch(error){errors.push(error.message);}
- try{validatePlanEncryptionKey(process.env.PLAN_ENCRYPTION_KEY);}catch(error){errors.push(error.message);}
+ // Dev applies runner-local plans in one job; only cross-job encrypted plans need a key.
+ if(process.env.DEPLOY_ENV!=='dev')try{validatePlanEncryptionKey(process.env.PLAN_ENCRYPTION_KEY);}catch(error){errors.push(error.message);}
  for(const key of ['INFRA_ROLE_ARN','BACKEND_ROLE_ARN','FRONTEND_ROLE_ARN']){
   const match=/^arn:aws:iam::([0-9]{12}):role\/.+$/.exec(process.env[key]??'');
   if(!match||match[1]!==process.env.AWS_ACCOUNT_ID)errors.push(`${key} must be an IAM role ARN in the selected AWS_ACCOUNT_ID.`);
  }
  if(errors.length)throw Error(`Deployment preflight failed before build/upload/plan:\n- ${errors.join('\n- ')}`);
- console.log('Deployment preflight passed: backend settings, Terraform configuration, three same-account role ARNs, and plan-encryption secret format. Live AWS permissions, resources and quotas are not verified by this check.');
+ console.log('Deployment preflight passed: backend settings, Terraform configuration and same-account role ARNs. Dev uses runner-local plans and needs no encryption secret. Live AWS permissions, resources and quotas are checked during deployment.');
 }else if(command==='prepare-check'){
  validateBackendConfig(process.env);
  const directory=resolve(process.env.GITHUB_WORKSPACE??'.','artifacts');
@@ -92,6 +94,16 @@ if(command==='preflight'){
 }else if(command==='config'){
  const value=await deploymentConfig();
  await writeFile(args[0],JSON.stringify(value));
+}else if(command==='bootstrap-refs'){
+ if(process.env.DEPLOY_ENV!=='dev')throw Error('Resumable infrastructure-first bootstrap is dev-only.');
+ const state=JSON.parse(run('terraform',['show','-json']));
+ const manifest=await json(resolve(process.env.GITHUB_WORKSPACE??'.','artifacts/lambda-manifest.json'));
+ const refs=stagedArtifactReferences(state,manifest,process.env.LAMBDA_ARTIFACT_BUCKET);
+ await writeFile(args[0],JSON.stringify(refs));
+}else if(command==='foundation-guard'){
+ const plan=await json(args[0]);
+ guardFoundationPlan(plan);
+ console.log('Foundation plan contains only permitted infrastructure changes, no Lambda code or destructive changes.');
 }else if(command==='refs'){
  const state=JSON.parse(run('terraform',['show','-json']));
  const prFreshPlan=process.env.GITHUB_EVENT_NAME==='pull_request'&&!resources(state.values?.root_module).some(r=>r.mode!=='data');

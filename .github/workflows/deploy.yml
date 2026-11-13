@@ -109,9 +109,20 @@ jobs:
   validation:
     needs: [changes, preflight]
     uses: ./.github/workflows/terraform-pr.yml
+    with:
+      defer_lambda_packaging: ${{ needs.changes.outputs.environment == 'dev' }}
+  backend-dev:
+    needs: [changes, validation]
+    if: needs.changes.outputs.environment == 'dev'
+    uses: ./.github/workflows/deploy-dev-staged.yml
+    secrets: inherit
+    with:
+      apply: ${{ github.event_name == 'push' || inputs.apply }}
+      migrations_validated: ${{ needs.validation.outputs.migrations_validated == 'true' }}
+      defer_frontend: ${{ inputs.defer_frontend || false }}
   backend:
     needs: [changes, validation]
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.infrastructure == 'true' || needs.changes.outputs.frontend == 'true'
+    if: needs.changes.outputs.environment == 'prod' && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.infrastructure == 'true' || needs.changes.outputs.frontend == 'true')
     uses: ./.github/workflows/deploy-dev-backend.yml
     secrets: inherit
     with:
@@ -124,12 +135,12 @@ jobs:
       migrations_validated: ${{ needs.validation.outputs.migrations_validated == 'true' }}
       apply: ${{ github.event_name == 'push' || inputs.apply }}
   frontend:
-    needs: [changes, validation, backend]
-    if: always() && !inputs.defer_frontend && needs.validation.result == 'success' && (needs.backend.result == 'success' || needs.backend.result == 'skipped') && (github.event_name == 'push' || inputs.apply) && (needs.changes.outputs.frontend == 'true' || needs.changes.outputs.infrastructure == 'true' || needs.backend.outputs.fresh_deployment == 'true')
+    needs: [changes, validation, backend, backend-dev]
+    if: always() && !inputs.defer_frontend && needs.validation.result == 'success' && ((needs.changes.outputs.environment == 'dev' && needs.backend-dev.result == 'success') || (needs.changes.outputs.environment == 'prod' && needs.backend.result == 'success')) && (github.event_name == 'push' || inputs.apply)
     uses: ./.github/workflows/deploy-dev-frontend.yml
     with:
       environment: ${{ needs.changes.outputs.environment }}
-      public_config: ${{ needs.backend.outputs.public_config || '' }}
+      public_config: ${{ needs.backend-dev.outputs.public_config || needs.backend.outputs.public_config || '' }}
   frontend-deferred:
     if: inputs.defer_frontend
     runs-on: ubuntu-latest

@@ -3,6 +3,11 @@ on:
   pull_request:
     branches: [dev, main]
   workflow_call:
+    inputs:
+      defer_lambda_packaging:
+        description: Dev deployment packages real Lambda code after foundation infrastructure exists
+        type: boolean
+        default: false
     outputs:
       migrations_validated:
         description: Same-commit migration and credential-free preparation checks passed
@@ -16,7 +21,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     outputs:
-      migrations_validated: ${{ steps.prepared.outputs.migrations_validated }}
+      migrations_validated: ${{ steps.migrations.outputs.migrations_validated }}
     services:
       postgres:
         image: postgres:16
@@ -40,9 +45,12 @@ jobs:
       - run: npm run prisma:generate --workspace backend
       - run: npx prisma validate --schema backend/prisma/schema.prisma
       - name: Validate complete migration history on an empty disposable PostgreSQL database
+        id: migrations
         env:
           MIGRATION_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/permissionhub_migration_test_ci
-        run: npm run test:migrations --workspace backend
+        run: |
+          npm run test:migrations --workspace backend
+          echo 'migrations_validated=true' >> "$GITHUB_OUTPUT"
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test --workspace backend
@@ -58,10 +66,12 @@ jobs:
           "$RUNNER_TEMP/actionlint" -shellcheck=''
       - run: npm run build
       - run: npm run build:lambda --workspace backend
+        if: ${{ !inputs.defer_lambda_packaging }}
       - run: npm run package:lambda --workspace backend
+        if: ${{ !inputs.defer_lambda_packaging }}
       - name: Backend prepare pre-merge checks (no AWS access)
         id: prepared
-        if: github.base_ref == 'dev' || github.ref == 'refs/heads/dev'
+        if: ${{ !inputs.defer_lambda_packaging && (github.base_ref == 'dev' || github.ref == 'refs/heads/dev') }}
         env:
           DEPLOY_ENV: dev
           AWS_REGION: ${{ vars.AWS_REGION || 'af-south-1' }}
@@ -95,6 +105,7 @@ jobs:
           terraform -chdir=infrastructure/terraform/modules/cognito init -backend=false
           terraform -chdir=infrastructure/terraform/modules/cognito test
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.defer_lambda_packaging }}
         with:
           name: lambda-build-${{ github.sha }}
           path: artifacts/

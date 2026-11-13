@@ -14,6 +14,19 @@ export function openPlan(value,key,context){
  const envelope=JSON.parse(value),decipher=createDecipheriv('aes-256-gcm',validatePlanEncryptionKey(key),Buffer.from(envelope.iv,'base64'));decipher.setAAD(Buffer.from(context));decipher.setAuthTag(Buffer.from(envelope.tag,'base64'));return Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,'base64')),decipher.final()]);
 }
 export const lambdaModules={api:'api_lambda',provisioning:'provisioning_lambda',expiry:'expiry_lambda',migration:'migration_lambda'};
+export const devFoundationTargets=['module.networking','module.security','module.rds','module.rds_proxy','module.secrets','module.cognito','module.queues','module.frontend_hosting','aws_vpc_endpoint.interface'];
+export function guardFoundationPlan(plan){
+ guardPlan(plan,'infrastructure');
+ for(const r of plan.resource_changes??[])if(r.mode!=='data'&&r.change.actions.some(a=>!['no-op','read'].includes(a))&&!devFoundationTargets.some(prefix=>r.address===prefix||r.address.startsWith(`${prefix}.`)||r.address.startsWith(`${prefix}[`)))throw Error(`Non-foundation change blocked: ${r.address}`);
+}
+export function stagedArtifactReferences(state,manifest,bucket){
+ const refs=artifactReferences({},manifest,bucket,true);
+ for(const [name,module] of Object.entries(lambdaModules)){
+  const current=resources(state.values?.root_module).find(r=>r.address===`module.${module}.aws_lambda_function.this`)?.values;
+  if(current&&current.s3_bucket!==bucket)throw Error(`Existing ${name} Lambda uses a different artifact bucket; review state before deploying.`);
+ }
+ return refs;
+}
 export function parseDeploymentConfig(raw,fallback,env){
  const text=typeof raw==='string'?raw.trim():'';
  if(!text&&env.DEPLOY_ENV!=='dev')throw Error('CI_TF_VARS_JSON is required for production; no dev configuration fallback is allowed.');

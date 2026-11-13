@@ -3,6 +3,20 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=name=>readFileSync(new URL(`../../.github/workflows/${name}`,import.meta.url),'utf8');
 
+test('dev applies same-runner plans before packaging and never needs cross-job plan encryption',()=>{
+ const deploy=read('deploy.yml'),staged=read('deploy-dev-staged.yml');
+ assert.match(deploy,/backend-dev:[\s\S]*uses: \.\/\.github\/workflows\/deploy-dev-staged.yml/);
+ assert.match(staged,/backend:[\s\S]*needs: infrastructure/);
+ assert.ok(staged.indexOf('foundation.tfplan"')<staged.indexOf('npm run build:lambda'));
+ assert.ok(staged.indexOf('Initialize or upgrade database before API release')<staged.indexOf('Plan and apply Lambda, API and remaining infrastructure'));
+ assert.doesNotMatch(staged,/seal-plan|open-plan|TF_PLAN_ENCRYPTION_KEY|upload-artifact/);
+ assert.match(staged,/terraform apply .*"\$RUNNER_TEMP\/foundation.tfplan"/);
+ assert.match(staged,/terraform apply .*"\$RUNNER_TEMP\/backend.tfplan"/);
+ assert.match(read('terraform-pr.yml'),/if: \$\{\{ !inputs.defer_lambda_packaging \}\}/);
+ const cli=readFileSync(new URL('./ci.mjs',import.meta.url),'utf8');
+ assert.match(cli,/if\(process.env.DEPLOY_ENV!=='dev'\)try\{validatePlanEncryptionKey/);
+});
+
 test('deployment checks environment secrets before build, upload or plan',()=>{
  const deploy=read('deploy.yml'),preflight=read('deployment-preflight.yml');
  assert.match(deploy,/validation:\s*\n\s*needs: \[changes, preflight\]/);
@@ -46,7 +60,7 @@ test('detected initial dev deployment propagates through infrastructure, migrati
  assert.match(backend,/role-to-assume:.*inputs.infrastructure \|\| needs.prepare.outputs.fresh_deployment == 'true'/);
  assert.match(backend,/needs: \[plan, prepare\]/);
  assert.match(backend,/Initialize a fresh database only after infrastructure exists\s*\n\s*if: needs.prepare.outputs.fresh_deployment == 'true'/);
- assert.match(read('deploy.yml'),/needs.backend.outputs.fresh_deployment == 'true'/);
+ assert.match(read('deploy.yml'),/needs.backend-dev.result == 'success'/);
  const cli=readFileSync(new URL('./ci.mjs',import.meta.url),'utf8');
  assert.ok(cli.indexOf('Initial deployment needs CI_MIGRATIONS_READY')<cli.indexOf("artifactReferences(state,manifest"));
 });
@@ -89,7 +103,7 @@ test('dev deployment uses supplied OIDC role ARNs without a production or PR fal
  assert.doesNotMatch(read('terraform-pr.yml'),/permissionhub-github-(terraform|backend|frontend)-dev/);
  const deploy=read('deploy.yml');
  assert.match(deploy,/backend:\s*\n\s*needs: \[changes, validation\]/);
- assert.match(deploy,/frontend:\s*\n\s*needs: \[changes, validation, backend\]/);
+ assert.match(deploy,/frontend:\s*\n\s*needs: \[changes, validation, backend, backend-dev\]/);
 });
 test('missing OIDC roles fail explicitly and static credentials are never configured',()=>{
  const action=readFileSync(new URL('../../.github/actions/aws-oidc/action.yml',import.meta.url),'utf8');
