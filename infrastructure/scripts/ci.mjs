@@ -3,6 +3,7 @@ import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {validatePlanEncryptionKey} from './ci-lib.mjs';
+import {inspectCognitoRecovery,cognitoDomainAddress} from './cognito-recovery.mjs';
 import {guardFoundationPlan,stagedArtifactReferences} from './ci-lib.mjs';
 import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations,validateBackendConfig,resolveFreshDeployment,parseDeploymentConfig} from './ci-lib.mjs';
 const [command,...args]=process.argv.slice(2);
@@ -16,7 +17,25 @@ async function deploymentConfig(){
  console.log(raw?.trim()?'Using explicit CI_TF_VARS_JSON configuration (values withheld).':'Using reviewed dev ci.tfvars.json configuration.');
  return value;
 }
-if(command==='preflight'){
+if(command==='recover-cognito-domain'){
+ if(process.env.DEPLOY_ENV!=='dev'||process.env.AWS_ACCOUNT_ID!=='143671530412'||process.env.AWS_REGION!=='af-south-1'||process.env.GITHUB_REF!=='refs/heads/dev')throw Error('Cognito recovery is restricted to the dev branch/environment in account 143671530412, af-south-1.');
+ validateBackendConfig(process.env);
+ const execute=process.env.RECOVERY_EXECUTE==='true';
+ if(execute&&process.env.RECOVERY_CONFIRMATION!=='RECOVER DEV COGNITO DOMAIN')throw Error('Explicit confirmation RECOVER DEV COGNITO DOMAIN is required. No state changed.');
+ const readState=()=>JSON.parse(run('terraform',['state','pull']));
+ const description=JSON.parse(run('aws',['cognito-idp','describe-user-pool-domain','--domain','permissionhub-demo-dev','--region','af-south-1','--output','json']));
+ const report=inspectCognitoRecovery(readState(),description);
+ console.log(JSON.stringify(report));
+ if(!execute){console.log('Recovery dry-run only. State and AWS resources unchanged.');}
+ else if(!report.tainted){console.log('Domain already untainted; nothing changed.');}
+ else{
+  const versioning=JSON.parse(run('aws',['s3api','get-bucket-versioning','--bucket',process.env.STATE_BUCKET,'--expected-bucket-owner',process.env.AWS_ACCOUNT_ID]));
+  if(versioning.Status!=='Enabled')throw Error('Versioned state backups are required before recovery; enable bucket versioning through reviewed bootstrap. No state changed.');
+  run('terraform',['untaint','-lock-timeout=5m',cognitoDomainAddress]);
+  if(inspectCognitoRecovery(readState(),description).tainted)throw Error('Recovery could not verify cleared taint; inspect state before retrying deployment.');
+  console.log('Verified healthy Cognito domain untainted. No AWS resource was created, modified or deleted. Start a new deployment to generate a fresh plan.');
+ }
+}else if(command==='preflight'){
  const errors=[];
  try{validateBackendConfig(process.env);}catch(error){errors.push(error.message);}
  try{await deploymentConfig();}catch(error){errors.push(error.message);}

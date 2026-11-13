@@ -55,7 +55,7 @@ jobs:
       - run: npm run lint
       - run: npm test --workspace backend
       - run: npm test --workspace frontend
-      - run: node --test infrastructure/scripts/ci-lib.test.mjs infrastructure/scripts/workflows.test.mjs infrastructure/scripts/prepare-check.test.mjs
+      - run: node --test infrastructure/scripts/ci-lib.test.mjs infrastructure/scripts/workflows.test.mjs infrastructure/scripts/prepare-check.test.mjs infrastructure/scripts/cognito-recovery.test.mjs
       - name: Validate GitHub workflow syntax and expression types
         run: |
           set -euo pipefail
