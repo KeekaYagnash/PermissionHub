@@ -3,6 +3,15 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=name=>readFileSync(new URL(`../../.github/workflows/${name}`,import.meta.url),'utf8');
 
+test('configuration is validated in prepare before any artifact upload and in PR checks',()=>{
+ const backend=read('deploy-dev-backend.yml');
+ assert.ok(backend.indexOf('Validate deployment configuration before uploading artifacts')<backend.indexOf('Upload only changed artifacts'));
+ const cli=readFileSync(new URL('./ci.mjs',import.meta.url),'utf8');
+ assert.match(cli,/ci.tfvars.json/);
+ assert.doesNotMatch(cli,/JSON.parse\(process.env.CI_TF_VARS_JSON/);
+ assert.match(read('terraform-pr.yml'),/environments\/dev test -var-file=ci.tfvars.json/);
+});
+
 test('same-commit migration validation unblocks dev prepare without manual readiness variable',()=>{
  const validation=read('terraform-pr.yml'),backend=read('deploy-dev-backend.yml');
  assert.match(validation,/migrations_validated:[\s\S]*jobs.validate.outputs.migrations_validated/);

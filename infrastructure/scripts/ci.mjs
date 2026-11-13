@@ -2,11 +2,18 @@ import {readFile,writeFile,appendFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations,validateBackendConfig,resolveFreshDeployment} from './ci-lib.mjs';
+import {changes,guardPlan,artifactReferences,sealPlan,openPlan,publicFrontendConfig,deploymentEnvironment,validateIdentity,requireProtection,guardDestroy,assertDestroyPrepared,resources,controlledMigrations,validateBackendConfig,resolveFreshDeployment,parseDeploymentConfig} from './ci-lib.mjs';
 const [command,...args]=process.argv.slice(2);
 function run(tool,argv,options={}){const result=spawnSync(tool,argv,{encoding:'utf8',maxBuffer:40*1024*1024,...options});if(result.status!==0)throw Error(`${tool} failed: ${result.stderr}`);return result.stdout}
 const json=async path=>JSON.parse(await readFile(path,'utf8'));
 const output=async(key,value)=>{if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,`${key}=${value}\n`);else console.log(`${key}=${value}`)};
+async function deploymentConfig(){
+ const raw=process.env.CI_TF_VARS_JSON;
+ const fallback=process.env.DEPLOY_ENV==='dev'&&!raw?.trim()?await json(new URL('../terraform/environments/dev/ci.tfvars.json',import.meta.url)):undefined;
+ const value=parseDeploymentConfig(raw,fallback,process.env);
+ console.log(raw?.trim()?'Using explicit CI_TF_VARS_JSON configuration (values withheld).':'Using reviewed dev ci.tfvars.json configuration.');
+ return value;
+}
 if(command==='prepare-check'){
  validateBackendConfig(process.env);
  const directory=resolve(process.env.GITHUB_WORKSPACE??'.','artifacts');
@@ -20,10 +27,7 @@ if(command==='prepare-check'){
   if(bytes.length!==item.zipBytes||digest.toString('base64')!==item.sourceHash||digest.toString('hex')!==item.sha256)throw Error(`Artifact integrity check failed: ${name}`);
   if(item.handler!==`dist/lambda/${name}.handler`||!Number.isFinite(item.uncompressedBytes)||item.uncompressedBytes<=0||item.uncompressedBytes>=250*1024*1024)throw Error(`Invalid handler/size: ${name}`);
  }
- if(process.env.CI_TF_VARS_JSON){
-  const config=JSON.parse(process.env.CI_TF_VARS_JSON);
-  if(config.environment!==process.env.DEPLOY_ENV||config.aws_region!==process.env.AWS_REGION||config.lambda_artifact_bucket!==process.env.LAMBDA_ARTIFACT_BUCKET||!config.vpc_cidr)throw Error('Repository CI_TF_VARS_JSON does not match preparation environment.');
- }
+ await deploymentConfig();
  console.log('Backend preparation passed: backend settings, four ZIP hashes, sizes, handlers, and initial artifact references. No AWS access/upload/apply. Deployment-environment variables, secrets, live IAM and remote state are checked only in deployment.');
 }else if(command==='backend-config'){
  const config=validateBackendConfig(process.env);
@@ -74,8 +78,7 @@ if(command==='prepare-check'){
 }else if(command==='changes'){
  const paths=run('git',['diff','--name-only',args[0],args[1]]).trim().split(/\r?\n/);for(const [key,value] of Object.entries(changes(paths)))await output(key,String(value));
 }else if(command==='config'){
- const value=JSON.parse(process.env.CI_TF_VARS_JSON??'{}');
- if(!value.vpc_cidr||value.environment!==process.env.DEPLOY_ENV||value.aws_region!==process.env.AWS_REGION||value.lambda_artifact_bucket!==process.env.LAMBDA_ARTIFACT_BUCKET||value.aws_account_id&&value.aws_account_id!==process.env.AWS_ACCOUNT_ID)throw Error('CI_TF_VARS_JSON must contain reviewed configuration matching selected environment/account/region/artifact bucket. Do not use example defaults.');
+ const value=await deploymentConfig();
  await writeFile(args[0],JSON.stringify(value));
 }else if(command==='refs'){
  const state=JSON.parse(run('terraform',['show','-json']));

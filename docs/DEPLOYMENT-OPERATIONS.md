@@ -439,3 +439,21 @@ partial apply needs review and a controlled recovery, not another empty-state
 deployment. Production still requires explicit `fresh_deployment` and migration
 approval. Older instructions requiring explicit fresh mode for dev are superseded
 by this dev-only detection.
+# Terraform configuration source for CI
+
+For dev, an unset, empty or whitespace-only `CI_TF_VARS_JSON` now selects the
+reviewed `infrastructure/terraform/environments/dev/ci.tfvars.json`. This file
+contains non-secret networking/demo settings and the independently managed dev
+runtime boundary ARN. Artifact keys/hashes still come from the actual build
+manifest, not placeholder ZIP names. It intentionally omits credentials and
+provider client secrets. Keep this CI configuration aligned with local
+`terraform.tfvars` when intentionally changing dev settings.
+
+A non-empty GitHub Variable overrides the file and must be a complete valid JSON
+object matching the selected environment, region and artifact bucket. Malformed
+or truncated overrides fail with a named error rather than falling back silently.
+Production still requires explicit `CI_TF_VARS_JSON`; it never uses dev settings.
+The configuration is checked before uploads, in PR preparation, and through a
+credential-free mocked Terraform dev plan. Deployment-environment overrides are
+only visible to the deployment job, not the PR job. `TF_PLAN_ENCRYPTION_KEY`
+remains a required GitHub Environment secret and must not be committed here.

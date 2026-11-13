@@ -86,6 +86,7 @@ jobs:
             terraform -chdir=infrastructure/terraform/environments/$environment validate
           done
           terraform -chdir=infrastructure/terraform/environments/prod test
+          terraform -chdir=infrastructure/terraform/environments/dev test -var-file=ci.tfvars.json
           terraform -chdir=infrastructure/terraform/bootstrap/github-dev init -backend=false
           terraform -chdir=infrastructure/terraform/bootstrap/github-dev validate
           terraform -chdir=infrastructure/terraform/bootstrap/github-dev test
