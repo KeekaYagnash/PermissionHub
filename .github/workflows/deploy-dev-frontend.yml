@@ -30,11 +30,11 @@ jobs:
       - run: npm test --workspace frontend
       - name: Require configured frontend OIDC role
         env:
-          ROLE: ${{ vars.AWS_FRONTEND_ROLE_ARN }}
+          ROLE: ${{ (vars.AWS_FRONTEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-frontend-dev' || '')) }}
         run: test -n "$ROLE" || { echo 'AWS_FRONTEND_ROLE_ARN missing; no static credential fallback.'; exit 1; }
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ vars.AWS_FRONTEND_ROLE_ARN }}
+          role-to-assume: ${{ (vars.AWS_FRONTEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-frontend-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - run: aws sts get-caller-identity
       - name: Validate public frontend configuration

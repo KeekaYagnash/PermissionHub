@@ -2,6 +2,21 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=name=>readFileSync(new URL(`../../.github/workflows/${name}`,import.meta.url),'utf8');
+
+test('dev deployment uses supplied OIDC role ARNs without a production or PR fallback',()=>{
+ for(const file of ['deploy-dev-backend.yml','deploy-dev-frontend.yml','verify-aws-oidc.yml','destroy-infrastructure.yml']){
+  const code=read(file);
+  const fallbacks=[...code.matchAll(/inputs.environment == 'dev' && '(arn:aws:iam::143671530412:role\/permissionhub-github-(terraform|backend|frontend)-dev)' \|\| ''/g)];
+  assert.ok(fallbacks.length>0,`${file} must include dev-only OIDC defaults`);
+  for(const line of code.split('\n').filter(line=>/vars\.AWS_\w+_ROLE_ARN/.test(line))){
+   assert.match(line,/vars\.AWS_\w+_ROLE_ARN \|\| \(inputs.environment == 'dev'/);
+  }
+ }
+ assert.doesNotMatch(read('terraform-pr.yml'),/permissionhub-github-(terraform|backend|frontend)-dev/);
+ const deploy=read('deploy.yml');
+ assert.match(deploy,/backend:\s*\n\s*needs: \[changes, validation\]/);
+ assert.match(deploy,/frontend:\s*\n\s*needs: \[changes, validation, backend\]/);
+});
 test('missing OIDC roles fail explicitly and static credentials are never configured',()=>{
  const action=readFileSync(new URL('../../.github/actions/aws-oidc/action.yml',import.meta.url),'utf8');
  assert.match(action,/Missing\/invalid OIDC role ARN/);

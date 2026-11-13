@@ -1,5 +1,30 @@
 # Dev GitHub OIDC bootstrap — authoritative setup
 
+## Existing account provider
+
+The existing provider is `arn:aws:iam::143671530412:oidc-provider/token.actions.githubusercontent.com`.
+Keep `create_oidc_provider = false` (the default and current local bootstrap configuration).
+All three `permissionhub-github-{terraform,backend,frontend}-dev` role trust policies
+reference this ARN. Terraform reads the provider as a data source, checks that its
+audiences include `sts.amazonaws.com`, and does not manage its thumbprints or lifecycle.
+Do not import this shared provider into application state or recreate it.
+The `github_oidc_provider_arn` bootstrap output exposes the selected ARN for review.
+
+Read-only verification and local validation (these commands do not create roles):
+
+```powershell
+aws iam get-open-id-connect-provider --open-id-connect-provider-arn arn:aws:iam::143671530412:oidc-provider/token.actions.githubusercontent.com --query '{Url:Url,Audiences:ClientIDList}'
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev init -backend=false
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev validate
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev test
+```
+
+Role creation still requires a separately reviewed bootstrap plan and approval.
+The bootstrap now restricts these dev roles to `refs/heads/dev` and the
+`development` environment. Existing AWS role trust policies only change after
+an operator reviews and applies the independent bootstrap plan. The main-only
+instructions further below are historical; use the current deployment guide.
+
 **Historical bootstrap guide:** the infrastructure in this root is intentionally
 unchanged by the dev/prod CI/CD update. Its current trust still requires main.
 The operator must separately change dev trust to refs/heads/dev, retaining the

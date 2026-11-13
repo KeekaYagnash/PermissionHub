@@ -52,7 +52,7 @@ jobs:
           node-version: 22
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ (vars.AWS_PLAN_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -94,7 +94,7 @@ jobs:
           node-version: 22
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ vars.AWS_ARTIFACT_ROLE_ARN }}
+          role-to-assume: ${{ (vars.AWS_ARTIFACT_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - run: aws sts get-caller-identity
       - uses: hashicorp/setup-terraform@v3
@@ -144,7 +144,7 @@ jobs:
           node-version: 22
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ vars.AWS_BACKEND_ROLE_ARN }}
+          role-to-assume: ${{ (vars.AWS_BACKEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - run: aws sts get-caller-identity
       - uses: hashicorp/setup-terraform@v3
@@ -189,7 +189,7 @@ jobs:
           node-version: 22
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ (vars.AWS_PLAN_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - run: aws sts get-caller-identity
       - uses: hashicorp/setup-terraform@v3
@@ -244,7 +244,7 @@ jobs:
           node-version: 22
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ inputs.infrastructure && vars.AWS_INFRA_ROLE_ARN || vars.AWS_BACKEND_ROLE_ARN }}
+          role-to-assume: ${{ inputs.infrastructure && (vars.AWS_INFRA_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) || (vars.AWS_BACKEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - run: aws sts get-caller-identity
       - uses: hashicorp/setup-terraform@v3
@@ -276,7 +276,7 @@ jobs:
         if: inputs.fresh_deployment
         uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ vars.AWS_BACKEND_ROLE_ARN }}
+          role-to-assume: ${{ (vars.AWS_BACKEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Initialize a fresh database only after infrastructure exists
         if: inputs.fresh_deployment

@@ -58,7 +58,7 @@ jobs:
           fi
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN }}
+          role-to-assume: ${{ (vars.AWS_INFRA_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -124,7 +124,7 @@ jobs:
           else node infrastructure/scripts/ci.mjs protection development-destroy; fi
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN }}
+          role-to-assume: ${{ (vars.AWS_INFRA_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) }}
           aws-region: ${{ env.AWS_REGION }}
       - uses: hashicorp/setup-terraform@v3
         with:

@@ -24,13 +24,13 @@ jobs:
       - name: Require selected deployment branch and explicit role
         env:
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
-          ROLE: ${{ matrix.role == 'terraform' && vars.AWS_INFRA_ROLE_ARN || matrix.role == 'backend' && vars.AWS_BACKEND_ROLE_ARN || vars.AWS_FRONTEND_ROLE_ARN }}
+          ROLE: ${{ matrix.role == 'terraform' && (vars.AWS_INFRA_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) || matrix.role == 'backend' && (vars.AWS_BACKEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' || '')) || (vars.AWS_FRONTEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-frontend-dev' || '')) }}
         run: |
           node infrastructure/scripts/ci.mjs environment
           test -n "$ROLE" || { echo 'Required OIDC role variable missing; configure selected environment.'; exit 1; }
       - uses: ./.github/actions/aws-oidc
         with:
-          role-to-assume: ${{ matrix.role == 'terraform' && vars.AWS_INFRA_ROLE_ARN || matrix.role == 'backend' && vars.AWS_BACKEND_ROLE_ARN || vars.AWS_FRONTEND_ROLE_ARN }}
+          role-to-assume: ${{ matrix.role == 'terraform' && (vars.AWS_INFRA_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' || '')) || matrix.role == 'backend' && (vars.AWS_BACKEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-backend-dev' || '')) || (vars.AWS_FRONTEND_ROLE_ARN || (inputs.environment == 'dev' && 'arn:aws:iam::143671530412:role/permissionhub-github-frontend-dev' || '')) }}
           aws-region: ${{ vars.AWS_REGION || 'af-south-1' }}
       - name: Show assumed identity (no resource mutations)
         env:

@@ -24,7 +24,11 @@ variable "state_bucket" { default = "permissionhub-dev-bucket" }
 variable "state_key" { default = "permissionhub/dev/terraform.tfstate" }
 variable "lock_table" { default = "permissionhub-state-lock" }
 variable "artifact_bucket" { default = "permissionhub-dev-lambda-artifacts" }
-variable "create_oidc_provider" { default = false }
+variable "create_oidc_provider" {
+  type        = bool
+  default     = false
+  description = "Keep false to reference the existing account GitHub OIDC provider without importing, replacing, or modifying it."
+}
 variable "create_state_bucket" { default = false }
 variable "create_artifact_bucket" { default = false }
 variable "create_lock_table" { default = false }
@@ -45,7 +49,7 @@ locals {
       Condition = { StringEquals = {
         "token.actions.githubusercontent.com:aud"         = "sts.amazonaws.com",
         "token.actions.githubusercontent.com:sub"         = "repo:${var.github_repository}:environment:${var.github_environment}",
-        "token.actions.githubusercontent.com:ref"         = "refs/heads/main",
+        "token.actions.githubusercontent.com:ref"         = "refs/heads/dev",
         "token.actions.githubusercontent.com:environment" = var.github_environment
       } }
     }]
@@ -144,8 +148,9 @@ resource "aws_dynamodb_table" "locks" {
   }
   lifecycle { prevent_destroy = true }
 }
+output "github_oidc_provider_arn" { value = local.provider_arn }
+# output "runtime_permissions_boundary_arn" { value = local.boundary_arn }
+# output "trust_policy" { value = local.trust_policy }
+# output "permission_policies" { value = local.role_policies }
+# output "runtime_boundary" { value = local.runtime_boundary }
 output "role_arns" { value = { for name, role in aws_iam_role.deploy : name => role.arn } }
-output "runtime_permissions_boundary_arn" { value = local.boundary_arn }
-output "trust_policy" { value = local.trust_policy }
-output "permission_policies" { value = local.role_policies }
-output "runtime_boundary" { value = local.runtime_boundary }
