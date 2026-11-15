@@ -47,7 +47,7 @@ run "existing_domain_sender_is_scoped_to_configured_mailbox" {
   command = plan
   variables {
     invitation_ses_identity_arn = "arn:aws:ses:us-east-1:143671530412:identity/disraptor-internal.net"
-    environment_variables      = { APP_AWS_REGION = "af-south-1", SES_REGION = "us-east-1", SES_FROM_EMAIL = "notifications@disraptor-internal.net" }
+    environment_variables       = { APP_AWS_REGION = "af-south-1", SES_REGION = "us-east-1", SES_FROM_EMAIL = "notifications@disraptor-internal.net" }
   }
   assert {
     condition = length([for statement in jsondecode(aws_iam_role_policy.runtime.policy).Statement : statement
