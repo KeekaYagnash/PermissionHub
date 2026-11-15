@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
 import AuthGate from './components/AuthGate';
+import {PublicThemeControl} from './components/ThemeControl';
 import { useAuthStore } from './store/auth';
 import { can, type Capability } from './lib/authz';
 
@@ -23,7 +24,7 @@ const Profile=lazy(()=>import('./pages/Profile'));
 const CompleteProfile=lazy(()=>import('./pages/CompleteProfile'));
 
 export default function App(){
- return <Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
+ return <><PublicThemeControl/><Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
   <Routes>
    <Route path="login" element={<Login/>}/>
    <Route path="auth/callback" element={<Login/>}/>
@@ -48,7 +49,7 @@ export default function App(){
    </Route>
    <Route path="*" element={<Navigate to="/" replace/>}/>
   </Routes>
- </Suspense>;
+ </Suspense></>;
 }
 
 function RequireCapability({capability,children}:{capability:Capability;children:ReactNode}){

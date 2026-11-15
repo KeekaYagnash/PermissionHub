@@ -2,6 +2,28 @@
 
 ## Existing account provider
 
+### HTTP API access-log delivery
+
+API Gateway HTTP API access logging needs CloudWatch Logs delivery permissions
+on the deployment caller, separately from creating a log group or allowing Lambda
+to write logs. The bootstrap now attaches
+`permissionhub-github-terraform-logging-dev` to the Terraform deployment role.
+It includes Create/Get/Update/Delete/ListLogDelivery, DescribeResourcePolicies and
+PutResourcePolicy with `Resource: "*"`, restricted to the configured region.
+The wildcard is needed for these delivery/resource-policy operations; it can
+affect other log deliveries/resource policies in that region and is not restricted
+to one log group. Read-only event/stream inspection is limited to the dev HTTP API
+log group. Existing scoped CreateLogGroup and DescribeLogGroups permissions remain
+in the platform/discovery policies. Access logging is not disabled as a workaround.
+
+This separate policy keeps each managed policy under IAM's 6,144-character limit.
+The policy renderer and existing-resource discovery/import list include it. Apply
+the reviewed independent bootstrap plan using administrator credentials before
+retrying API Gateway stage creation. The GitHub deployment role cannot grant
+these permissions to itself.
+
+Reference: [AWS HTTP API logging permissions](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-logging.html).
+
 ### Requested dev storage permissions
 
 All three dev GitHub deployment roles now receive the inline policy

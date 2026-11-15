@@ -1,0 +1,31 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "HttpApiAccessLogDelivery",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogDelivery",
+        "logs:GetLogDelivery",
+        "logs:UpdateLogDelivery",
+        "logs:DeleteLogDelivery",
+        "logs:ListLogDeliveries",
+        "logs:DescribeResourcePolicies",
+        "logs:PutResourcePolicy"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {"aws:RequestedRegion": "${region}"}
+      }
+    },
+    {
+      "Sid": "HttpApiAccessLogInspection",
+      "Effect": "Allow",
+      "Action": ["logs:DescribeLogStreams", "logs:GetLogEvents", "logs:FilterLogEvents"],
+      "Resource": [
+        "arn:aws:logs:${region}:${account_id}:log-group:/aws/apigateway/permissionhub-dev",
+        "arn:aws:logs:${region}:${account_id}:log-group:/aws/apigateway/permissionhub-dev:*"
+      ]
+    }
+  ]
+}

@@ -13,9 +13,27 @@ run "exact_trust_and_three_roles" {
     create_lock_table      = true
   }
   assert {
+    condition     = toset(local.role_policies["terraform-logging"].Statement[0].Action) == toset(["logs:CreateLogDelivery", "logs:GetLogDelivery", "logs:UpdateLogDelivery", "logs:DeleteLogDelivery", "logs:ListLogDeliveries", "logs:DescribeResourcePolicies", "logs:PutResourcePolicy"]) && local.role_policies["terraform-logging"].Statement[0].Resource == "*" && local.role_policies["terraform-logging"].Statement[0].Condition.StringEquals["aws:RequestedRegion"] == "af-south-1" && aws_iam_role_policy_attachment.deploy["terraform-logging"].role == "permissionhub-github-terraform-dev"
+    error_message = "HTTP API logging requires the complete regional log-delivery permission set attached to the Terraform role."
+  }
+  assert {
+    condition = length([
+      for statement in local.role_policies["terraform-platform"].Statement : statement
+      if try(statement.Sid == "HttpApiConfiguration" && contains(statement.Action, "apigateway:POST") && contains(statement.Action, "apigateway:TagResource") && contains(statement.Action, "apigateway:UntagResource") && statement.Resource == "arn:aws:apigateway:af-south-1::*", false)
+    ]) == 1
+    error_message = "Tagged API Gateway stage creation and subsequent tag updates require explicit TagResource/UntagResource permissions alongside the HTTP management actions."
+  }
+  assert {
+    condition = alltrue([for name in ["terraform-platform", "terraform-discovery", "backend"] : length([
+      for statement in local.role_policies[name].Statement : statement
+      if try(contains(statement.Resource, "arn:aws:logs:af-south-1:143671530412:log-group:/aws/apigateway/permissionhub-dev") && contains(statement.Resource, "arn:aws:logs:af-south-1:143671530412:log-group:/aws/apigateway/permissionhub-dev:*"), false)
+    ]) >= 1])
+    error_message = "API Gateway uses the exact /aws/apigateway/permissionhub-dev name, without a hyphen suffix; read/write permissions must cover both ARN forms."
+  }
+  assert {
     condition = alltrue([for name in ["terraform-discovery", "backend"] : length([
       for statement in local.role_policies[name].Statement : statement
-      if try(statement.Sid == "LogRead" && contains(statement.Action, "logs:ListTagsForResource") && contains(statement.Action, "logs:ListTagsLogGroup") && contains(statement.Resource, "arn:aws:logs:af-south-1:143671530412:log-group:/aws/lambda/permissionhub-dev-*") && contains(statement.Resource, "arn:aws:logs:af-south-1:143671530412:log-group:/aws/apigateway/permissionhub-dev-*"), false)
+      if try(statement.Sid == "LogRead" && contains(statement.Action, "logs:ListTagsForResource") && contains(statement.Action, "logs:ListTagsLogGroup") && contains(statement.Resource, "arn:aws:logs:af-south-1:143671530412:log-group:/aws/lambda/permissionhub-dev-*") && contains(statement.Resource, "arn:aws:logs:af-south-1:143671530412:log-group:/aws/apigateway/permissionhub-dev"), false)
     ]) == 1])
     error_message = "Terraform/backend log tag reads must support the modern API and bare log-group ARNs for Lambda and API Gateway."
   }
