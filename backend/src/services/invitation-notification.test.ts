@@ -28,6 +28,12 @@ describe('invitation email integration',()=>{
   const {service,send,updateMany}=setup();send.mockRejectedValue(new Error('SES unavailable'));updateMany.mockRejectedValue(new Error('metadata unavailable'));
   await expect(service.invite(actor,'tenant','invitee@example.invalid','REQUESTER')).resolves.toMatchObject({id:'invite',status:'PENDING',deliveryStatus:'FAILED'});
  });
+ it('returns an actionable sanitized permission error without undoing the invitation',async()=>{
+  const {service,send}=setup();send.mockRejectedValue({name:'AccessDeniedException',message:'secret recipient and token', $metadata:{requestId:'12345678-abcd-1234-abcd-123456789012'}});
+  const result=await service.invite(actor,'tenant','invitee@example.invalid','REQUESTER');
+  expect(result).toMatchObject({status:'PENDING',deliveryStatus:'FAILED',deliveryError:{code:'EMAIL_ACCESS_DENIED',awsRequestId:'12345678-abcd-1234-abcd-123456789012'}});
+  expect(result.message).toContain('permissions boundary');expect(JSON.stringify(result)).not.toContain('secret recipient and token');
+ });
  it('rotates the proof for an intentional repeated invitation, without storing plaintext tokens',async()=>{
   const {service,upsert}=setup();await service.invite(actor,'tenant','invitee@example.invalid','REQUESTER');await service.invite(actor,'tenant','invitee@example.invalid','REQUESTER');
   expect(upsert.mock.calls[0]![0].create.tokenHash).not.toBe(upsert.mock.calls[1]![0].create.tokenHash);

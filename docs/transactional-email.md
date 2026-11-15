@@ -1,5 +1,46 @@
 # PermissionHub transactional email
 
+## Repairing the deployed dev sender
+
+Two repository configuration gaps were found after the first email release:
+
+- The reviewed dev `ci.tfvars.json` omitted the SES identity ARN, so deployments using it disabled email and omitted the API role's SES allow statement. It now includes the existing `info@disraptor.co.za` identity in us-east-1.
+- The independent runtime boundary omitted SES. A role's `ses:SendEmail` policy cannot exceed that boundary. The boundary template now allows only `ses:SendEmail` on the two existing us-east-1 identities, with a sender-address restriction. CI identity/runtime-role protections remain unchanged.
+
+These are confirmed repository defects, not a claim that live CloudWatch logs or deployed policies have been inspected. No live AWS access or email send was used to investigate. SES sandbox/network/account issues still require live verification if delivery fails after configuration is corrected.
+
+### One-time operator update (changes AWS; not executed by Codex)
+
+Use the **existing independent bootstrap state** and an authorized bootstrap operator identity. App deployment roles intentionally cannot modify their own runtime boundary. Do not create new bootstrap state or recreate the application.
+
+```powershell
+# Read-only local state check. Stop if this policy is not in the expected bootstrap state.
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev state show aws_iam_policy.runtime_boundary
+
+# Plan the one policy update; inspect the plan before applying.
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev plan -target=aws_iam_policy.runtime_boundary -out=email-boundary.tfplan
+
+# Only after reviewing that plan (operator action; modifies AWS).
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev apply email-boundary.tfplan
+```
+
+Then deploy the updated application configuration/backend through the existing dev pipeline and use the existing invitation **Resend** action. No frontend update is needed for the new actionable error message. No new database migration is added by this repair; the previous email outbox migration is still required for request notifications.
+
+If the GitHub `development` Environment supplies **CI_TF_VARS_JSON**, it overrides the checked-in fallback. Add these two fields to that JSON as well; an explicit null still means intentionally disabled:
+
+```json
+"invitation_ses_identity_arn": "arn:aws:ses:us-east-1:143671530412:identity/info@disraptor.co.za",
+"invitation_sender_email": "info@disraptor.co.za"
+```
+
+### Read-only deployed check (operator command; no email sent)
+
+```powershell
+aws lambda get-function-configuration --function-name permissionhub-dev-api --region af-south-1 --query '{Role:Role,EmailMode:Environment.Variables.INVITATION_EMAIL_MODE,Notifications:Environment.Variables.NOTIFICATION_EMAIL_MODE,Sender:Environment.Variables.SES_FROM_EMAIL,SESRegion:Environment.Variables.SES_REGION}' --no-cli-pager
+```
+
+The result should show `ses`, `info@disraptor.co.za`, and `us-east-1`. Never dump all environment variables, app secrets or credentials. Invitation failures now show a safe error code/message in the existing UI and log `INVITATION_EMAIL_DELIVERY_FAILED` with the AWS request ID when available. Request failures log the same sanitized cause alongside their receipt ID. No raw SDK error message, recipient address, message body, invitation proof or credentials are logged. Distinguish `EMAIL_DISABLED`, `EMAIL_ACCESS_DENIED`/`EMAIL_BOUNDARY_DENIED`, `EMAIL_IDENTITY_NOT_VERIFIED`, `EMAIL_TIMEOUT` and `EMAIL_STORAGE_UNAVAILABLE` before changing more configuration.
+
 ## Scope and security
 
 Emails cover organization invitations, submitted requests/current approval stages, **completed** approval, rejection (with the saved reason), confirmed `Provisioned` state, and `Provisioning failed` state. Draft creation, simulation and dry-run provisioning do not generate access-granted emails. Intermediate approvals notify the next eligible reviewers, not a premature final-approval email to the requester. Invitation acceptance confirmations remain supported.
