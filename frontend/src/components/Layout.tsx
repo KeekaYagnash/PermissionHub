@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState, type ComponentType, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentType, type RefObject } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Activity, FileKey2, GitPullRequestArrow, Grid3X3, Home, KeyRound, Laptop, LogOut, PlugZap, Settings, SunMoon, UserRoundCog, X } from 'lucide-react';
+import { Activity, FileKey2, GitPullRequestArrow, Grid3X3, Home, KeyRound, LogOut, PlugZap, Settings, UserRoundCog, X } from 'lucide-react';
 import { useQuery,useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { cognitoEnabled,logoutCognito } from '../lib/cognito';
 import { isNavActive, navItems, visibleNavItems, type NavKey } from '../lib/navigation';
-import { useThemePreference } from '../lib/theme';
+import { ThemeControl } from './ThemeControl';
 import { useAuthStore } from '../store/auth';
 import { shouldAutoSelectAccount } from '../lib/auth';
 
@@ -26,6 +26,7 @@ export default function Layout(){
  const context=useQuery({queryKey:['auth-context',session?.user?.activeTenantId,activeAwsAccountRecordId],queryFn:api.context});
  const {data}=useQuery({queryKey:['connection',activeAwsAccountRecordId],queryFn:api.connection,refetchInterval:60000,enabled:Boolean(activeAwsAccountRecordId)});
  const [drawerOpen,setDrawerOpen]=useState(false);
+ const closeDrawer=useCallback(()=>setDrawerOpen(false),[]);
  const menuButtonRef=useRef<HTMLButtonElement>(null);
  const location=useLocation();
  useEffect(()=>{if(shouldAutoSelectAccount(context.data))void api.selectAccount(context.data!.accounts[0]!.id).then(value=>{setSession(value);queryClient.clear()})},[context.data,queryClient,setSession]);
@@ -38,11 +39,12 @@ export default function Layout(){
   return ()=>media.removeEventListener('change',sync);
  },[]);
  return <div className="app">
+  <a className="skip-link" href="#main-content">Skip to main content</a>
   {session?.developmentAuthenticationActive&&<div className="development-auth-banner" role="status">Development authentication is active</div>}
   <AppHeader connection={data} context={context.data} contextError={Boolean(context.error)} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen}/>
-  <main id="main-content"><Outlet key={activeAwsAccountRecordId??'no-aws-account'}/></main>
+  <main id="main-content" tabIndex={-1} inert={drawerOpen||undefined}><Outlet key={activeAwsAccountRecordId??'no-aws-account'}/></main>
   <MobileBottomNavigation drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} menuButtonRef={menuButtonRef}/>
-  <MobileNavigationDrawer open={drawerOpen} onClose={()=>setDrawerOpen(false)} connection={data} context={context.data} returnFocusRef={menuButtonRef}/>
+  <MobileNavigationDrawer open={drawerOpen} onClose={closeDrawer} connection={data} context={context.data} returnFocusRef={menuButtonRef}/>
  </div>;
 }
 
@@ -97,9 +99,10 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
  const session=useAuthStore(state=>state.session);
  useEffect(()=>{
   if(!open)return;
+  const previousFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
   const previousOverflow=document.body.style.overflow;
   document.body.style.overflow='hidden';
-  window.setTimeout(()=>closeRef.current?.focus(),0);
+  const focusTimer=window.setTimeout(()=>closeRef.current?.focus(),0);
   const onKeyDown=(event:KeyboardEvent)=>{
    if(event.key==='Escape'){event.preventDefault();onClose();return}
    if(event.key!=='Tab'||!drawerRef.current)return;
@@ -110,7 +113,7 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
    else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
   };
   document.addEventListener('keydown',onKeyDown);
-  return ()=>{document.body.style.overflow=previousOverflow;document.removeEventListener('keydown',onKeyDown);returnFocusRef.current?.focus()};
+  return ()=>{window.clearTimeout(focusTimer);document.body.style.overflow=previousOverflow;document.removeEventListener('keydown',onKeyDown);(previousFocus?.isConnected?previousFocus:returnFocusRef.current)?.focus()};
  },[open,onClose,returnFocusRef]);
  if(!open)return null;
  return <div className="drawer-layer" role="presentation">
@@ -121,14 +124,6 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
    <section className="drawer-utilities" aria-label="Utilities"><h2>Active context</h2><ContextBar connection={connection} context={context} compact/><ThemeControl/><UserMenu/></section>
   </aside>
  </div>;
-}
-
-function ThemeControl({compact=false}:{compact?:boolean}){
- const theme=useThemePreference();
- const nextTheme=theme.preference==='system'?'light':theme.preference==='light'?'dark':'system';
- return <button className={compact?'theme-toggle compact':'theme-toggle'} onClick={()=>theme.setPreference(nextTheme)} title={`Theme: ${theme.preference}. Switch to ${nextTheme}.`} aria-label={`Theme: ${theme.preference}. Switch to ${nextTheme}.`}>
-  {theme.preference==='system'?<Laptop size={16}/>:<SunMoon size={16}/>}<span>{theme.preference}</span>
- </button>;
 }
 
 function ConnectionDot({connection}:{connection:any}){return <span className={connection?.connected?'connection-dot connected':'connection-dot mock'} aria-label={connection?.connected?'AWS connected':'AWS disconnected'}/>}
