@@ -22,6 +22,25 @@ function renderDetail(value:PermissionRequest=request){const client=new QueryCli
 beforeEach(()=>{useAuthStore.setState({session,loading:false});vi.mocked(api.request).mockResolvedValue(request);vi.mocked(api.approvers).mockResolvedValue([]);vi.mocked(api.activity).mockResolvedValue({data:[],pagination:{page:1,pageSize:10,total:0,totalPages:1}} as any);vi.mocked(api.connection).mockResolvedValue({} as any)});
 afterEach(()=>{cleanup();vi.clearAllMocks();useAuthStore.getState().clear()});
 describe('request provisioning capability UI',()=>{
+ it('allows approved IAM role provisioning when the server validates stored credentials without a provision-role ARN',async()=>{
+  useAuthStore.setState({session:{...session,user:{...session.user!,permissions:[...session.user!.permissions,'PROVISION_EXECUTE']}}});
+  const value:PermissionRequest={...request,targetType:'ROLE',targetName:'FinanceReader',status:'Approved',reviewCapabilities:{...capabilities,provisioningMode:'live',canProvision:true,planValid:true,checklist:[{key:'provisionRole',label:'Connected credentials',passed:true}]}};
+  vi.mocked(api.request).mockResolvedValue(value);renderDetail(value);
+  expect((await screen.findByRole('button',{name:'Provision access'}) as HTMLButtonElement).disabled).toBe(false);
+  expect(api.provision).not.toHaveBeenCalled();
+ });
+ it('does not enable role provisioning when server credential validation fails',async()=>{
+  useAuthStore.setState({session:{...session,user:{...session.user!,permissions:[...session.user!.permissions,'PROVISION_EXECUTE']}}});
+  const value:PermissionRequest={...request,targetType:'ROLE',status:'Approved',reviewCapabilities:{...capabilities,provisioningMode:'live',checklist:[{key:'provisionRole',label:'Provision role validated',passed:false}]}};
+  vi.mocked(api.request).mockResolvedValue(value);renderDetail(value);
+  expect((await screen.findByRole('button',{name:'Provision access'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.provision).not.toHaveBeenCalled();
+ });
+ it('shows a recoverable loading failure instead of an endless skeleton',async()=>{
+  vi.mocked(api.request).mockRejectedValue(new Error('Connection unavailable'));renderDetail();
+  expect(await screen.findByText('Unable to open this request')).toBeTruthy();
+  expect(screen.getByRole('link',{name:'Back to Requests'})).toBeTruthy();
+ });
  it('renders blocker codes and remediation',()=>{const html=renderToStaticMarkup(<CapabilityChecklist capabilities={capabilities}/>);expect(html).toContain('CURRENT_USER_NOT_ELIGIBLE_APPROVER');expect(html).toContain('Assign the required reviewer role.');expect(html).toContain('SECURITY_REVIEWER');expect(html).toContain('ORGANISATION_ADMIN')});
  it('requires the exact request phrase and both acknowledgements',()=>{expect(isLiveConfirmationReady('PR-1009','PROVISION PR-1009',true,true)).toBe(true);expect(isLiveConfirmationReady('PR-1009','PROVISION PR-1008',true,true)).toBe(false);expect(isLiveConfirmationReady('PR-1009','PROVISION PR-1009',false,true)).toBe(false)});
  it('renders the development bypass without a Provisioner role',()=>{const html=renderToStaticMarkup(<CapabilityChecklist capabilities={{...capabilities,provisioningMode:'local',localProvisioningEnabled:true,canApprove:true,canProvision:true,approvalAllowed:true,provisioningAllowed:true,blockingReasons:[],requiredApproverRoles:['DEVELOPMENT_REVIEW'],currentUserRoles:['REQUESTER'],checklist:[{key:'local',label:'Development provisioning authorization bypass',passed:true}]}}/>);expect(html).toContain('Development provisioning authorization bypass');expect(html).toContain('DEVELOPMENT_REVIEW');expect(html).toContain('REQUESTER')});

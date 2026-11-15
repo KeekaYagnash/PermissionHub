@@ -22,6 +22,8 @@ describe('responsive visual refresh contracts',()=>{
  });
  it('keeps compact navigation, dialog constraints, touch targets and reduced motion',()=>{
   for(const declaration of ['min-width: 1024px','max-width: 1023px','max-width: 720px','max-height: calc(100dvh - 24px)','min-height: 44px','prefers-reduced-motion','focus-visible','.skip-link:focus','overscroll-behavior-x: contain'])expect(css).toContain(declaration);
-  expect(css).toContain('.mobile-bottom-nav > * { flex: 1; min-width: 0; }');
+  expect(css).toContain('--mobile-bottom-nav-height: 0px');
+  expect(css).toContain('.mobile-context-strip .context-bar { display: flex;');
+  expect(css).toContain('.theme-toggle.compact svg { display: block; }');
  });
 });

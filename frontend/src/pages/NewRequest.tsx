@@ -177,6 +177,7 @@ function submit(){
 
  return <div className="page request-workflow">
   <PageHeader eyebrow="New request" title="Request an IAM permission change" description="Select the identity, permissions, scope, timing and justification. AWS changes are not made until approval and provisioning." />
+  {isRole&&<div className="info-note compact"><strong>Requesting access for an IAM role</strong><p>Choose whether to create or update a role. A trust relationship controls who can assume it; attached policies control what it can do. Your request will be reviewed before any AWS change is made.</p></div>}
   {toast&&<div className="toast" role="status"><Check size={15}/>{toast}<button onClick={()=>setToast(undefined)} aria-label="Dismiss notification"><X size={14}/></button></div>}
   <div className="wizard">
    <div className="mobile-step-header" aria-live="polite"><span>Step {step} of {steps.length}</span><strong>{steps[step-1]}</strong><i style={{width:`${(step/steps.length)*100}%`}}/></div>

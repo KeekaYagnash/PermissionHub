@@ -6,8 +6,7 @@ const changeEvent='permissionhub:theme-change';
 let unavailableStoragePreference:ThemePreference|undefined;
 
 export function applyThemePreference(preference:ThemePreference){
- const systemDark=window.matchMedia('(prefers-color-scheme: dark)').matches;
- const resolved=preference==='system'?(systemDark?'dark':'light'):preference;
+ const resolved=preference==='dark'?'dark':'light';
  document.documentElement.dataset.theme=resolved;
  document.documentElement.style.colorScheme=resolved;
 }
@@ -16,8 +15,8 @@ export function readThemePreference():ThemePreference{
  if(unavailableStoragePreference)return unavailableStoragePreference;
  try{
   const stored=localStorage.getItem(key);
-  return stored==='light'||stored==='dark'||stored==='system'?stored:'system';
- }catch{return 'system'}
+  return stored==='dark'?'dark':'light';
+ }catch{return 'light'}
 }
 
 export function setThemePreference(preference:ThemePreference){
@@ -34,8 +33,7 @@ function subscribe(listener:()=>void){
 }
 
 export function useThemePreference(){
- const preference=useSyncExternalStore(subscribe,readThemePreference,()=> 'system' as ThemePreference);
+ const preference=useSyncExternalStore(subscribe,readThemePreference,()=> 'light' as ThemePreference);
  useEffect(()=>{applyThemePreference(preference)},[preference]);
- useEffect(()=>{const media=window.matchMedia('(prefers-color-scheme: dark)');const listener=()=>preference==='system'&&applyThemePreference('system');media.addEventListener('change',listener);return()=>media.removeEventListener('change',listener)},[preference]);
  return {preference,setPreference:setThemePreference};
 }
