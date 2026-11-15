@@ -4,6 +4,7 @@ import { logger } from '../config/logger.js';
 import type {AccountType,PermissionRequest,PermissionRequestItem,RequestStatus,SessionUser} from '../types.js';
 import { ApiError } from '../utils/http.js';
 import {requests as memoryRequests} from './mock.service.js';
+import {requestNotifications} from './request-notification.runtime.js';
 import {grants as memoryGrants} from './mock.service.js';
 
 type JsonObject=Record<string,unknown>;
@@ -106,7 +107,7 @@ export const requestRepository={
   return request;
  },
  async save(request:PermissionRequest,expectedApprovalStages?:string[]){
-  if(useMemoryOnly()){const index=memoryRequests.findIndex(item=>item.id===request.id);if(index>=0)memoryRequests[index]=request;else memoryRequests.unshift(request);return request}
+  if(useMemoryOnly()){const index=memoryRequests.findIndex(item=>item.id===request.id);if(index>=0)memoryRequests[index]=request;else memoryRequests.unshift(request);await requestNotifications.record(request);return request}
   try{
    await prisma.$transaction(async tx=>{
     await tx.request.update({where:{id:request.id,...(expectedApprovalStages?{status:'PENDING_APPROVAL' as const,OR:[{completedApprovalStages:{equals:expectedApprovalStages}},...(expectedApprovalStages.length===0?[{completedApprovalStages:{equals:Prisma.DbNull}}]:[])]}:{})},data:{title:request.title,approver:request.approver,approverUserId:request.approverUserId,targetName:request.targetName,targetArn:request.targetArn,group:dbJson(request.group),role:dbJson(request.role),members:dbJson(request.members),scope:dbJson(request.scope)!,duration:request.duration,startDate:new Date(request.startDate),expiryDate:date(request.expiryDate),priority:request.priority,justification:request.justification,notes:request.notes,requiredApprovalStages:dbJson(request.requiredApprovalStages),completedApprovalStages:dbJson(request.completedApprovalStages),status:statusToDb[request.status],approvalComment:request.approvalComment,provisioningResult:dbJson(request.provisioningResult),simulationResult:dbJson(request.simulationResult),timeline:dbJson(request.timeline)!,submittedAt:date(request.submittedAt)}});
@@ -118,6 +119,7 @@ export const requestRepository={
     if(request.items.length)await tx.requestItem.createMany({data:request.items.map(item=>({requestId:request.id,mode:item.mode,operation:item.operation,policyArn:item.policyArn,policyName:item.policyName,generatedPolicyName:item.generatedPolicyName,requestedPolicyName:item.requestedPolicyName,actions:item.actions??[],generatedPolicyDocument:dbJson(item.generatedPolicyDocument)}))});
    });
   }catch(error){if(expectedApprovalStages&&(error as {code?:string}).code==='P2025')throw new ApiError(409,'This request was reviewed by another person. Refresh before continuing.','REVIEW_CONFLICT');throw persistenceError('request.save',error)}
+  await requestNotifications.record(request);
   return request;
  }
 };

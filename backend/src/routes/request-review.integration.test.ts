@@ -46,6 +46,11 @@ async function authenticatedAgent(userId='user_org_admin_dev'){
 }
 
 describe('safe request review HTTP workflow',()=>{
+ it('never applies an approval from an email GET and rejects unauthenticated review POSTs',async()=>{
+  const item=pending('PR-EMAIL-GET-SAFE');requests.unshift(item);const {agent}=await authenticatedAgent();
+  await agent.get(`/api/requests/${item.id}/approve`).expect(404);expect(item.status).toBe('Pending approval');
+  await request(app).post(`/api/requests/${item.id}/review`).send({action:'APPROVE'}).expect(401);expect(item.status).toBe('Pending approval');
+ });
  it('serves the canonical IAM groups discovery route',async()=>{
   const listGroups=vi.spyOn(IamIdentityService.prototype,'listGroups').mockResolvedValue([{id:'group_DR_DevOps',type:'GROUP',name:'DR_DevOps',arn:'arn:aws:iam::143671530412:group/DR_DevOps',path:'/',createdAt:new Date().toISOString(),attachedPolicies:[],inlinePolicies:[],userCount:0}]);
   const {agent}=await authenticatedAgent();
