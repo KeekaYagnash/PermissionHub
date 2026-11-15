@@ -6,6 +6,12 @@ mock_provider "aws" {
 
 run "exact_trust_and_three_roles" {
   command = plan
+  assert {
+    condition = length([for statement in local.runtime_boundary.Statement : statement
+      if try(statement.Sid == "TransactionalEmailFromExistingIdentities" && statement.Action == "ses:SendEmail" && toset(statement.Resource) == toset(["arn:aws:ses:us-east-1:143671530412:identity/info@disraptor.co.za", "arn:aws:ses:us-east-1:143671530412:identity/disraptor-internal.net"]) && contains(statement.Condition.StringLike["ses:FromAddress"], "info@disraptor.co.za"), false)
+    ]) == 1
+    error_message = "The independent runtime boundary must permit SES only for the existing us-east-1 identities; an API role policy alone cannot authorize sending."
+  }
   variables {
     create_oidc_provider   = true
     create_state_bucket    = true
@@ -77,7 +83,7 @@ run "exact_trust_and_three_roles" {
     error_message = "Do not grant unrestricted AdministratorAccess-equivalent actions."
   }
   assert {
-    condition     = local.runtime_boundary.Statement[1].Effect == "Deny" && contains(local.runtime_boundary.Statement[1].Resource, "arn:aws:iam::143671530412:role/permissionhub-github-*")
+    condition     = length([for statement in local.runtime_boundary.Statement : statement if try(statement.Sid == "ProtectCiIdentities" && statement.Effect == "Deny" && contains(statement.Resource, "arn:aws:iam::143671530412:role/permissionhub-github-*"), false)]) == 1
     error_message = "Runtime roles must not modify CI roles."
   }
 }

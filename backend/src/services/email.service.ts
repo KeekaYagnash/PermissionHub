@@ -2,6 +2,7 @@ import {SESClient,SendEmailCommand} from '@aws-sdk/client-ses';
 import {env} from '../config/env.js';
 import {logger} from '../config/logger.js';
 import {renderNotification,applicationLink,type EmailContent} from './email-template.js';
+import {describeEmailFailure,emailConfigurationError} from './email-diagnostics.js';
 
 // SES identities are regional. Never use the selected account's credentials or APP_AWS_REGION.
 export const SES_EMAIL_REGION='us-east-1';
@@ -10,7 +11,7 @@ export class EmailService {
  private client=new SESClient({region:SES_EMAIL_REGION,maxAttempts:3});
  async sendMessage(to:string,content:EmailContent){
   const sender=env.SES_FROM_EMAIL.trim().toLowerCase();
-  if(sender!=='info@disraptor.co.za'&&!/^[^@\s]+@disraptor-internal\.net$/.test(sender))throw new Error('Configure an existing verified PermissionHub SES sender.');
+  if(sender!=='info@disraptor.co.za'&&!/^[^@\s]+@disraptor-internal\.net$/.test(sender))throw emailConfigurationError('EMAIL_SENDER_NOT_ALLOWED');
   const response=await this.client.send(new SendEmailCommand({Source:sender,Destination:{ToAddresses:[to]},Message:{Subject:{Data:content.subject.replace(/[\r\n]/g,' ').slice(0,200),Charset:'UTF-8'},Body:{Text:{Data:content.text,Charset:'UTF-8'},Html:{Data:content.html,Charset:'UTF-8'}}}}),{abortSignal:AbortSignal.timeout(6000)});
   return {delivery:'ses' as const,messageId:response.MessageId};
  }
@@ -18,6 +19,6 @@ export class EmailService {
  async send(to:string,event:EmailEvent,details:{requestId:string;actor?:string}){
   if((env.NOTIFICATION_EMAIL_MODE??env.INVITATION_EMAIL_MODE)!=='ses')return {delivery:'disabled' as const};
   try{return await this.sendMessage(to,renderNotification({heading:event,organization:'PermissionHub',requestId:details.requestId,summary:'A permission request has an update. Review its current status securely in PermissionHub.',actionLabel:'View request',actionUrl:applicationLink(env.FRONTEND_URL,`/requests/${encodeURIComponent(details.requestId)}`)}))}
-  catch{logger.warn({event:'EMAIL_DELIVERY_FAILED'},'Email delivery failed; application state is unchanged');return {delivery:'failed' as const}}
+  catch(error){logger.warn({event:'EMAIL_DELIVERY_FAILED',...describeEmailFailure(error)},'Email delivery failed; application state is unchanged');return {delivery:'failed' as const}}
  }
 }

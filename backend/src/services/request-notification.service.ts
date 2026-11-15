@@ -3,6 +3,7 @@ import {env} from '../config/env.js';
 import {logger} from '../config/logger.js';
 import {authorization} from './authorization.service.js';
 import {EmailService} from './email.service.js';
+import {describeEmailFailure} from './email-diagnostics.js';
 import {applicationLink,renderNotification,type NotificationView} from './email-template.js';
 import type {PermissionRequest,SessionUser} from '../types.js';
 
@@ -55,7 +56,7 @@ export class RequestNotificationService {
    for(const user of users)await this.store.enqueue({id:notificationId(request,event,user.id),tenantId:request.tenantId,requestId:request.id,recipientUserId:user.id,event,payload:{organization:directory.organization,...(event==='REJECTED'&&request.approvalComment?{reason:request.approvalComment.slice(0,1000)}:{})}});
    // Await a bounded batch: do not leave unawaited email work in a frozen Lambda.
    await this.retry(request.tenantId,request.id,2);
-  }catch{logger.warn({event:'NOTIFICATION_ENQUEUE_FAILED',tenantId:request.tenantId,requestId:request.id},'Notification unavailable; committed workflow state is unchanged')}
+  }catch(error){logger.warn({event:'NOTIFICATION_ENQUEUE_FAILED',tenantId:request.tenantId,requestId:request.id,...describeEmailFailure(error)},'Notification unavailable; committed workflow state is unchanged')}
  }
  async retry(tenantId?:string,requestId?:string,limit=20){
   if(!this.enabled())return;
@@ -72,9 +73,9 @@ export class RequestNotificationService {
    if(!recipient){await this.store.finish(id,'CANCELLED');return}
    const response=await this.mailer.sendMessage(recipient.email,renderNotification(requestEmailView(record,this.frontendUrl)));
    await this.store.finish(id,'SENT',response.messageId);
-  }catch{
+  }catch(error){
    await this.store.finish(id,'FAILED');
-   logger.warn({event:'NOTIFICATION_DELIVERY_FAILED',notificationId:id},'Notification retained for bounded retry');
+   logger.warn({event:'NOTIFICATION_DELIVERY_FAILED',notificationId:id,...describeEmailFailure(error)},'Notification retained for bounded retry');
   }
  }
 }

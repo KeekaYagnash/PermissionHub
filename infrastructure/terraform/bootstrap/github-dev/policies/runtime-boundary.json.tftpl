@@ -50,6 +50,20 @@
       "Resource": "*"
     },
     {
+      "Sid": "TransactionalEmailFromExistingIdentities",
+      "Effect": "Allow",
+      "Action": "ses:SendEmail",
+      "Resource": [
+        "arn:aws:ses:us-east-1:${account_id}:identity/info@disraptor.co.za",
+        "arn:aws:ses:us-east-1:${account_id}:identity/disraptor-internal.net"
+      ],
+      "Condition": {
+        "StringLike": {
+          "ses:FromAddress": ["info@disraptor.co.za", "*@disraptor-internal.net"]
+        }
+      }
+    },
+    {
       "Sid": "ProtectCiIdentities",
       "Effect": "Deny",
       "Action": [

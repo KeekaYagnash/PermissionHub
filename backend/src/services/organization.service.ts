@@ -4,6 +4,8 @@ import {prisma} from '../config/database.js';
 import {ApiError} from '../utils/http.js';
 import type {SessionUser} from '../types.js';
 import {renderNotification} from './email-template.js';
+import {logger} from '../config/logger.js';
+import {describeEmailFailure} from './email-diagnostics.js';
 
 export const organizationRoles=['REQUESTER','ACCOUNT_APPROVER','OU_ADMIN','SECURITY_REVIEWER','PROVISIONER','ORGANISATION_ADMIN'] as const;
 export const tokenHash=(token:string)=>createHash('sha256').update(token).digest('hex');
@@ -43,10 +45,11 @@ export class OrganizationService {
    await this.audit(tx,user,tenantId,resendId?'INVITATION_RESENT':'INVITATION_CREATED',{invitationId:item.id,email:normalized,role});return item;
   });
   let deliveryStatus='SENT';
-  try{const tenant=await this.db.tenant.findUniqueOrThrow({where:{id:tenantId}}),url=new URL('/accept-invitation',this.frontendUrl);url.hash=new URLSearchParams({token:proof}).toString();const message=renderNotification({heading:'You’re invited to join an organization',organization:tenant.name,summary:`You are invited to ${tenant.name} as ${role.replaceAll('_',' ')}. Sign in or create an account with your invited email address, verify it, then accept this invitation. This single-use link expires in 48 hours. Ask your administrator to resend it if it expires.`,actionLabel:'Accept invitation',actionUrl:url.toString()});await this.mailer.send(normalized,`Invitation to ${tenant.name} on PermissionHub`,message.text,message.html)}catch{deliveryStatus='FAILED'}
+  let deliveryError:ReturnType<typeof describeEmailFailure>|undefined;
+  try{const tenant=await this.db.tenant.findUniqueOrThrow({where:{id:tenantId}}),url=new URL('/accept-invitation',this.frontendUrl);url.hash=new URLSearchParams({token:proof}).toString();const message=renderNotification({heading:'You’re invited to join an organization',organization:tenant.name,summary:`You are invited to ${tenant.name} as ${role.replaceAll('_',' ')}. Sign in or create an account with your invited email address, verify it, then accept this invitation. This single-use link expires in 48 hours. Ask your administrator to resend it if it expires.`,actionLabel:'Accept invitation',actionUrl:url.toString()});await this.mailer.send(normalized,`Invitation to ${tenant.name} on PermissionHub`,message.text,message.html)}catch(error){deliveryStatus='FAILED';deliveryError=describeEmailFailure(error);logger.warn({event:'INVITATION_EMAIL_DELIVERY_FAILED',tenantId,invitationId:invitation.id,...deliveryError},'Invitation saved; email delivery failed')}
   // A concurrent resend must never update the delivery state of a newer token.
   try{await this.db.organizationInvitation.updateMany({where:{id:invitation.id,tokenHash:tokenHash(proof)},data:{deliveryStatus,lastSentAt:deliveryStatus==='SENT'?new Date():null}})}catch{/* Delivery metadata must not undo a committed invitation. */}
-  return {id:invitation.id,email:normalized,role,status:'PENDING',expiresAt:invitation.expiresAt,deliveryStatus,message:deliveryStatus==='SENT'?'Invitation email sent.':'Invitation saved, but email could not be delivered. Configure the sender and resend.'};
+  return {id:invitation.id,email:normalized,role,status:'PENDING',expiresAt:invitation.expiresAt,deliveryStatus,...(deliveryError?{deliveryError}:{}),message:deliveryStatus==='SENT'?'Invitation email sent.':`Invitation saved, but email could not be delivered. [${deliveryError?.code??'EMAIL_DELIVERY_FAILED'}] ${deliveryError?.message??'Review CloudWatch and resend.'}`};
  }
  async resend(user:SessionUser,tenantId:string,id:string){const item=await this.db.organizationInvitation.findFirst({where:{id,tenantId}});if(!item)throw new ApiError(404,'Invitation not found.','INVITATION_NOT_FOUND');return this.invite(user,tenantId,item.email,item.role,id)}
  async revoke(user:SessionUser,tenantId:string,id:string){return this.transaction(async tx=>{await this.admin(tx,user,tenantId);const result=await tx.organizationInvitation.updateMany({where:{id,tenantId,status:'PENDING'},data:{status:'REVOKED',revokedAt:new Date()}});if(!result.count)throw new ApiError(409,'Invitation is not pending.','INVITATION_NOT_PENDING');await this.audit(tx,user,tenantId,'INVITATION_REVOKED',{invitationId:id});return {revoked:true}})}
