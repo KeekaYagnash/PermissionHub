@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType, type RefObject } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type ComponentType, type RefObject } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Activity, FileKey2, GitPullRequestArrow, Grid3X3, Home, KeyRound, LogOut, PlugZap, Settings, UserRoundCog, X } from 'lucide-react';
+import { Activity, FileKey2, GitPullRequestArrow, Menu, Home, KeyRound, LogOut, PlugZap, Settings, UserRoundCog, X } from 'lucide-react';
 import { useQuery,useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { cognitoEnabled,logoutCognito } from '../lib/cognito';
-import { isNavActive, navItems, visibleNavItems, type NavKey } from '../lib/navigation';
+import { isNavActive, visibleNavItems, type NavKey } from '../lib/navigation';
 import { ThemeControl } from './ThemeControl';
 import { useAuthStore } from '../store/auth';
 import { shouldAutoSelectAccount } from '../lib/auth';
@@ -41,55 +41,45 @@ export default function Layout(){
  return <div className="app">
   <a className="skip-link" href="#main-content">Skip to main content</a>
   {session?.developmentAuthenticationActive&&<div className="development-auth-banner" role="status">Development authentication is active</div>}
-  <AppHeader connection={data} context={context.data} contextError={Boolean(context.error)} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen}/>
+  <AppHeader connection={data} context={context.data} contextError={Boolean(context.error)} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} menuButtonRef={menuButtonRef}/>
   <main id="main-content" tabIndex={-1} inert={drawerOpen||undefined}><Outlet key={activeAwsAccountRecordId??'no-aws-account'}/></main>
-  <MobileBottomNavigation drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} menuButtonRef={menuButtonRef}/>
   <MobileNavigationDrawer open={drawerOpen} onClose={closeDrawer} connection={data} context={context.data} returnFocusRef={menuButtonRef}/>
  </div>;
 }
 
-function AppHeader({connection,context,contextError,drawerOpen,setDrawerOpen}:{connection:any;context:any;contextError:boolean;drawerOpen:boolean;setDrawerOpen:(open:boolean)=>void}){
+function AppHeader({connection,context,contextError,drawerOpen,setDrawerOpen,menuButtonRef}:{connection:any;context:any;contextError:boolean;drawerOpen:boolean;setDrawerOpen:(open:boolean)=>void;menuButtonRef:RefObject<HTMLButtonElement|null>}){
  const location=useLocation();
  const session=useAuthStore(state=>state.session);
  return <>
   <aside className="desktop-sidebar desktop-shell" aria-label="Desktop navigation drawer">
    <Brand/>
+   <OrganizationIdentity/>
    <DesktopNavigation/>
    <div className="desktop-sidebar-footer">
+    {visibleNavItems(session).some(item=>['administration','connection'].includes(item.key))&&<span className="navigation-group-label">Organization management</span>}
     {visibleNavItems(session).filter(item=>['administration','connection'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}
     <ThemeControl/>
     <UserMenu compact/>
+    <img className="maker-logo" src="/DR_Logo_Colour.png" alt="Disraptor"/>
    </div>
   </aside>
   <header className="desktop-account-header desktop-shell"><ContextBar connection={connection} context={context} contextError={contextError}/></header>
   <header className="mobile-header">
    <Brand/>
-   <div className="mobile-header-actions"><ConnectionDot connection={connection}/><ThemeControl compact/><button className="mobile-header-menu" aria-label="Open navigation menu" aria-expanded={drawerOpen} aria-controls="mobile-nav-drawer" onClick={()=>setDrawerOpen(true)}><Grid3X3 size={18}/></button></div>
+   <div className="mobile-header-actions"><ThemeControl compact/><button ref={menuButtonRef} className="mobile-header-menu" aria-label="Open navigation menu" aria-expanded={drawerOpen} aria-controls="mobile-nav-drawer" onClick={()=>setDrawerOpen(true)}><Menu size={18}/></button></div>
   </header>
+  <div className="mobile-context-strip"><OrganizationIdentity/><ContextBar connection={connection} context={context} contextError={contextError} compact/></div>
  </>;
 }
 
-function Brand(){return <Link to="/" className="brand" aria-label="PermissionHub overview"><div className="brand-mark">PH</div><div><strong>PermissionHub</strong><span>AWS permission requests</span></div></Link>}
+function Brand(){return <Link to="/" className="brand" aria-label="PermissionHub overview"><img className="product-icon" src="/DR_Icon_Colour.png" alt=""/><div><strong>PermissionHub</strong><span>AWS permission requests</span></div></Link>}
+
+function OrganizationIdentity(){const session=useAuthStore(state=>state.session);const membership=session?.user?.memberships.find(item=>item.tenantId===session.user?.activeTenantId&&item.status==='ACTIVE');return membership?<div className="organization-identity"><small>Organization</small><strong title={membership.tenantName}>{membership.tenantName}</strong></div>:null}
 
 function DesktopNavigation(){
  const location=useLocation();
  const session=useAuthStore(state=>state.session);
  return <nav className="desktop-nav" aria-label="Primary navigation">{visibleNavItems(session).filter(item=>!['administration','connection'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} end={item.path==='/' ? true : undefined} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}</nav>;
-}
-
-function MobileBottomNavigation({drawerOpen,setDrawerOpen,menuButtonRef}:{drawerOpen:boolean;setDrawerOpen:(open:boolean)=>void;menuButtonRef:RefObject<HTMLButtonElement|null>}){
- const location=useLocation();
- const session=useAuthStore(state=>state.session),visible=visibleNavItems(session,'mobile');
- return <nav className="mobile-bottom-nav" aria-label="Mobile primary navigation">
-  {visible.slice(0,2).map(item=><MobileNavLink key={item.key} item={item} active={isNavActive(location.pathname,item.key)}/>)}
-  <button ref={menuButtonRef} className={drawerOpen?'mobile-menu-button open':'mobile-menu-button'} aria-label="Open navigation menu" aria-expanded={drawerOpen} aria-controls="mobile-nav-drawer" onClick={()=>setDrawerOpen(true)}><Grid3X3 size={20}/><span>Menu</span></button>
-  {visible.slice(2).map(item=><MobileNavLink key={item.key} item={item} active={isNavActive(location.pathname,item.key)}/>)}
- </nav>;
-}
-
-function MobileNavLink({item,active}:{item:typeof navItems[number];active:boolean}){
- const Icon=icons[item.key];
- return <NavLink to={item.path} aria-current={active?'page':undefined} className={active?'active':''}><Icon size={18}/><span>{item.shortLabel}</span></NavLink>;
 }
 
 function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}:{open:boolean;onClose:()=>void;connection:any;context:any;returnFocusRef:RefObject<HTMLButtonElement|null>}){
@@ -120,12 +110,33 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
   <button className="drawer-backdrop" aria-label="Close navigation menu" onClick={onClose}/>
   <aside id="mobile-nav-drawer" className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation" ref={drawerRef}>
    <div className="drawer-head"><Brand/><button ref={closeRef} className="icon-btn" onClick={onClose} aria-label="Close navigation menu"><X size={18}/></button></div>
-   <nav className="drawer-nav" aria-label="Navigation drawer">{visibleNavItems(session,'drawer').map(item=>{const Icon=icons[item.key];const active=isNavActive(location.pathname,item.key);return <NavLink key={item.key} to={item.path} aria-current={active?'page':undefined} className={active?'active':''}><Icon size={18}/><span><strong>{item.label}</strong><small>{item.description}</small></span></NavLink>})}</nav>
-   <section className="drawer-utilities" aria-label="Utilities"><h2>Active context</h2><ContextBar connection={connection} context={context} compact/><ThemeControl/><UserMenu/></section>
+   <nav className="drawer-nav" aria-label="Navigation drawer">{visibleNavItems(session,'drawer').map(item=>{const Icon=icons[item.key];const active=isNavActive(location.pathname,item.key),startManagement=item.key==='administration'||item.key==='connection'&&!visibleNavItems(session).some(link=>link.key==='administration');return <Fragment key={item.key}>{startManagement&&<span className="navigation-group-label">Organization management</span>}<NavLink to={item.path} aria-current={active?'page':undefined} className={active?'active':''}><Icon size={18}/><span><strong>{item.label}</strong><small>{item.description}</small></span></NavLink></Fragment>})}</nav>
+   <section className="drawer-utilities" aria-label="Utilities"><OrganizationIdentity/><h2>Active context</h2><ContextBar connection={connection} context={context} compact/><ThemeControl/><UserMenu/><img className="maker-logo" src="/DR_Logo_Colour.png" alt="Disraptor"/></section>
   </aside>
  </div>;
 }
 
 function ConnectionDot({connection}:{connection:any}){return <span className={connection?.connected?'connection-dot connected':'connection-dot mock'} aria-label={connection?.connected?'AWS connected':'AWS disconnected'}/>}
-function ContextBar({connection,context,compact=false,contextError=false}:{connection:any;context:any;compact?:boolean;contextError?:boolean}){const session=useAuthStore(state=>state.session),setSession=useAuthStore(state=>state.setSession),queryClient=useQueryClient(),activeRecordId=session?.user?.activeAwsAccountRecordId??session?.user?.activeAccountId;const active=context?.accounts?.find((account:any)=>account.accountRecordId===activeRecordId);async function changeAccount(accountRecordId:string){const next=await api.selectAccount(accountRecordId);setSession(next);queryClient.clear()}async function changeTenant(tenantId:string){const next=await api.selectTenant(tenantId);setSession(next);queryClient.clear()}if(contextError&&!context)return <div className={compact?'context-bar compact':'context-bar'}><ConnectionDot connection={connection}/><span className="connection-context-warning">Account context unavailable</span>{activeRecordId&&<span className="muted">Selection retained</span>}</div>;return <div className={compact?'context-bar compact':'context-bar'}><ConnectionDot connection={connection}/>{context?.tenants?.length>1&&<select aria-label="Active tenant" value={session?.user?.activeTenantId??''} onChange={event=>void changeTenant(event.target.value)}>{context.tenants.map((item:any)=><option value={item.id} key={item.id}>{item.name}</option>)}</select>}<select aria-label="Active AWS account" value={activeRecordId??''} onChange={event=>void changeAccount(event.target.value)}><option value="" disabled>Select AWS account</option>{context?.accounts?.map((account:any)=><option value={account.accountRecordId} key={account.accountRecordId}>{account.accountName} · {account.awsAccountNumber}</option>)}</select>{active&&<><span className={`account-type ${active.accountType.toLowerCase()}`}>{active.accountType.replaceAll('_',' ')}</span><span>{active.region}</span></>}</div>}
+function ContextBar({connection,context,compact=false,contextError=false}:{connection:any;context:any;compact?:boolean;contextError?:boolean}){
+ const session=useAuthStore(state=>state.session),setSession=useAuthStore(state=>state.setSession),queryClient=useQueryClient();
+ const [changing,setChanging]=useState(false),[selectionError,setSelectionError]=useState('');
+ const activeRecordId=session?.user?.activeAwsAccountRecordId??session?.user?.activeAccountId;
+ const active=context?.accounts?.find((account:any)=>account.accountRecordId===activeRecordId);
+ async function changeSelection(value:string,kind:'account'|'tenant'){
+  setChanging(true);setSelectionError('');
+  try{const next=await(kind==='account'?api.selectAccount(value):api.selectTenant(value));setSession(next);queryClient.clear()}
+  catch{setSelectionError('Could not switch context. Your previous selection is retained. Please try again.')}
+  finally{setChanging(false)}
+ }
+ const status=contextError?'Account context unavailable':changing?'Switching account…':!context?'Loading accounts…':!activeRecordId?'Select an AWS account to get started':connection?.connected?'Connected':active?.connectionStatus?.replaceAll('_',' ').toLowerCase()??'Checking connection…';
+ return <div className={compact?'context-bar compact':'context-bar'}>
+  <ConnectionDot connection={connection}/>
+  {context?.tenants?.length>1&&<select aria-label="Active tenant" disabled={changing} value={session?.user?.activeTenantId??''} onChange={event=>void changeSelection(event.target.value,'tenant')}>{context.tenants.map((item:any)=><option value={item.id} key={item.id}>{item.name}</option>)}</select>}
+  <select aria-label="Active AWS account" disabled={changing||!context||!context.accounts?.length} value={activeRecordId??''} onChange={event=>void changeSelection(event.target.value,'account')}><option value="" disabled>Select AWS account</option>{context?.accounts?.map((account:any)=><option value={account.accountRecordId} key={account.accountRecordId}>{account.accountName} · {account.awsAccountNumber}</option>)}</select>
+  {active&&<><span className={`account-type ${active.accountType.toLowerCase()}`}>{active.accountType.replaceAll('_',' ')}</span><span>{active.region}</span></>}
+  <span className="context-status" role="status">{status}</span>
+  {!activeRecordId&&visibleNavItems(session).some(item=>item.key==='connection')&&<Link className="context-next-action" to="/connection">Manage AWS connections</Link>}
+  {selectionError&&<span className="error-text" role="alert">{selectionError}</span>}
+ </div>
+}
 function UserMenu({compact=false}:{compact?:boolean}){const session=useAuthStore(state=>state.session),clear=useAuthStore(state=>state.clear),navigate=useNavigate(),queryClient=useQueryClient();async function logout(){try{if(cognitoEnabled()){try{await api.logout()}finally{await logoutCognito()}}else await api.logout()}finally{queryClient.clear();clear();if(!cognitoEnabled())navigate('/login',{replace:true})}}return <div className={compact?'user-menu compact':'user-menu'}><NavLink to="/profile"><strong>{session?.user?.displayName}</strong><small>{session?.user?.email}</small></NavLink><button onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={15}/></button></div>}

@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {approvalProvisionLabel,buildReviewPayload,reviewCommentError,reviewProvisionButtonDisabled} from './review';
+import {approvalProvisionLabel,buildReviewPayload,reviewCommentError,reviewProvisionButtonDisabled,provisionCredentialsReady} from './review';
 
 describe('review request payload',()=>{
  it.each(['APPROVE','APPROVE_AND_PROVISION'] as const)('omits an empty optional comment for %s',action=>{
@@ -19,5 +19,10 @@ describe('review request payload',()=>{
   expect(approvalProvisionLabel('live')).toBe('Approve and provision');
  expect(approvalProvisionLabel('local')).toBe('Approve and Provision');
  });
- it('never disables the combined button because of workflow gates in local mode',()=>{expect(reviewProvisionButtonDisabled('local',false,false,false)).toBe(false);expect(reviewProvisionButtonDisabled('local',true,true,true)).toBe(false);expect(reviewProvisionButtonDisabled('live',false,true,false)).toBe(true)});
+ it('retains local workflow behavior but prevents duplicate submissions in every mode',()=>{expect(reviewProvisionButtonDisabled('local',false,false,false)).toBe(false);expect(reviewProvisionButtonDisabled('local',true,true,true)).toBe(true);expect(reviewProvisionButtonDisabled('live',false,true,false)).toBe(true)});
+ it('uses server credential readiness for access-key and assumed-role provisioning',()=>{
+  expect(provisionCredentialsReady({checklist:[{key:'provisionRole',passed:true}]})).toBe(true);
+  expect(provisionCredentialsReady({checklist:[{key:'provisionRole',passed:false}]})).toBe(false);
+  expect(provisionCredentialsReady()).toBe(false);
+ });
 });

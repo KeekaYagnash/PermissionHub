@@ -139,12 +139,6 @@ pre { border-radius: 10px; font-size: 12px; line-height: 1.65; }
 .drawer-nav a:hover { background: var(--ph-bg-hover); }
 .drawer-nav a.active { background: var(--ph-bg-selected); }
 .drawer-utilities .appearance-control { width: 100%; }
-.mobile-bottom-nav .mobile-menu-button { background: var(--ph-bg-muted); color: var(--ph-text-primary); border: 1px solid var(--ph-border); box-shadow: none; height: 50px; margin-top: 0; }
-.mobile-bottom-nav a.active { color: var(--ph-link); }
-@media (max-width: 1023px) {
-  .mobile-bottom-nav { display: flex; align-items: center; }
-  .mobile-bottom-nav > * { flex: 1; min-width: 0; }
-}
 .mobile-drawer .context-bar { background: var(--ph-bg-muted); border-color: var(--ph-border); }
 .user-menu { min-width: 0; }
 .user-menu a { min-width: 0; overflow: hidden; }
@@ -176,7 +170,6 @@ pre { border-radius: 10px; font-size: 12px; line-height: 1.65; }
   main:not(.auth-page) { max-width: 960px; margin-inline: auto; padding-inline: 28px; }
   .mobile-header { padding-inline: 28px; }
   .mobile-drawer { width: 400px; }
-  .mobile-bottom-nav { padding-inline: max(20px, calc((100vw - 760px) / 2)); }
   .detail-layout, .split { grid-template-columns: minmax(0, 1fr); }
   .policy-detail, .approval-panel { position: static; max-height: none; }
 }
@@ -221,4 +214,49 @@ pre { border-radius: 10px; font-size: 12px; line-height: 1.65; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* Version 1 shell: one navigation pattern on compact screens. */
+:root { --mobile-bottom-nav-height: 0px; }
+.product-icon { width: 36px; height: 40px; flex: 0 0 36px; object-fit: contain; }
+.maker-logo { display: block; width: 104px; height: 34px; object-fit: contain; align-self: flex-start; }
+.organization-identity { display: grid; gap: 4px; min-width: 0; padding: 12px 14px; border: 1px solid var(--ph-border); border-radius: 10px; background: var(--ph-bg-muted); }
+.organization-identity small, .navigation-group-label { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ph-text-muted); }
+.organization-identity strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-sidebar > .organization-identity { margin: 0 14px 14px; }
+.navigation-group-label { padding: 8px 12px 2px; }
+.theme-toggle, .desktop-sidebar-footer .theme-toggle { justify-content: flex-start; cursor: pointer; min-height: 44px; background: var(--ph-bg-surface); border-color: var(--ph-border); color: var(--ph-text-secondary); }
+.theme-toggle.compact { width: 44px; min-width: 44px; justify-content: center; padding: 0; }
+.appearance-control.compact svg { display: block; }
+.context-status { color: var(--ph-text-muted); font-size: 12px; }
+.context-next-action { color: var(--ph-link); font-weight: 600; font-size: 12px; }
+.context-bar { flex-wrap: wrap; row-gap: 6px; }
+.context-bar select { max-width: min(100%, 320px); min-width: 0; }
+.mobile-context-strip { display: none; }
+.admin-tabs { position: static; display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 8px; border: 0; }
+.admin-tabs button { text-align: left; white-space: normal; display: grid; gap: 6px; padding: 14px; border: 1px solid var(--ph-border); border-radius: 10px; background: var(--ph-bg-surface); }
+.admin-tabs button small { color: var(--ph-text-muted); font-size: 12px; font-weight: 400; line-height: 1.5; }
+.admin-tabs button.active { border-color: #0499F2; background: var(--ph-bg-muted); }
+.organization-connection-help { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px; border: 1px solid var(--ph-border); border-radius: 12px; }
+.organization-connection-help p { margin: 6px 0 0; font-size: 13px; color: var(--ph-text-secondary); }
+.organization-connection-help .btn { flex-shrink: 0; }
+@media (min-width: 1024px) { .desktop-account-header { min-height: 68px; height: auto; padding-block: 10px; } }
+@media (max-width: 1023px) {
+ .mobile-header { position: sticky; top: 0; }
+ .mobile-context-strip { display: grid; gap: 10px; padding: 12px 20px; background: var(--ph-bg-surface); border-bottom: 1px solid var(--ph-border); }
+ .mobile-context-strip .organization-identity { padding: 0; border: 0; background: transparent; }
+ .mobile-context-strip .context-bar { display: flex; padding: 0; width: 100%; flex-direction: row; align-items: center; border: 0; background: transparent; }
+ .mobile-context-strip select { flex: 1 1 210px; }
+ .mobile-context-strip .context-status { flex-basis: 100%; }
+ main:not(.auth-page) { padding-top: 24px; padding-bottom: 28px; }
+ .mobile-drawer { width: min(400px, 100%); padding-bottom: max(20px,env(safe-area-inset-bottom)); }
+ .mobile-drawer .drawer-nav { gap: 3px; }
+ .mobile-drawer .drawer-nav a { padding-block: 10px; }
+ .mobile-drawer .drawer-nav small { font-size: 12px; }
+}
+@media (max-width: 720px) {
+ .organization-connection-help { align-items: stretch; flex-direction: column; }
+ .admin-tabs { grid-template-columns: repeat(2,minmax(0,1fr)); }
+ .mobile-context-strip { padding-inline: 16px; }
+ .theme-toggle.compact svg { display: block; }
 }
