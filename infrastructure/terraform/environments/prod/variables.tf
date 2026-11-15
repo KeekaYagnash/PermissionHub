@@ -11,13 +11,17 @@ variable "invitation_ses_identity_arn" {
   type    = string
   default = null
   validation {
-    condition     = var.invitation_ses_identity_arn == null ? true : can(regex("^arn:aws:ses:[a-z0-9-]+:[0-9]{12}:identity/.+$", var.invitation_ses_identity_arn))
-    error_message = "Provide an existing SES verified identity ARN, not email credentials."
+    condition     = var.invitation_ses_identity_arn == null ? true : can(regex("^arn:aws:ses:us-east-1:[0-9]{12}:identity/(info@disraptor[.]co[.]za|disraptor-internal[.]net)$", var.invitation_ses_identity_arn))
+    error_message = "Use the existing us-east-1 verified identity info@disraptor.co.za or disraptor-internal.net; do not create a new identity."
   }
 }
 variable "invitation_sender_email" {
   type    = string
-  default = ""
+  default = "info@disraptor.co.za"
+  validation {
+    condition     = var.invitation_sender_email == "" || var.invitation_sender_email == "info@disraptor.co.za" || can(regex("^[^@ ]+@disraptor-internal[.]net$", var.invitation_sender_email))
+    error_message = "Use info@disraptor.co.za or a mailbox under the existing verified disraptor-internal.net domain."
+  }
 }
 variable "aws_account_id" { type = string }
 variable "runtime_permissions_boundary_arn" {

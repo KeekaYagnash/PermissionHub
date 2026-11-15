@@ -3,6 +3,7 @@ import {Prisma,PrismaClient,type ApplicationRole} from '@prisma/client';
 import {prisma} from '../config/database.js';
 import {ApiError} from '../utils/http.js';
 import type {SessionUser} from '../types.js';
+import {renderNotification} from './email-template.js';
 
 export const organizationRoles=['REQUESTER','ACCOUNT_APPROVER','OU_ADMIN','SECURITY_REVIEWER','PROVISIONER','ORGANISATION_ADMIN'] as const;
 export const tokenHash=(token:string)=>createHash('sha256').update(token).digest('hex');
@@ -10,7 +11,7 @@ export const newProof=()=>randomBytes(32).toString('base64url');
 export function verifiedEmail(user:SessionUser){if(!user.emailVerified)throw new ApiError(403,'Verify your email address before continuing.','EMAIL_VERIFICATION_REQUIRED');return user.email.trim().toLowerCase()}
 function requireProfile(user:SessionUser){if(user.displayName.trim().length<2||user.displayName===user.email||user.displayName==='Cognito user')throw new ApiError(422,'Complete your profile with your full name before continuing.','PROFILE_REQUIRED')}
 export function scopeForRole(role:ApplicationRole,tenantId:string){return {scopeType:'TENANT' as const,scopeId:tenantId,includeDescendants:true,canView:true,canRequest:true,canApprove:['ACCOUNT_APPROVER','OU_ADMIN','SECURITY_REVIEWER','ORGANISATION_ADMIN'].includes(role),canProvision:['PROVISIONER','ORGANISATION_ADMIN'].includes(role),canRevoke:['PROVISIONER','ORGANISATION_ADMIN'].includes(role),canManageConfiguration:role==='ORGANISATION_ADMIN'}}
-export interface InvitationMailer {send(to:string,subject:string,body:string):Promise<void>}
+export interface InvitationMailer {send(to:string,subject:string,body:string,html?:string):Promise<void>}
 type Tx=Prisma.TransactionClient;
 export class OrganizationService {
  constructor(private db:PrismaClient=prisma,private mailer:InvitationMailer,private frontendUrl:string){}
@@ -41,12 +42,10 @@ export class OrganizationService {
    const item=await tx.organizationInvitation.upsert({where:{tenantId_email:{tenantId,email:normalized}},create:{tenantId,email:normalized,...data},update:data});
    await this.audit(tx,user,tenantId,resendId?'INVITATION_RESENT':'INVITATION_CREATED',{invitationId:item.id,email:normalized,role});return item;
   });
-  const tenant=await this.db.tenant.findUniqueOrThrow({where:{id:tenantId}});
-  const url=new URL('/accept-invitation',this.frontendUrl);url.hash=new URLSearchParams({token:proof}).toString();
   let deliveryStatus='SENT';
-  try{await this.mailer.send(normalized,`Invitation to ${tenant.name} on PermissionHub`,`You are invited to ${tenant.name} as ${role.replaceAll('_',' ')}.\nSign in or register with ${normalized}, verify your email, and open:\n${url}\nThis single-use link expires in 48 hours. If expired, ask the organisation administrator to resend it.`)}catch{deliveryStatus='FAILED'}
+  try{const tenant=await this.db.tenant.findUniqueOrThrow({where:{id:tenantId}}),url=new URL('/accept-invitation',this.frontendUrl);url.hash=new URLSearchParams({token:proof}).toString();const message=renderNotification({heading:'You’re invited to join an organization',organization:tenant.name,summary:`You are invited to ${tenant.name} as ${role.replaceAll('_',' ')}. Sign in or create an account with your invited email address, verify it, then accept this invitation. This single-use link expires in 48 hours. Ask your administrator to resend it if it expires.`,actionLabel:'Accept invitation',actionUrl:url.toString()});await this.mailer.send(normalized,`Invitation to ${tenant.name} on PermissionHub`,message.text,message.html)}catch{deliveryStatus='FAILED'}
   // A concurrent resend must never update the delivery state of a newer token.
-  await this.db.organizationInvitation.updateMany({where:{id:invitation.id,tokenHash:tokenHash(proof)},data:{deliveryStatus,lastSentAt:deliveryStatus==='SENT'?new Date():null}});
+  try{await this.db.organizationInvitation.updateMany({where:{id:invitation.id,tokenHash:tokenHash(proof)},data:{deliveryStatus,lastSentAt:deliveryStatus==='SENT'?new Date():null}})}catch{/* Delivery metadata must not undo a committed invitation. */}
   return {id:invitation.id,email:normalized,role,status:'PENDING',expiresAt:invitation.expiresAt,deliveryStatus,message:deliveryStatus==='SENT'?'Invitation email sent.':'Invitation saved, but email could not be delivered. Configure the sender and resend.'};
  }
  async resend(user:SessionUser,tenantId:string,id:string){const item=await this.db.organizationInvitation.findFirst({where:{id,tenantId}});if(!item)throw new ApiError(404,'Invitation not found.','INVITATION_NOT_FOUND');return this.invite(user,tenantId,item.email,item.role,id)}
@@ -70,7 +69,7 @@ export class OrganizationService {
    await tx.user.update({where:{id:user.id},data:{activeTenantId:item.tenantId,activeAwsAccountRecordId:null}});
    await this.audit(tx,user,item.tenantId,'INVITATION_ACCEPTED',{invitationId:item.id});return {tenantId:item.tenantId,name:item.tenant.name};
   });
-  try{await this.mailer.send(email,`You joined ${result.name}`,`Your verified account has joined ${result.name} on PermissionHub. Application roles do not grant AWS IAM credentials.`)}catch{await this.db.organizationInvitation.updateMany({where:{tokenHash:tokenHash(proof)},data:{deliveryStatus:'CONFIRMATION_FAILED'}})}
+  try{await this.mailer.send(email,`You joined ${result.name}`,`Your verified account has joined ${result.name} on PermissionHub. Application roles do not grant AWS IAM credentials.`)}catch{try{await this.db.organizationInvitation.updateMany({where:{tokenHash:tokenHash(proof)},data:{deliveryStatus:'CONFIRMATION_FAILED'}})}catch{/* Joining succeeded even if confirmation delivery/metadata failed. */}}
   return result;
  }
  async changeMember(user:SessionUser,tenantId:string,id:string,role?:ApplicationRole){

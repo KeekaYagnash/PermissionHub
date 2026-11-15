@@ -110,6 +110,7 @@ enum ProvisioningMode {
 }
 
 model User {
+  emailNotifications EmailNotification[]
   id                String                 @id @default(uuid())
   email             String                 @unique
   displayName       String
@@ -388,6 +389,7 @@ model AwsPrincipalMapping {
 }
 
 model Request {
+  emailNotifications EmailNotification[]
   id                     String                 @id
   title                  String
   tenantId               String?
@@ -563,6 +565,27 @@ model ConnectionAuditEvent {
   createdAt    DateTime    @default(now())
 
   @@index([tenantId, createdAt])
+}
+
+// Durable, tenant-scoped delivery receipts. Contains no invitation tokens or policy documents.
+model EmailNotification {
+  id String @id
+  tenantId String
+  requestId String
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  recipientUserId String
+  recipient User @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+  event String
+  payload Json
+  status String @default("PENDING")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  leaseUntil DateTime?
+  messageId String?
+  createdAt DateTime @default(now())
+  sentAt DateTime?
+  @@index([status, nextAttemptAt])
+  @@index([tenantId, requestId])
 }
 
 model ApplicationSettings {
