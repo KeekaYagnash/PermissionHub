@@ -69,9 +69,15 @@ resource "aws_iam_role_policy" "runtime" {
         Action   = ["sts:AssumeRole", "sts:TagSession", "sts:SetSourceIdentity"]
         Resource = var.assumable_role_arns
         }] : [], var.invitation_ses_identity_arn == null ? [] : [{
+        Sid      = "SendTransactionalEmail"
         Effect   = "Allow"
         Action   = ["ses:SendEmail"]
         Resource = var.invitation_ses_identity_arn
+        Condition = {
+          StringEquals = {
+            "ses:FromAddress" = lookup(var.environment_variables, "SES_FROM_EMAIL", "info@disraptor.co.za")
+          }
+        }
     }])
   })
 }
