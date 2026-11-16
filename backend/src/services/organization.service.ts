@@ -2,7 +2,9 @@ import {createHash,randomBytes} from 'node:crypto';
 import {Prisma,PrismaClient,type ApplicationRole} from '@prisma/client';
 import {prisma} from '../config/database.js';
 import {ApiError} from '../utils/http.js';
-import type {SessionUser} from '../types.js';
+import type {SessionUser,AwsAccountContext} from '../types.js';
+import {authorization} from './authorization.service.js';
+import {env} from '../config/env.js';
 import {renderNotification} from './email-template.js';
 import {logger} from '../config/logger.js';
 import {describeEmailFailure} from './email-diagnostics.js';
@@ -84,7 +86,9 @@ export class OrganizationService {
    if(existing?.status!=='ACTIVE'){
     const membership=await tx.tenantMembership.upsert({where:{tenantId_userId:{tenantId:item.tenantId,userId:user.id}},create:{tenantId:item.tenantId,userId:user.id,role:item.role},update:{role:item.role,status:'ACTIVE'}});
     await tx.adminScope.deleteMany({where:{tenantMembershipId:membership.id}});
-    await tx.adminScope.create({data:{tenantMembershipId:membership.id,...scopeForRole(item.role,item.tenantId)}});
+    // Membership/application role is not an AWS account grant. Owners retain
+    // organization administration; other invitees need explicit account scopes.
+    if(item.role==='ORGANISATION_ADMIN')await tx.adminScope.create({data:{tenantMembershipId:membership.id,...scopeForRole(item.role,item.tenantId)}});
    }
    await tx.user.update({where:{id:user.id},data:{activeTenantId:item.tenantId,activeAwsAccountRecordId:null}});
    await this.audit(tx,user,item.tenantId,'INVITATION_ACCEPTED',{invitationId:item.id});return {tenantId:item.tenantId,name:item.tenant.name};
@@ -98,11 +102,47 @@ export class OrganizationService {
    await this.admin(tx,user,tenantId);const target=await tx.tenantMembership.findFirst({where:{id,tenantId,status:'ACTIVE'}});if(!target)throw new ApiError(404,'Member not found in this organisation.','MEMBER_NOT_FOUND');
    if(target.role==='PLATFORM_ADMIN')throw new ApiError(403,'Platform administrator identities cannot be changed through organisation administration.','PLATFORM_ROLE_PROTECTED');
    if(target.role==='ORGANISATION_ADMIN'&&role!=='ORGANISATION_ADMIN'&&await tx.tenantMembership.count({where:{tenantId,status:'ACTIVE',role:'ORGANISATION_ADMIN'}})<=1)throw new ApiError(409,'The organisation must retain at least one administrator.','LAST_ADMIN_REQUIRED');
-   await tx.adminScope.deleteMany({where:{tenantMembershipId:id}});
-   await tx.tenantMembership.update({where:{id},data:{status:role?'ACTIVE':'SUSPENDED',...(role?{role,adminScopes:{create:scopeForRole(role,tenantId)}}:{})}});
+   if(!role)await tx.adminScope.deleteMany({where:{tenantMembershipId:id}});
+   else if(target.role==='ORGANISATION_ADMIN'||role==='ORGANISATION_ADMIN')await tx.adminScope.deleteMany({where:{tenantMembershipId:id,scopeType:'TENANT',scopeId:tenantId}});
+   await tx.tenantMembership.update({where:{id},data:{status:role?'ACTIVE':'SUSPENDED',...(role?{role,...(role==='ORGANISATION_ADMIN'?{adminScopes:{create:scopeForRole(role,tenantId)}}:{})}:{})}});
    // Account-specific development grants must not survive membership removal/demotion.
    await tx.developmentRoleGrant.updateMany({where:{tenantId,userId:target.userId,revokedAt:null},data:{revokedAt:new Date()}});
    await this.audit(tx,user,tenantId,role?'MEMBER_ROLE_CHANGED':'MEMBER_REMOVED',{membershipId:id,...(role?{role}:{})});return {updated:true};
   });
  }
+ async memberDetails(user:SessionUser,tenantId:string,membershipId:string){return this.transaction(async tx=>{
+  await this.admin(tx,user,tenantId);
+  const target=await tx.tenantMembership.findFirst({where:{id:membershipId,tenantId},include:{tenant:true,adminScopes:true,user:{select:{id:true,email:true,displayName:true,identities:{select:{provider:true}}}}}});
+  if(!target)throw new ApiError(404,'Member not found in this organization.','MEMBER_NOT_FOUND');
+  const accounts=await tx.awsAccount.findMany({where:{tenantId,isDemo:false},select:{id:true,tenantId:true,awsOrganisationId:true,ouId:true,accountId:true,accountName:true,accountType:true,environment:true,riskTier:true,region:true,connectionType:true,connectionStatus:true},orderBy:{accountName:'asc'}});
+  const grants=env.NODE_ENV!=='production'&&target.user.identities.some(item=>item.provider==='development')?await tx.developmentRoleGrant.findMany({where:{tenantId,userId:target.userId,revokedAt:null},select:{id:true,tenantId:true,awsAccountId:true,role:true}}):[];
+  const subject:SessionUser={id:target.userId,email:target.user.email,displayName:target.user.displayName,provider:'membership',providerSubject:target.userId,activeTenantId:tenantId,permissions:[],memberships:[{id:target.id,tenantId,tenantName:target.tenant.name,tenantSlug:target.tenant.slug,role:target.role,status:target.status,scopes:target.adminScopes}],roleAssignments:grants};
+  return {id:target.id,role:target.role,status:target.status,user:{id:target.user.id,email:target.user.email,displayName:target.user.displayName},accounts:accounts.map(row=>{
+   const context:AwsAccountContext={...row,organisationId:row.awsOrganisationId??undefined,ouId:row.ouId??undefined};
+   const direct=target.adminScopes.find(scope=>scope.scopeType==='AWS_ACCOUNT'&&[row.id,row.accountId].includes(scope.scopeId));
+   const inherited={...subject,memberships:[{...subject.memberships[0]!,scopes:target.adminScopes.filter(scope=>!(scope.scopeType==='AWS_ACCOUNT'&&[row.id,row.accountId].includes(scope.scopeId)))}]};
+   return {id:row.id,accountName:row.accountName,awsAccountNumber:row.accountId,region:row.region,connectionStatus:row.connectionStatus,directScope:direct?{canView:direct.canView,canRequest:direct.canRequest,canApprove:direct.canApprove,canProvision:direct.canProvision,canRevoke:direct.canRevoke}:null,effective:authorization.accountAccess(subject,context),inherited:authorization.accountAccess(inherited,context)};
+  })};
+ })}
+ async setMemberAccountAccess(user:SessionUser,tenantId:string,membershipId:string,accountRecordId:string,access:{canView:boolean;canRequest:boolean;canApprove:boolean;canProvision:boolean;canRevoke:boolean}|null){return this.transaction(async tx=>{
+  await this.admin(tx,user,tenantId);
+  const target=await tx.tenantMembership.findFirst({where:{id:membershipId,tenantId,status:'ACTIVE'}}),account=await tx.awsAccount.findFirst({where:{id:accountRecordId,tenantId,isDemo:false},select:{id:true,accountId:true}});
+  if(!target||!account)throw new ApiError(404,'Member or AWS account not found in this organization.','MEMBER_ACCOUNT_NOT_FOUND');
+  if(target.role==='PLATFORM_ADMIN')throw new ApiError(403,'Platform identities cannot be granted customer access here.','PLATFORM_ROLE_PROTECTED');
+  if(access){
+   if(!access.canView&&Object.values(access).some(Boolean))throw new ApiError(422,'Account view access is required for other account actions.','ACCOUNT_VIEW_REQUIRED');
+   const subject:SessionUser={...user,id:target.userId,permissions:[],memberships:[{id:target.id,tenantId,tenantName:'',tenantSlug:'',role:target.role,status:target.status,scopes:[]}],roleAssignments:[]};
+   for(const [flag,capability]of [['canRequest','REQUEST_CREATE'],['canApprove','REQUEST_APPROVE'],['canProvision','PROVISION_EXECUTE'],['canRevoke','GRANT_REVOKE']] as const)if(access[flag]&&!authorization.hasCapability(subject,capability))throw new ApiError(422,'The assigned application role does not permit this account action.','ROLE_CAPABILITY_REQUIRED');
+  }
+  // Normalize any legacy numeric account scope to the internal record ID.
+  await tx.adminScope.deleteMany({where:{tenantMembershipId:membershipId,scopeType:'AWS_ACCOUNT',scopeId:{in:[account.id,account.accountId]}}});
+  if(access)await tx.adminScope.create({data:{tenantMembershipId:membershipId,scopeType:'AWS_ACCOUNT',scopeId:account.id,includeDescendants:false,...access,canManageConfiguration:false}});
+  await this.audit(tx,user,tenantId,access?'MEMBER_ACCOUNT_ACCESS_UPDATED':'MEMBER_ACCOUNT_ACCESS_REMOVED',{membershipId,accountRecordId,...(access??{})});return {updated:true};
+ })}
+ async validateScopeAssignment(user:SessionUser,tenantId:string,membershipId:string,scopeType:'TENANT'|'AWS_ORGANISATION'|'ORGANISATIONAL_UNIT'|'AWS_ACCOUNT',scopeId:string){return this.transaction(async tx=>{
+  await this.admin(tx,user,tenantId);
+  if(!await tx.tenantMembership.findFirst({where:{id:membershipId,tenantId,status:'ACTIVE'}}))throw new ApiError(404,'Active member not found in this organization.','MEMBER_NOT_FOUND');
+  const valid=scopeType==='TENANT'?scopeId===tenantId:scopeType==='AWS_ACCOUNT'?await tx.awsAccount.findFirst({where:{tenantId,OR:[{id:scopeId},{accountId:scopeId}]},select:{id:true}}):scopeType==='AWS_ORGANISATION'?await tx.awsOrganisation.findFirst({where:{tenantId,OR:[{id:scopeId},{organisationId:scopeId}]},select:{id:true}}):await tx.awsOrganisationalUnit.findFirst({where:{awsOrganisation:{tenantId},OR:[{id:scopeId},{ouId:scopeId}]},select:{id:true}});
+  if(!valid)throw new ApiError(403,'Scope must belong to the active organization.','SCOPE_TENANT_VIOLATION');
+ })}
 }
