@@ -1,5 +1,5 @@
-import {useState} from 'react';
-import {Link} from 'react-router-dom';
+import {useEffect,useRef,useState} from 'react';
+import {Link,useLocation} from 'react-router-dom';
 import {useQuery} from '@tanstack/react-query';
 import {api} from '../lib/api';
 import {can} from '../lib/authz';
@@ -11,12 +11,14 @@ import {PageHeader} from '../components/ui';
 
 export default function Organizations(){
  const session=useAuthStore(state=>state.session),[proof,setProof]=useState(()=>sessionStorage.getItem('permissionhub.invitation')??'');
+ const location=useLocation(),invitationsRef=useRef<HTMLElement>(null);
+ useEffect(()=>{if(location.hash!=='#pending-invitations')return;invitationsRef.current?.scrollIntoView?.({block:'start'});invitationsRef.current?.focus({preventScroll:true})},[location.hash]);
  const memberships=session?.user?.memberships.filter(item=>item.status==='ACTIVE')??[];
  const invitation=useQuery({queryKey:['invitation-link',proof],queryFn:()=>api.inspectInvitation(proof),enabled:Boolean(proof&&session?.user?.emailVerified),retry:false});
  return <div className="page organizations-page"><PageHeader eyebrow="Administration" title="Organizations" description="Your memberships and invitations. Organization settings remain restricted to authorized administrators." actions={<OrganizationCreation/>}/>
   <nav className="tabs organization-section-nav" aria-label="Administration sections">{can(session,'ADMINISTRATION_VIEW')&&<Link className="btn secondary" to="/administration">Organization settings</Link>}<Link className="btn secondary active" aria-current="page" to="/administration/organizations">Organizations</Link></nav>
   <section className="panel"><h2>Your organizations</h2>{!memberships.length?<p>You have no active memberships. Accept an invitation below or create your own organization.</p>:<><OrganizationPicker/><div className="membership-list">{memberships.map(item=><article key={item.id}><span><strong>{item.tenantName}</strong><small>{item.role.replaceAll('_',' ')}{item.tenantId===session?.user?.activeTenantId?' · Active organization':''}</small></span>{item.role==='ORGANISATION_ADMIN'&&item.tenantId===session?.user?.activeTenantId&&<Link className="btn secondary" to="/administration?tab=memberships">Manage members</Link>}{item.role==='ORGANISATION_ADMIN'&&item.tenantId!==session?.user?.activeTenantId&&<small>Switch to this organization to manage it.</small>}</article>)}</div></> }</section>
   {proof&&<section className="panel" aria-label="Email invitation">{invitation.isFetching?<p role="status">Checking your email invitation…</p>:invitation.error?<p role="alert">{invitation.error.message}</p>:invitation.data?<p>Your invitation to <strong>{invitation.data.organizationName}</strong> is ready to review below. Sign in with the invited, verified email address.</p>:<p>Verify your email before reviewing this invitation.</p>}<button className="link-button" onClick={()=>{sessionStorage.removeItem('permissionhub.invitation');setProof('')}}>Dismiss email link</button></section>}
-  <section className="panel"><PendingInvitations onResolved={()=>setProof('')}/></section>
+  <section className="panel pending-invitations-anchor" id="pending-invitations" ref={invitationsRef} tabIndex={-1} aria-label="Pending organization invitations"><PendingInvitations onResolved={()=>setProof('')}/></section>
  </div>;
 }

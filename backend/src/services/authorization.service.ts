@@ -30,6 +30,7 @@ export interface ScopedRequest {tenantId?:string;awsAccountId?:string;requesterU
 export interface ScopedGrant {awsAccountId?:string;requestId?:string}
 
 export class AuthorizationService {
+ accountAccess(user:SessionUser,account:AwsAccountContext){return {canView:this.allowed(user,'canView',account),canRequest:this.hasCapability(user,'REQUEST_CREATE')&&this.allowed(user,'canRequest',account),canApprove:this.hasCapability(user,'REQUEST_APPROVE')&&this.allowed(user,'canApprove',account),canProvision:this.hasCapability(user,'PROVISION_EXECUTE')&&this.allowed(user,'canProvision',account),canRevoke:this.hasCapability(user,'GRANT_REVOKE')&&this.allowed(user,'canRevoke',account)}}
  canViewTenant(user:SessionUser,tenantId:string){return this.membership(user,tenantId)!==undefined}
  canViewOrganisation(user:SessionUser,organisationId:string){const org=developmentOrganisations.find(o=>o.id===organisationId||o.organisationId===organisationId);return Boolean(org&&this.allowed(user,'canView',{tenantId:org.tenantId,organisationId:org.id}))}
  canViewOU(user:SessionUser,ouId:string){const ou=developmentOus.find(o=>o.id===ouId||o.ouId===ouId),org=ou&&developmentOrganisations.find(o=>o.id===ou.organisationId);return Boolean(ou&&org&&this.allowed(user,'canView',{tenantId:org.tenantId,organisationId:org.id,ouId:ou.id}))}

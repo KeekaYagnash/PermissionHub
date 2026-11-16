@@ -4,6 +4,8 @@ import {buildReviewPayload,type LiveConfirmation,type ReviewAction} from './revi
 import { ensureAccessToken } from './cognito';
 import type {ConnectionDiagnostics} from '../types';
 export interface OrganizationMembers {members:{id:string;role:string;status:string;user:{id:string;email:string;displayName:string}}[];invitations:{id:string;email:string;role:string;status:string;expiresAt:string;deliveryStatus:string}[]}
+export interface AccountAccess{canView:boolean;canRequest:boolean;canApprove:boolean;canProvision:boolean;canRevoke:boolean}
+export interface MemberDetails{ id:string;role:string;status:string;user:{id:string;email:string;displayName:string};accounts:{id:string;accountName:string;awsAccountNumber:string;region:string;connectionStatus:string;directScope:AccountAccess|null;effective:AccountAccess;inherited:AccountAccess}[] }
 
 export const http=axios.create({baseURL:import.meta.env.VITE_API_BASE_URL||'/api',withCredentials:true});
 let csrfToken='';
@@ -50,6 +52,9 @@ export const api={
  startIdentityLink:()=>http.post('/auth/link/start').then(unwrap<{proof:string}>),
  acceptIdentityLink:(proof:string)=>http.post('/auth/link/accept',{proof}).then(unwrap<AuthSession>),
  organizationMembers:()=>http.get('/admin/members').then(unwrap<OrganizationMembers>),
+ memberDetails:(id:string)=>http.get(`/admin/members/${encodeURIComponent(id)}`).then(unwrap<MemberDetails>),
+ setMemberAccountAccess:(memberId:string,accountId:string,access:AccountAccess)=>http.put(`/admin/members/${encodeURIComponent(memberId)}/accounts/${encodeURIComponent(accountId)}`,access).then(unwrap<{updated:boolean}>),
+ removeMemberAccountAccess:(memberId:string,accountId:string)=>http.delete(`/admin/members/${encodeURIComponent(memberId)}/accounts/${encodeURIComponent(accountId)}`).then(unwrap<{updated:boolean}>),
  inviteMember:(input:{email:string;role:string})=>http.post('/admin/invitations',input).then(unwrap<{message:string;deliveryStatus:string}>),
  resendInvitation:(id:string)=>http.post(`/admin/invitations/${encodeURIComponent(id)}/resend`).then(unwrap<{message:string;deliveryStatus:string}>),
  revokeInvitation:(id:string)=>http.delete(`/admin/invitations/${encodeURIComponent(id)}`).then(unwrap<unknown>),

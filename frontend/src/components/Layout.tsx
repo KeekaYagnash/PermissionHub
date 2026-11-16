@@ -9,6 +9,7 @@ import { ThemeControl } from './ThemeControl';
 import { useAuthStore } from '../store/auth';
 import { shouldAutoSelectAccount } from '../lib/auth';
 import {OrganizationPicker} from './OrganizationPicker';
+import {applicationVersion} from '../lib/version';
 
 const icons:Record<NavKey,ComponentType<{size?:number}>>={
  overview:Home,
@@ -63,7 +64,7 @@ function AppHeader({connection,context,contextError,drawerOpen}:{connection:any;
     {visibleNavItems(session).some(item=>['administration','connection','organizations'].includes(item.key))&&<span className="navigation-group-label">Organization management</span>}
     {visibleNavItems(session).filter(item=>['administration','connection','organizations'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} end={item.key==='administration'} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}
     <ThemeControl/>
-    <img className="maker-logo" src="/DR_Logo_Colour.png" alt="Disraptor"/>
+    <small className="application-version">Version {applicationVersion}</small>
    </div>
   </aside>
   <header className="desktop-account-header desktop-shell" inert={drawerOpen||undefined}><div className="shell-context"><ContextBar connection={connection} context={context} contextError={contextError}/></div><UserMenu compact/></header>
@@ -115,7 +116,7 @@ function MobileNavigationDrawer({open,onClose,returnFocusRef}:{open:boolean;onCl
   <aside id="mobile-nav-drawer" className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation" ref={drawerRef}>
    <div className="drawer-head"><Brand/><button ref={closeRef} className="icon-btn" onClick={onClose} aria-label="Close navigation menu"><X size={18}/></button></div>
    <nav className="drawer-nav" aria-label="Navigation drawer">{visibleNavItems(session,'drawer').filter(item=>!item.mobileVisible).map(item=>{const Icon=icons[item.key];const active=isNavActive(location.pathname,item.key),startManagement=item.key==='administration'||item.key==='connection'&&!visibleNavItems(session).some(link=>link.key==='administration');return <Fragment key={item.key}>{startManagement&&<span className="navigation-group-label">Organization management</span>}<NavLink to={item.path} end={item.key==='administration'} aria-current={active?'page':undefined} className={active?'active':''}><Icon size={18}/><span><strong>{item.label}</strong><small>{item.description}</small></span></NavLink></Fragment>})}</nav>
-   <section className="drawer-utilities" aria-label="Utilities"><ThemeControl/></section>
+   <section className="drawer-utilities" aria-label="Utilities"><ThemeControl/><small className="application-version">Version {applicationVersion}</small></section>
   </aside>
  </div>;
 }
@@ -149,4 +150,4 @@ function ContextBar({connection,context,compact=false,contextError=false}:{conne
   {selectionError&&<span className="error-text" role="alert">{selectionError}</span>}
  </div>
 }
-function UserMenu({compact=false}:{compact?:boolean}){const session=useAuthStore(state=>state.session),clear=useAuthStore(state=>state.clear),navigate=useNavigate(),queryClient=useQueryClient();async function logout(){try{if(cognitoEnabled()){try{await api.logout()}finally{await logoutCognito()}}else await api.logout()}finally{queryClient.clear();clear();if(!cognitoEnabled())navigate('/login',{replace:true})}}return <div className={compact?'user-menu compact':'user-menu'}><NavLink to="/profile" aria-label={`Manage profile for ${session?.user?.displayName??'your account'}`}><strong>{session?.user?.displayName}</strong><small>{session?.user?.email}</small></NavLink><button onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={15}/></button></div>}
+function UserMenu({compact=false}:{compact?:boolean}){const session=useAuthStore(state=>state.session),clear=useAuthStore(state=>state.clear),navigate=useNavigate(),queryClient=useQueryClient();async function logout(){try{if(cognitoEnabled()){try{await api.logout()}finally{await logoutCognito()}}else await api.logout()}finally{queryClient.clear();clear();if(!cognitoEnabled())navigate('/login',{replace:true})}}return <div className={compact?'user-menu compact':'user-menu'}><NavLink to="/profile" aria-label={`Manage profile for ${session?.user?.displayName??'your account'}`}><strong>{session?.user?.displayName}</strong><small>{session?.user?.email}</small></NavLink><button className="sign-out-btn" onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={15}/><span>Sign out</span></button></div>}

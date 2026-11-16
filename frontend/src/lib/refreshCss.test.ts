@@ -30,4 +30,9 @@ describe('responsive visual refresh contracts',()=>{
   expect(css).toContain('--mobile-bottom-nav-height:68px');expect(css).toContain('grid-auto-columns:minmax(0,1fr)');expect(css).toContain('overflow:hidden;background:var(--ph-bg-surface)');expect(css).toContain('max-height:min(84dvh,760px);overflow-y:auto;overscroll-behavior:contain');expect(css).toContain('padding-bottom:calc(var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom) + 24px)');
  });
  it('disables the restrained session spinner for reduced-motion preferences',()=>{expect(css).toContain('.session-loading-spinner{animation:none}');expect(css).toContain('color:var(--ph-link);animation:feedback-spin 1s linear infinite')});
+ it('uses readable danger colors in both themes and hides desktop navigation overflow',()=>{
+  const lum=(value:string)=>{const rgb=value.match(/[a-f\d]{2}/gi)!.map(v=>parseInt(v,16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return rgb[0]!*.2126+rgb[1]!*.7152+rgb[2]!*.0722};
+  for(const theme of ['light','dark']){const block=css.split(`:root[data-theme="${theme}"]`)[1]!.split('}')[0]!,text=lum(block.match(/--ph-danger-text: (#[a-f\d]{6})/i)![1]!),bg=lum(block.match(/--ph-danger-bg: (#[a-f\d]{6})/i)![1]!);expect((Math.max(text,bg)+.05)/(Math.min(text,bg)+.05)).toBeGreaterThanOrEqual(4.5)}
+  expect(css).toContain('.desktop-sidebar,.desktop-sidebar .desktop-nav{overflow:hidden}');expect(css).toContain('background:var(--ph-danger-bg);color:var(--ph-danger-text)');
+ });
 });

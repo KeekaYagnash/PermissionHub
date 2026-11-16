@@ -24,8 +24,8 @@ export default function SelectTenant(){
  return <main className="auth-page"><section className="auth-card"><div className="auth-intro"><Building2 size={28}/><h1>{memberships.length?'Select a tenant':'Set up your organisation'}</h1><p>{memberships.length?'Choose your company context. Only active memberships are shown.':'If an administrator added you, sign in with that verified email address. Otherwise, create your own organisation below.'}</p></div>
  {error&&<p role="alert" className="error-box">{error}</p>}
  <div className="tenant-options">{memberships.map(item=><button key={item.id} disabled={busy} onClick={()=>void select(item.tenantId)}><strong>{item.tenantName}</strong><span>{item.role.replaceAll('_',' ')}</span></button>)}</div>
- {sessionStorage.getItem('permissionhub.invitation')&&<Link to="/administration/organizations">Review your pending invitation</Link>}
- {session?.authenticated&&<Link className="btn secondary" to="/administration/organizations">Organizations and invitations</Link>}
+ {sessionStorage.getItem('permissionhub.invitation')&&<Link to="/administration/organizations#pending-invitations">Review your pending invitation</Link>}
+ {session?.authenticated&&<Link className="btn secondary" to="/administration/organizations#pending-invitations">Organizations and invitations</Link>}
  {!session?<p>Loading memberships…</p>:memberships.length?null:<details open={!memberships.length}><summary>{memberships.length?'Create another organisation':'Create your organisation'}</summary><form onSubmit={event=>{event.preventDefault();void select()}}><label className="field"><span>Company name</span><input value={companyName} onChange={event=>setCompanyName(event.target.value)} required minLength={2} maxLength={120} autoComplete="organization"/></label><button className="btn primary" disabled={busy||companyName.trim().length<2}>{busy?'Saving…':'Create organisation'}</button></form></details>}
  </section></main>;
 }

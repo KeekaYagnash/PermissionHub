@@ -7,6 +7,7 @@ import Layout from './Layout';
 import {api} from '../lib/api';
 import {useAuthStore} from '../store/auth';
 import type {AuthSession,AppRole} from '../types';
+import {applicationVersion} from '../lib/version';
 vi.mock('../lib/api',()=>({api:{context:vi.fn().mockResolvedValue({accounts:[],tenants:[]}),connection:vi.fn(),selectAccount:vi.fn()},setCsrfToken:vi.fn()}));
 vi.mock('../lib/cognito',()=>({cognitoEnabled:()=>false,logoutCognito:vi.fn()}));
 beforeEach(()=>{
@@ -26,6 +27,9 @@ it('preserves capability-filtered desktop navigation and existing request routes
  fireEvent.click(within(navigation).getByRole('link',{name:'Requests'}));
  expect(await screen.findByRole('heading',{name:'Requests content'})).toBeTruthy();
  expect(screen.getByRole('link',{name:'Skip to main content'}).getAttribute('href')).toBe('#main-content');
+});
+it('shows package-derived version and separately destructive sign-out controls with stacked profile details',()=>{
+ open();expect(screen.queryByRole('img',{name:'Disraptor'})).toBeNull();expect(screen.getByText(`Version ${applicationVersion}`)).toBeTruthy();for(const button of screen.getAllByRole('button',{name:'Sign out'}))expect(button.classList.contains('sign-out-btn')).toBe(true);const profile=document.querySelector('.desktop-account-header .user-menu a')!;expect(profile.querySelector('strong')?.textContent).toBe('Test Reviewer');expect(profile.querySelector('small')?.textContent).toBe('test@example.invalid');
 });
 it('traps drawer focus, supports Escape, restores the menu button and unlocks the background',async()=>{
  open('ORGANISATION_ADMIN');
