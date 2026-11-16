@@ -260,3 +260,15 @@ pre { border-radius: 10px; font-size: 12px; line-height: 1.65; }
  .mobile-context-strip { padding-inline: 16px; }
  .theme-toggle.compact svg { display: block; }
 }
+/* Shared operation feedback and organization controls. */
+.feedback-center{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10000;width:min(480px,calc(100vw - 24px));display:grid;gap:8px;pointer-events:none}
+.feedback-toast{pointer-events:auto;display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:0 8px 32px #0003;overflow-wrap:anywhere}
+.feedback-toast>div{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
+.feedback-toast svg{flex-shrink:0}.feedback-toast.success>div>svg{color:#14864e}.feedback-toast.warning>div>svg{color:#b76a0c}.feedback-toast.error>div>svg{color:#d73548}.feedback-toast.loading>div>svg{color:#0499f2;animation:feedback-spin 1s linear infinite}
+@keyframes feedback-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.feedback-toast.loading>div>svg{animation:none}}
+.organization-picker{min-width:0;padding:12px 16px}.organization-picker .field{margin:0;min-width:0}.organization-picker select{width:100%;min-width:0;max-width:100%}.organization-picker-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}.organization-picker .link-button{min-height:36px;font-size:12px}
+.pending-invitations{border-top:1px solid var(--border);margin-top:20px;padding-top:16px}.pending-invitation{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}.pending-invitation small{display:block;color:var(--muted)}
+.organization-account-notice{padding:12px 16px;margin-bottom:16px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.organization-account-notice p{margin:4px 0 0;color:var(--muted)}
+fieldset.onboarding-form{border:0;padding:0;margin:0;min-width:0}.connection-operation-status{padding:10px 14px;border-left:3px solid #0499f2;background:var(--surface);border-radius:6px}
+@media(max-width:1023px){.mobile-context-strip>.organization-picker{width:100%;padding:8px 0}.organization-picker-actions{gap:16px}.pending-invitation{align-items:flex-start;flex-wrap:wrap}.modal-actions>.btn{min-height:44px}}

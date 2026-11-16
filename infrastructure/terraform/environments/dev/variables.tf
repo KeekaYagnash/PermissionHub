@@ -11,16 +11,16 @@ variable "invitation_ses_identity_arn" {
   type    = string
   default = null
   validation {
-    condition     = var.invitation_ses_identity_arn == null ? true : can(regex("^arn:aws:ses:us-east-1:[0-9]{12}:identity/(info@disraptor[.]co[.]za|disraptor[.]co[.]za|disraptor-internal[.]net)$", var.invitation_ses_identity_arn))
-    error_message = "Use a matching EXISTING verified us-east-1 domain identity. disraptor.co.za domain verification is not established by the previously supplied info@ email identity."
+    condition     = var.invitation_ses_identity_arn == null || var.invitation_ses_identity_arn == "arn:aws:ses:us-east-1:143671530412:identity/disraptor-internal.net"
+    error_message = "Dev email must use the existing disraptor-internal.net identity in us-east-1/account 143671530412. A null identity intentionally disables email."
   }
 }
 variable "invitation_sender_email" {
   type    = string
-  default = "no-reply@disraptor.co.za"
+  default = "no-reply@disraptor-internal.net"
   validation {
-    condition     = var.invitation_sender_email == "" || contains(["no-reply@disraptor.co.za", "info@disraptor.co.za"], var.invitation_sender_email) || can(regex("^[^@ ]+@disraptor-internal[.]net$", var.invitation_sender_email))
-    error_message = "Use no-reply@disraptor.co.za or no-reply@disraptor-internal.net with matching existing verified identity/IAM configuration. Legacy verified senders remain supported."
+    condition     = var.invitation_sender_email == "" || var.invitation_sender_email == "no-reply@disraptor-internal.net"
+    error_message = "The shared dev runtime boundary permits only no-reply@disraptor-internal.net. An empty value uses that same default."
   }
 }
 variable "runtime_permissions_boundary_arn" {

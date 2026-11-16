@@ -69,6 +69,9 @@ it('keeps organization administration and connections discoverable for authorize
  expect(within(drawer).getByRole('link',{name:/Administration/}).getAttribute('href')).toBe('/administration');
  expect(within(drawer).getByRole('link',{name:/AWS Connection/}).getAttribute('href')).toBe('/connection');
 });
+it('leaves a nested organization dialog open when unsaved changes prevent Escape dismissal',async()=>{
+ const confirm=vi.spyOn(window,'confirm').mockReturnValue(false);open();fireEvent.click(screen.getByRole('button',{name:'Open navigation menu'}));const drawer=screen.getByRole('dialog',{name:'Navigation'});fireEvent.click(within(drawer).getByRole('button',{name:'Add organization'}));const dialog=screen.getByRole('dialog',{name:'Add organization'});fireEvent.change(within(dialog).getByLabelText('Company name'),{target:{value:'Unsaved company'}});fireEvent.keyDown(document,{key:'Escape'});expect(confirm).toHaveBeenCalled();expect(screen.getByRole('dialog',{name:'Add organization'})).toBeTruthy();expect(screen.getByRole('dialog',{name:'Navigation'})).toBeTruthy();confirm.mockRestore();
+});
 it('retains the session and gives a recovery message when account selection fails',async()=>{
  vi.mocked(api.context).mockResolvedValue({tenants:[],organisations:[],organisationalUnits:[],accounts:[{id:'record-2',accountRecordId:'record-2',tenantId:'tenant',accountId:'123456789012',accountName:'Authorized account',awsAccountNumber:'123456789012',accountType:'DEVELOPMENT',environment:'development',riskTier:'LOW',region:'af-south-1',connectionType:'ACCESS_KEYS',connectionStatus:'PENDING'}]});
  vi.mocked(api.selectAccount).mockRejectedValue(new Error('Connection unavailable'));

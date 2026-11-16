@@ -6,10 +6,11 @@ import App from './App';
 import './index.css';
 import './styles/refresh.css';
 import {applyThemePreference,readThemePreference} from './lib/theme';
+import {createMutationFeedback} from './lib/mutationFeedback';
 
 applyThemePreference(readThemePreference());
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: false } } });
+const queryClient = new QueryClient({ mutationCache:createMutationFeedback(), defaultOptions: { queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: false } } });
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><QueryClientProvider client={queryClient}><BrowserRouter><App /></BrowserRouter></QueryClientProvider></React.StrictMode>

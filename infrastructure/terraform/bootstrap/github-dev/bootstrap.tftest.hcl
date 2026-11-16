@@ -4,34 +4,21 @@ mock_provider "aws" {
   }
 }
 
-run "co_za_domain_is_not_granted_without_explicit_confirmation" {
-  command = plan
-  assert {
-    condition     = var.allow_existing_disraptor_co_za_ses_domain == false && length([for statement in local.runtime_boundary.Statement : statement if try(contains(statement.Resource, "arn:aws:ses:us-east-1:143671530412:identity/disraptor.co.za"), false)]) == 0
-    error_message = "The earlier info@ screenshot is not proof that disraptor.co.za domain sending is verified."
-  }
-}
-
-run "confirmed_existing_co_za_domain_is_scoped_to_requested_no_reply_sender" {
-  command = plan
-  variables {
-    allow_existing_disraptor_co_za_ses_domain = true
-  }
-  assert {
-    condition = length([for statement in local.runtime_boundary.Statement : statement
-      if try(statement.Sid == "TransactionalEmailFromExistingIdentities" && contains(statement.Resource, "arn:aws:ses:us-east-1:143671530412:identity/disraptor.co.za") && contains(statement.Condition.StringLike["ses:FromAddress"], "no-reply@disraptor.co.za"), false)
-    ]) == 1
-    error_message = "Opt-in permission must be scoped to the requested address on the existing domain; this mock does not verify AWS SES."
-  }
-}
-
 run "exact_trust_and_three_roles" {
   command = plan
   assert {
-    condition = length([for statement in local.runtime_boundary.Statement : statement
-      if try(statement.Sid == "TransactionalEmailFromExistingIdentities" && statement.Action == "ses:SendEmail" && toset(statement.Resource) == toset(["arn:aws:ses:us-east-1:143671530412:identity/info@disraptor.co.za", "arn:aws:ses:us-east-1:143671530412:identity/disraptor-internal.net"]) && contains(statement.Condition.StringLike["ses:FromAddress"], "info@disraptor.co.za"), false)
-    ]) == 1
-    error_message = "The independent runtime boundary must permit SES only for the existing us-east-1 identities; an API role policy alone cannot authorize sending."
+    condition = jsonencode([for statement in local.runtime_boundary.Statement : statement if statement.Sid == "TransactionalEmailFromExistingIdentities"]) == jsonencode([{
+      Sid       = "TransactionalEmailFromExistingIdentities"
+      Effect    = "Allow"
+      Action    = "ses:SendEmail"
+      Resource  = "arn:aws:ses:us-east-1:143671530412:identity/disraptor-internal.net"
+      Condition = { StringEquals = { "ses:FromAddress" = "no-reply@disraptor-internal.net" } }
+    }])
+    error_message = "The four-role boundary must permit exactly SendEmail on the internal domain, with an exact no-reply From address and no wildcard/alternative identities."
+  }
+  assert {
+    condition     = length([for statement in local.runtime_boundary.Statement : statement if anytrue([for action in flatten([statement.Action]) : startswith(action, "ses:")])]) == 1
+    error_message = "SES must not also be allowed by another broader boundary statement."
   }
   variables {
     create_oidc_provider   = true
