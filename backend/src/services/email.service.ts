@@ -2,7 +2,8 @@ import {SESClient,SendEmailCommand} from '@aws-sdk/client-ses';
 import {env} from '../config/env.js';
 import {logger} from '../config/logger.js';
 import {renderNotification,applicationLink,type EmailContent} from './email-template.js';
-import {describeEmailFailure,emailConfigurationError} from './email-diagnostics.js';
+import {describeEmailFailure} from './email-diagnostics.js';
+import {resolveEmailSender} from './email-sender.js';
 
 // SES identities are regional. Never use the selected account's credentials or APP_AWS_REGION.
 export const SES_EMAIL_REGION='us-east-1';
@@ -10,8 +11,7 @@ export type EmailEvent='Request Submitted'|'Approved'|'Rejected'|'Provisioned'|'
 export class EmailService {
  private client=new SESClient({region:SES_EMAIL_REGION,maxAttempts:3});
  async sendMessage(to:string,content:EmailContent){
-  const sender=env.SES_FROM_EMAIL.trim().toLowerCase();
-  if(sender!=='info@disraptor.co.za'&&!/^[^@\s]+@disraptor-internal\.net$/.test(sender))throw emailConfigurationError('EMAIL_SENDER_NOT_ALLOWED');
+  const sender=resolveEmailSender(env.SES_FROM_EMAIL,env.SES_IDENTITY_ARN);
   const response=await this.client.send(new SendEmailCommand({Source:sender,Destination:{ToAddresses:[to]},Message:{Subject:{Data:content.subject.replace(/[\r\n]/g,' ').slice(0,200),Charset:'UTF-8'},Body:{Text:{Data:content.text,Charset:'UTF-8'},Html:{Data:content.html,Charset:'UTF-8'}}}}),{abortSignal:AbortSignal.timeout(6000)});
   return {delivery:'ses' as const,messageId:response.MessageId};
  }

@@ -4,6 +4,27 @@ mock_provider "aws" {
   }
 }
 
+run "co_za_domain_is_not_granted_without_explicit_confirmation" {
+  command = plan
+  assert {
+    condition     = var.allow_existing_disraptor_co_za_ses_domain == false && length([for statement in local.runtime_boundary.Statement : statement if try(contains(statement.Resource, "arn:aws:ses:us-east-1:143671530412:identity/disraptor.co.za"), false)]) == 0
+    error_message = "The earlier info@ screenshot is not proof that disraptor.co.za domain sending is verified."
+  }
+}
+
+run "confirmed_existing_co_za_domain_is_scoped_to_requested_no_reply_sender" {
+  command = plan
+  variables {
+    allow_existing_disraptor_co_za_ses_domain = true
+  }
+  assert {
+    condition = length([for statement in local.runtime_boundary.Statement : statement
+      if try(statement.Sid == "TransactionalEmailFromExistingIdentities" && contains(statement.Resource, "arn:aws:ses:us-east-1:143671530412:identity/disraptor.co.za") && contains(statement.Condition.StringLike["ses:FromAddress"], "no-reply@disraptor.co.za"), false)
+    ]) == 1
+    error_message = "Opt-in permission must be scoped to the requested address on the existing domain; this mock does not verify AWS SES."
+  }
+}
+
 run "exact_trust_and_three_roles" {
   command = plan
   assert {

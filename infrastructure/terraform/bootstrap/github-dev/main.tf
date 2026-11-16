@@ -48,15 +48,21 @@ variable "create_oidc_provider" {
 variable "create_state_bucket" { default = false }
 variable "create_artifact_bucket" { default = false }
 variable "create_lock_table" { default = false }
+variable "allow_existing_disraptor_co_za_ses_domain" {
+  type        = bool
+  default     = false
+  description = "Opt in ONLY after an authorized operator confirms the EXISTING disraptor.co.za SES domain identity is verified in us-east-1. This does not create or verify any identity."
+}
 
 locals {
   github_immutable_repository = "${split("/", var.github_repository)[0]}@${var.github_repository_owner_id}/${split("/", var.github_repository)[1]}@${var.github_repository_id}"
   provider_arn                = "arn:aws:iam::${var.aws_account_id}:oidc-provider/token.actions.githubusercontent.com"
   boundary_arn                = "arn:aws:iam::${var.aws_account_id}:policy/permissionhub-github-runtime-boundary-dev"
   template_variables = {
-    account_id      = var.aws_account_id, region = var.aws_region,
-    state_bucket    = var.state_bucket, state_key = var.state_key, lock_table = var.lock_table,
-    artifact_bucket = var.artifact_bucket, boundary_arn = local.boundary_arn
+    account_id                                = var.aws_account_id, region = var.aws_region,
+    state_bucket                              = var.state_bucket, state_key = var.state_key, lock_table = var.lock_table,
+    artifact_bucket                           = var.artifact_bucket, boundary_arn = local.boundary_arn
+    allow_existing_disraptor_co_za_ses_domain = var.allow_existing_disraptor_co_za_ses_domain
   }
   trust_policy = {
     Version = "2012-10-17"

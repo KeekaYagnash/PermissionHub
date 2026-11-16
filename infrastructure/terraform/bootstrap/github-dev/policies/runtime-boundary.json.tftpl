@@ -55,11 +55,12 @@
       "Action": "ses:SendEmail",
       "Resource": [
         "arn:aws:ses:us-east-1:${account_id}:identity/info@disraptor.co.za",
-        "arn:aws:ses:us-east-1:${account_id}:identity/disraptor-internal.net"
+        "arn:aws:ses:us-east-1:${account_id}:identity/disraptor-internal.net"%{ if allow_existing_disraptor_co_za_ses_domain },
+        "arn:aws:ses:us-east-1:${account_id}:identity/disraptor.co.za"%{ endif }
       ],
       "Condition": {
         "StringLike": {
-          "ses:FromAddress": ["info@disraptor.co.za", "*@disraptor-internal.net"]
+          "ses:FromAddress": ["info@disraptor.co.za", "*@disraptor-internal.net"%{ if allow_existing_disraptor_co_za_ses_domain }, "no-reply@disraptor.co.za"%{ endif }]
         }
       }
     },
