@@ -76,7 +76,7 @@ function renderConnection(){
 
 beforeEach(()=>{
  vi.mocked(api.connections).mockResolvedValue([account]);
- vi.mocked(api.awsDiagnostics).mockResolvedValue({status:'ok'});
+ vi.mocked(api.awsDiagnostics).mockResolvedValue({activeTenantId:'tenant-1',diagnosticStatus:'ACCOUNT_REQUIRED',observedAt:'2026-11-16T00:00:00Z',source:'SAVED_CONNECTION_STATUS'});
  vi.mocked(api.createAwsAccount).mockResolvedValue({account:{accountRecordId:'new-account'}});
  vi.mocked(api.session).mockResolvedValue(session);
  vi.mocked(api.validateLocalCredentials).mockResolvedValue({success:true});
@@ -91,6 +91,15 @@ afterEach(()=>{
 });
 
 describe('Connection Add Account modal',()=>{
+ it('keeps direct credentials independent of role ARNs and omits role fields from the request',async()=>{
+  const user=userEvent.setup();renderConnection();await user.click(screen.getByRole('button',{name:'Add account'}));const dialog=screen.getByRole('dialog',{name:'Add AWS account'});expect(within(dialog).queryByLabelText('Read role ARN')).toBeNull();expect(within(dialog).queryByLabelText('Provision role ARN (optional)')).toBeNull();await user.type(screen.getByLabelText('Account name'),'Direct Account');await user.type(screen.getByLabelText('AWS account ID'),'123456789012');await user.type(screen.getByLabelText('AWS Access Key ID'),'TESTONLYACCESSKEY');await user.type(screen.getByLabelText('AWS Secret Access Key'),'test-only-secret-never-sent-to-aws');await user.click(within(dialog).getByRole('button',{name:'Save and validate later'}));await waitFor(()=>expect(api.createAwsAccount).toHaveBeenCalled());const payload=vi.mocked(api.createAwsAccount).mock.calls[0]![0];expect(payload).toMatchObject({connectionType:'ACCESS_KEYS',accessKeyId:'TESTONLYACCESSKEY'});expect(payload).not.toHaveProperty('readRoleArn');expect(payload).not.toHaveProperty('provisionRoleArn');expect(payload).not.toHaveProperty('externalIdSecretReference');
+ });
+ it('requires a valid account-specific read role only for Assume role and excludes direct credentials',async()=>{
+  const user=userEvent.setup();renderConnection();await user.click(screen.getByRole('button',{name:'Add account'}));await user.type(screen.getByLabelText('Account name'),'Role Account');await user.type(screen.getByLabelText('AWS account ID'),'123456789012');await user.selectOptions(screen.getByLabelText('Authentication method'),'ASSUME_ROLE');const dialog=screen.getByRole('dialog',{name:'Add AWS account'}),save=within(dialog).getByRole('button',{name:'Add account'});expect(screen.getByLabelText('Read role ARN')).toHaveProperty('required',true);expect(save).toHaveProperty('disabled',true);await user.type(screen.getByLabelText('Read role ARN'),'arn:aws:iam::999999999999:role/ReadRole');expect(save).toHaveProperty('disabled',true);await user.clear(screen.getByLabelText('Read role ARN'));await user.type(screen.getByLabelText('Read role ARN'),'arn:aws:iam::123456789012:role/ReadRole');expect(save).toHaveProperty('disabled',false);await user.click(save);await waitFor(()=>expect(api.createAwsAccount).toHaveBeenCalled());const payload=vi.mocked(api.createAwsAccount).mock.calls[0]![0];expect(payload).toMatchObject({connectionType:'ASSUME_ROLE',readRoleArn:'arn:aws:iam::123456789012:role/ReadRole'});expect(payload).not.toHaveProperty('accessKeyId');expect(payload).not.toHaveProperty('secretAccessKey');
+ });
+ it('clears hidden role fields when returning from Assume role to direct credentials',async()=>{
+  const user=userEvent.setup();renderConnection();await user.click(screen.getByRole('button',{name:'Add account'}));await user.selectOptions(screen.getByLabelText('Authentication method'),'ASSUME_ROLE');await user.type(screen.getByLabelText('Read role ARN'),'arn:aws:iam::123456789012:role/ReadRole');await user.type(screen.getByLabelText('Provision role ARN (optional)'),'arn:aws:iam::123456789012:role/ProvisionRole');await user.selectOptions(screen.getByLabelText('Authentication method'),'ACCESS_KEYS');expect(screen.queryByLabelText('Read role ARN')).toBeNull();expect(screen.queryByLabelText('Provision role ARN (optional)')).toBeNull();await user.selectOptions(screen.getByLabelText('Authentication method'),'ASSUME_ROLE');expect(screen.getByLabelText('Read role ARN')).toHaveProperty('value','');
+ });
  it('opens Add Account in a modal and does not render the form inline',async()=>{
   const user=userEvent.setup();
   renderConnection();

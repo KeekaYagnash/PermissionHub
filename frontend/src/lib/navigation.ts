@@ -8,9 +8,10 @@ export const navItems=[
  {key:'new-request',label:'New Request',shortLabel:'New',path:'/new-request',description:'Start an IAM permission request',mobileVisible:true,drawerVisible:true,capability:'REQUEST_CREATE' as Capability},
  {key:'permissions',label:'Permissions',shortLabel:'Policies',path:'/permissions',description:'Managed policy catalogue',mobileVisible:false,drawerVisible:true,capability:'PERMISSION_CATALOGUE_VIEW' as Capability},
  {key:'identities',label:'AWS Identities',shortLabel:'Identities',path:'/identities',description:'IAM users and roles',mobileVisible:false,drawerVisible:true,capability:'IDENTITY_VIEW_OWN' as Capability},
- {key:'activity',label:'Activity',shortLabel:'Activity',path:'/activity',description:'Audit and lifecycle events',mobileVisible:true,drawerVisible:true,capability:'ACTIVITY_VIEW' as Capability},
+ {key:'activity',label:'Activity',shortLabel:'Activity',path:'/activity',description:'Audit and lifecycle events',mobileVisible:false,drawerVisible:true,capability:'ACTIVITY_VIEW' as Capability},
  {key:'administration',label:'Administration',shortLabel:'Admin',path:'/administration',description:'Organization members, account access and approvals',mobileVisible:false,drawerVisible:true,capability:'ADMINISTRATION_VIEW' as Capability},
- {key:'connection',label:'AWS Connection',shortLabel:'Connect',path:'/connection',description:'Connect and validate your organization’s AWS accounts',mobileVisible:false,drawerVisible:true,capability:'CONNECTION_VIEW' as Capability}
+ {key:'connection',label:'AWS Connection',shortLabel:'Connect',path:'/connection',description:'Connect and validate your organization’s AWS accounts',mobileVisible:false,drawerVisible:true,capability:'CONNECTION_VIEW' as Capability},
+ {key:'organizations',label:'Organizations',shortLabel:'Organizations',path:'/administration/organizations',description:'Your memberships and invitations',mobileVisible:false,drawerVisible:true,capability:undefined}
 ] as const satisfies readonly NavItem[];
 
 export type NavKey=typeof navItems[number]['key'];
@@ -23,6 +24,7 @@ export function activeNavKey(pathname:string):NavKey{
  if(pathname.startsWith('/permissions'))return 'permissions';
  if(pathname.startsWith('/identities'))return 'identities';
  if(pathname.startsWith('/activity'))return 'activity';
+ if(pathname.startsWith('/administration/organizations'))return 'organizations';
  if(pathname.startsWith('/administration'))return 'administration';
  if(pathname.startsWith('/connection'))return 'connection';
  return 'overview';

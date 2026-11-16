@@ -26,4 +26,8 @@ describe('responsive visual refresh contracts',()=>{
   expect(css).toContain('.mobile-context-strip .context-bar { display: flex;');
   expect(css).toContain('.theme-toggle.compact svg { display: block; }');
  });
+ it('reserves safe-area space for fixed navigation and confines overflow to the bottom sheet',()=>{
+  expect(css).toContain('--mobile-bottom-nav-height:68px');expect(css).toContain('grid-auto-columns:minmax(0,1fr)');expect(css).toContain('overflow:hidden;background:var(--ph-bg-surface)');expect(css).toContain('max-height:min(84dvh,760px);overflow-y:auto;overscroll-behavior:contain');expect(css).toContain('padding-bottom:calc(var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom) + 24px)');
+ });
+ it('disables the restrained session spinner for reduced-motion preferences',()=>{expect(css).toContain('.session-loading-spinner{animation:none}');expect(css).toContain('color:var(--ph-link);animation:feedback-spin 1s linear infinite')});
 });

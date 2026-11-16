@@ -23,6 +23,7 @@ const Administration=lazy(()=>import('./pages/Administration'));
 const AcceptInvitation=lazy(()=>import('./pages/AcceptInvitation'));
 const Profile=lazy(()=>import('./pages/Profile'));
 const CompleteProfile=lazy(()=>import('./pages/CompleteProfile'));
+const Organizations=lazy(()=>import('./pages/Organizations'));
 
 export default function App(){
  return <><FeedbackCenter/><PublicThemeControl/><Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
@@ -46,6 +47,7 @@ export default function App(){
     <Route path="activity" element={<RequireCapability capability="ACTIVITY_VIEW"><Activity/></RequireCapability>}/>
     <Route path="connection" element={<RequireCapability capability="CONNECTION_VIEW"><Connection/></RequireCapability>}/>
     <Route path="administration" element={<RequireCapability capability="ADMINISTRATION_VIEW"><Administration/></RequireCapability>}/>
+    <Route path="administration/organizations" element={<Organizations/>}/>
    </Route>
    </Route>
    <Route path="*" element={<Navigate to="/" replace/>}/>
