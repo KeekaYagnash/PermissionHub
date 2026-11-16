@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { AppContext,AuditEvent,AuthSession,AwsAccountContext,AwsResource,ConnectionStatus,IamIdentity,IamPolicyDetail,IamPolicySummary,Page,PermissionRequest } from '../types';
 import {buildReviewPayload,type LiveConfirmation,type ReviewAction} from './review';
 import { ensureAccessToken } from './cognito';
+import type {ConnectionDiagnostics} from '../types';
 export interface OrganizationMembers {members:{id:string;role:string;status:string;user:{id:string;email:string;displayName:string}}[];invitations:{id:string;email:string;role:string;status:string;expiresAt:string;deliveryStatus:string}[]}
 
 export const http=axios.create({baseURL:import.meta.env.VITE_API_BASE_URL||'/api',withCredentials:true});
@@ -71,7 +72,7 @@ export const api={
  resetAwsAccount:(accountRecordId:string,dryRun=true,confirm=false)=>http.post(`/aws/accounts/${encodeURIComponent(accountRecordId)}/reset`,{dryRun,confirm}).then(unwrap<any>),
  runtimeDebug:()=>http.get('/debug/runtime').then(unwrap<any>),
  clearAwsCache:()=>http.post('/aws/cache/clear').then(unwrap<any>),
- awsDiagnostics:()=>http.get('/aws/diagnostics').then(unwrap<any>),
+ awsDiagnostics:()=>http.get('/aws/diagnostics').then(unwrap<ConnectionDiagnostics>),
  validateReadConnection:()=>http.post('/aws/connection/validate-read').then(unwrap<any>),
  testCapabilities:()=>http.post('/aws/connection/capabilities').then(unwrap<any>),
  validateProvisionConnection:()=>http.post('/aws/connection/validate-provision').then(unwrap<any>),

@@ -24,16 +24,16 @@ describe('navigation routing',()=>{
  });
 
  it('uses one shared route configuration for mobile and drawer navigation',()=>{
-  expect(navItems.filter(item=>item.mobileVisible).map(item=>item.key)).toEqual(['overview','requests','new-request','activity']);
+  expect(navItems.filter(item=>item.mobileVisible).map(item=>item.key)).toEqual(['overview','requests','new-request']);
   expect(navItems.every(item=>item.drawerVisible)).toBe(true);
  });
 
  it('hides activity administration and connection for requesters',()=>{
-  expect(visibleNavItems(session(['REQUESTER'])).map(item=>item.key)).toEqual(['overview','requests','new-request','permissions','identities']);
+  expect(visibleNavItems(session(['REQUESTER'])).map(item=>item.key)).toEqual(['overview','requests','new-request','permissions','identities','organizations']);
  });
 
  it('shows read-only reviewer navigation',()=>{
-  expect(visibleNavItems(session(['SECURITY_REVIEWER'])).map(item=>item.key)).toEqual(['overview','requests','new-request','permissions','identities','activity','administration','connection']);
+  expect(visibleNavItems(session(['SECURITY_REVIEWER'])).map(item=>item.key)).toEqual(['overview','requests','new-request','permissions','identities','activity','administration','connection','organizations']);
  });
 });
 

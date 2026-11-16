@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ComponentType, type RefObject } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Activity, FileKey2, GitPullRequestArrow, Menu, Home, KeyRound, LogOut, PlugZap, Settings, UserRoundCog, X } from 'lucide-react';
+import { Activity, FileKey2, GitPullRequestArrow, Ellipsis, Building2, Home, KeyRound, LogOut, PlugZap, Settings, UserRoundCog, X } from 'lucide-react';
 import { useQuery,useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { cognitoEnabled,logoutCognito } from '../lib/cognito';
@@ -18,7 +18,8 @@ const icons:Record<NavKey,ComponentType<{size?:number}>>={
  identities:UserRoundCog,
  activity:Activity,
  administration:Settings,
- connection:PlugZap
+ connection:PlugZap,
+ organizations:Building2
 };
 
 export default function Layout(){
@@ -45,11 +46,12 @@ export default function Layout(){
   {session?.developmentAuthenticationActive&&<div className="development-auth-banner" role="status">Development authentication is active</div>}
   <AppHeader connection={data} context={context.data} contextError={Boolean(context.error)} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} menuButtonRef={menuButtonRef}/>
   <main id="main-content" tabIndex={-1} inert={drawerOpen||undefined}><Outlet key={`${session?.user?.activeTenantId}:${activeAwsAccountRecordId??'no-aws-account'}`}/></main>
+  <MobileBottomNavigation open={drawerOpen} onOpen={()=>setDrawerOpen(true)} menuButtonRef={menuButtonRef}/>
   <MobileNavigationDrawer open={drawerOpen} onClose={closeDrawer} connection={data} context={context.data} returnFocusRef={menuButtonRef}/>
  </div>;
 }
 
-function AppHeader({connection,context,contextError,drawerOpen,setDrawerOpen,menuButtonRef}:{connection:any;context:any;contextError:boolean;drawerOpen:boolean;setDrawerOpen:(open:boolean)=>void;menuButtonRef:RefObject<HTMLButtonElement|null>}){
+function AppHeader({connection,context,contextError,drawerOpen}:{connection:any;context:any;contextError:boolean;drawerOpen:boolean;setDrawerOpen:(open:boolean)=>void;menuButtonRef:RefObject<HTMLButtonElement|null>}){
  const location=useLocation();
  const session=useAuthStore(state=>state.session);
  return <>
@@ -58,33 +60,31 @@ function AppHeader({connection,context,contextError,drawerOpen,setDrawerOpen,men
    <OrganizationPicker/>
    <DesktopNavigation/>
    <div className="desktop-sidebar-footer">
-    {visibleNavItems(session).some(item=>['administration','connection'].includes(item.key))&&<span className="navigation-group-label">Organization management</span>}
-    {visibleNavItems(session).filter(item=>['administration','connection'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}
+    {visibleNavItems(session).some(item=>['administration','connection','organizations'].includes(item.key))&&<span className="navigation-group-label">Organization management</span>}
+    {visibleNavItems(session).filter(item=>['administration','connection','organizations'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} end={item.key==='administration'} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}
     <ThemeControl/>
-    <UserMenu compact/>
     <img className="maker-logo" src="/DR_Logo_Colour.png" alt="Disraptor"/>
    </div>
   </aside>
-  <header className="desktop-account-header desktop-shell"><ContextBar connection={connection} context={context} contextError={contextError}/></header>
-  <header className="mobile-header">
+  <header className="desktop-account-header desktop-shell" inert={drawerOpen||undefined}><div className="shell-context"><ContextBar connection={connection} context={context} contextError={contextError}/></div><UserMenu compact/></header>
+  <header className="mobile-header" inert={drawerOpen||undefined}>
    <Brand/>
-   <div className="mobile-header-actions"><ThemeControl compact/><button ref={menuButtonRef} className="mobile-header-menu" aria-label="Open navigation menu" aria-expanded={drawerOpen} aria-controls="mobile-nav-drawer" onClick={()=>setDrawerOpen(true)}><Menu size={18}/></button></div>
+   <div className="mobile-header-actions"><UserMenu compact/><ThemeControl compact/></div>
   </header>
-  <div className="mobile-context-strip"><OrganizationIdentity/><ContextBar connection={connection} context={context} contextError={contextError} compact/></div>
+  <div className="mobile-context-strip" inert={drawerOpen||undefined}><OrganizationPicker/><ContextBar connection={connection} context={context} contextError={contextError} compact/></div>
  </>;
 }
 
 function Brand(){return <Link to="/" className="brand" aria-label="PermissionHub overview"><img className="product-icon" src="/DR_Icon_Colour.png" alt=""/><div><strong>PermissionHub</strong><span>AWS permission requests</span></div></Link>}
 
-function OrganizationIdentity(){const session=useAuthStore(state=>state.session);const membership=session?.user?.memberships.find(item=>item.tenantId===session.user?.activeTenantId&&item.status==='ACTIVE');return membership?<div className="organization-identity"><small>Organization</small><strong title={membership.tenantName}>{membership.tenantName}</strong></div>:null}
 
 function DesktopNavigation(){
  const location=useLocation();
  const session=useAuthStore(state=>state.session);
- return <nav className="desktop-nav" aria-label="Primary navigation">{visibleNavItems(session).filter(item=>!['administration','connection'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} end={item.path==='/' ? true : undefined} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}</nav>;
+ return <nav className="desktop-nav" aria-label="Primary navigation">{visibleNavItems(session).filter(item=>!['administration','connection','organizations'].includes(item.key)).map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} end={item.path==='/' ? true : undefined} aria-current={isNavActive(location.pathname,item.key)?'page':undefined} className={isNavActive(location.pathname,item.key)?'active':''}><Icon size={16}/><span>{item.label}</span></NavLink>})}</nav>;
 }
 
-function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}:{open:boolean;onClose:()=>void;connection:any;context:any;returnFocusRef:RefObject<HTMLButtonElement|null>}){
+function MobileNavigationDrawer({open,onClose,returnFocusRef}:{open:boolean;onClose:()=>void;connection:any;context:any;returnFocusRef:RefObject<HTMLButtonElement|null>}){
  const drawerRef=useRef<HTMLDivElement>(null);
  const closeRef=useRef<HTMLButtonElement>(null);
  const location=useLocation();
@@ -114,10 +114,16 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
   <button className="drawer-backdrop" aria-label="Close navigation menu" onClick={onClose}/>
   <aside id="mobile-nav-drawer" className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation" ref={drawerRef}>
    <div className="drawer-head"><Brand/><button ref={closeRef} className="icon-btn" onClick={onClose} aria-label="Close navigation menu"><X size={18}/></button></div>
-   <nav className="drawer-nav" aria-label="Navigation drawer">{visibleNavItems(session,'drawer').map(item=>{const Icon=icons[item.key];const active=isNavActive(location.pathname,item.key),startManagement=item.key==='administration'||item.key==='connection'&&!visibleNavItems(session).some(link=>link.key==='administration');return <Fragment key={item.key}>{startManagement&&<span className="navigation-group-label">Organization management</span>}<NavLink to={item.path} aria-current={active?'page':undefined} className={active?'active':''}><Icon size={18}/><span><strong>{item.label}</strong><small>{item.description}</small></span></NavLink></Fragment>})}</nav>
-   <section className="drawer-utilities" aria-label="Utilities"><OrganizationPicker/><h2>Active context</h2><ContextBar connection={connection} context={context} compact/><ThemeControl/><UserMenu/><img className="maker-logo" src="/DR_Logo_Colour.png" alt="Disraptor"/></section>
+   <nav className="drawer-nav" aria-label="Navigation drawer">{visibleNavItems(session,'drawer').filter(item=>!item.mobileVisible).map(item=>{const Icon=icons[item.key];const active=isNavActive(location.pathname,item.key),startManagement=item.key==='administration'||item.key==='connection'&&!visibleNavItems(session).some(link=>link.key==='administration');return <Fragment key={item.key}>{startManagement&&<span className="navigation-group-label">Organization management</span>}<NavLink to={item.path} end={item.key==='administration'} aria-current={active?'page':undefined} className={active?'active':''}><Icon size={18}/><span><strong>{item.label}</strong><small>{item.description}</small></span></NavLink></Fragment>})}</nav>
+   <section className="drawer-utilities" aria-label="Utilities"><ThemeControl/></section>
   </aside>
  </div>;
+}
+
+function MobileBottomNavigation({open,onOpen,menuButtonRef}:{open:boolean;onOpen:()=>void;menuButtonRef:RefObject<HTMLButtonElement|null>}){
+ const session=useAuthStore(state=>state.session),location=useLocation();
+ const moreActive=visibleNavItems(session,'drawer').filter(item=>!item.mobileVisible).some(item=>isNavActive(location.pathname,item.key));
+ return <nav className="mobile-bottom-nav" aria-label="Mobile primary navigation" inert={open||undefined}>{visibleNavItems(session,'mobile').map(item=>{const Icon=icons[item.key];return <NavLink key={item.key} to={item.path} className={isNavActive(location.pathname,item.key)?'active':''} aria-current={isNavActive(location.pathname,item.key)?'page':undefined}><Icon size={20}/><span>{item.label}</span></NavLink>})}<button ref={menuButtonRef} type="button" className={open||moreActive?'active':''} aria-label="More navigation" aria-expanded={open} aria-controls="mobile-nav-drawer" onClick={onOpen}><Ellipsis size={20}/><span>More</span></button></nav>;
 }
 
 function ConnectionDot({connection}:{connection:any}){return <span className={connection?.connected?'connection-dot connected':'connection-dot mock'} aria-label={connection?.connected?'AWS connected':'AWS disconnected'}/>}
@@ -143,4 +149,4 @@ function ContextBar({connection,context,compact=false,contextError=false}:{conne
   {selectionError&&<span className="error-text" role="alert">{selectionError}</span>}
  </div>
 }
-function UserMenu({compact=false}:{compact?:boolean}){const session=useAuthStore(state=>state.session),clear=useAuthStore(state=>state.clear),navigate=useNavigate(),queryClient=useQueryClient();async function logout(){try{if(cognitoEnabled()){try{await api.logout()}finally{await logoutCognito()}}else await api.logout()}finally{queryClient.clear();clear();if(!cognitoEnabled())navigate('/login',{replace:true})}}return <div className={compact?'user-menu compact':'user-menu'}><NavLink to="/profile"><strong>{session?.user?.displayName}</strong><small>{session?.user?.email}</small></NavLink><button onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={15}/></button></div>}
+function UserMenu({compact=false}:{compact?:boolean}){const session=useAuthStore(state=>state.session),clear=useAuthStore(state=>state.clear),navigate=useNavigate(),queryClient=useQueryClient();async function logout(){try{if(cognitoEnabled()){try{await api.logout()}finally{await logoutCognito()}}else await api.logout()}finally{queryClient.clear();clear();if(!cognitoEnabled())navigate('/login',{replace:true})}}return <div className={compact?'user-menu compact':'user-menu'}><NavLink to="/profile" aria-label={`Manage profile for ${session?.user?.displayName??'your account'}`}><strong>{session?.user?.displayName}</strong><small>{session?.user?.email}</small></NavLink><button onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={15}/></button></div>}

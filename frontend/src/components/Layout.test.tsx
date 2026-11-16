@@ -29,14 +29,14 @@ it('preserves capability-filtered desktop navigation and existing request routes
 });
 it('traps drawer focus, supports Escape, restores the menu button and unlocks the background',async()=>{
  open('ORGANISATION_ADMIN');
- const menu=screen.getByRole('button',{name:'Open navigation menu'});
+ const menu=screen.getByRole('button',{name:'More navigation'});
  menu.focus();fireEvent.click(menu);
  const dialog=screen.getByRole('dialog',{name:'Navigation'});
  const close=within(dialog).getByRole('button',{name:'Close navigation menu'});
  await waitFor(()=>expect(document.activeElement).toBe(close));
  expect(document.getElementById('main-content')?.hasAttribute('inert')).toBe(true);
  expect(document.body.style.overflow).toBe('hidden');
- const last=within(dialog).getByRole('button',{name:'Sign out'});last.focus();fireEvent.keyDown(last,{key:'Tab'});
+ const last=within(dialog).getByRole('button',{name:'Switch to dark theme'});last.focus();fireEvent.keyDown(last,{key:'Tab'});
  const first=within(dialog).getByRole('link',{name:'PermissionHub overview'});
  expect(document.activeElement).toBe(first);
  fireEvent.keyDown(first,{key:'Tab',shiftKey:true});expect(document.activeElement).toBe(last);
@@ -46,38 +46,38 @@ it('traps drawer focus, supports Escape, restores the menu button and unlocks th
  expect(document.body.style.overflow).toBe('');
  expect(document.getElementById('main-content')?.hasAttribute('inert')).toBe(false);
 });
-it('returns focus to the header opener when the drawer is opened from the header',async()=>{
- open();const menu=screen.getAllByRole('button',{name:'Open navigation menu'})[0]!;
+it('returns focus to More when the drawer is dismissed',async()=>{
+ open();const menu=screen.getAllByRole('button',{name:'More navigation'})[0]!;
  menu.focus();fireEvent.click(menu);
  const dialog=screen.getByRole('dialog',{name:'Navigation'});
  fireEvent.click(within(dialog).getByRole('button',{name:'Close navigation menu'}));
  expect(document.activeElement).toBe(menu);
 });
-it('shows real organization membership and one mobile menu without a bottom bar',()=>{
+it('shows organization context and four fixed mobile destinations',()=>{
  open();expect(screen.getAllByText('Test Company').length).toBeGreaterThan(0);
- expect(screen.queryByRole('navigation',{name:'Mobile primary navigation'})).toBeNull();
- expect(screen.getAllByRole('button',{name:'Open navigation menu'})).toHaveLength(1);
- fireEvent.click(screen.getByRole('button',{name:'Open navigation menu'}));
+ const bottom=screen.getByRole('navigation',{name:'Mobile primary navigation'});expect(within(bottom).getAllByRole('link').map(item=>item.textContent)).toEqual(['Overview','Requests','New Request']);expect(within(bottom).getByRole('button',{name:'More navigation'})).toBeTruthy();
+ expect(screen.getAllByRole('button',{name:'More navigation'})).toHaveLength(1);
+ fireEvent.click(screen.getByRole('button',{name:'More navigation'}));
  const drawer=screen.getByRole('dialog',{name:'Navigation'});
  expect(within(drawer).queryByRole('link',{name:/Administration/})).toBeNull();
  expect(within(drawer).queryByRole('link',{name:/AWS Connection/})).toBeNull();
  expect(within(drawer).getByRole('link',{name:/Permissions/})).toBeTruthy();
 });
 it('keeps organization administration and connections discoverable for authorized administrators',()=>{
- open('ORGANISATION_ADMIN');fireEvent.click(screen.getByRole('button',{name:'Open navigation menu'}));
+ open('ORGANISATION_ADMIN');fireEvent.click(screen.getByRole('button',{name:'More navigation'}));
  const drawer=screen.getByRole('dialog',{name:'Navigation'});
  expect(within(drawer).getByRole('link',{name:/Administration/}).getAttribute('href')).toBe('/administration');
  expect(within(drawer).getByRole('link',{name:/AWS Connection/}).getAttribute('href')).toBe('/connection');
 });
-it('leaves a nested organization dialog open when unsaved changes prevent Escape dismissal',async()=>{
- const confirm=vi.spyOn(window,'confirm').mockReturnValue(false);open();fireEvent.click(screen.getByRole('button',{name:'Open navigation menu'}));const drawer=screen.getByRole('dialog',{name:'Navigation'});fireEvent.click(within(drawer).getByRole('button',{name:'Add organization'}));const dialog=screen.getByRole('dialog',{name:'Add organization'});fireEvent.change(within(dialog).getByLabelText('Company name'),{target:{value:'Unsaved company'}});fireEvent.keyDown(document,{key:'Escape'});expect(confirm).toHaveBeenCalled();expect(screen.getByRole('dialog',{name:'Add organization'})).toBeTruthy();expect(screen.getByRole('dialog',{name:'Navigation'})).toBeTruthy();confirm.mockRestore();
+it('confines remaining destinations to More and dismisses with the backdrop',()=>{
+ open();expect(screen.getAllByRole('combobox',{name:'Active organization'}).length).toBeGreaterThan(0);fireEvent.click(screen.getByRole('button',{name:'More navigation'}));const drawer=screen.getByRole('dialog',{name:'Navigation'});expect(within(drawer).getByRole('link',{name:/Organizations/}).getAttribute('href')).toBe('/administration/organizations');expect(within(drawer).queryByRole('link',{name:'Requests'})).toBeNull();expect(within(drawer).queryByRole('combobox')).toBeNull();fireEvent.click(document.querySelector('.drawer-backdrop')!);expect(screen.queryByRole('dialog')).toBeNull();
 });
 it('retains the session and gives a recovery message when account selection fails',async()=>{
  vi.mocked(api.context).mockResolvedValue({tenants:[],organisations:[],organisationalUnits:[],accounts:[{id:'record-2',accountRecordId:'record-2',tenantId:'tenant',accountId:'123456789012',accountName:'Authorized account',awsAccountNumber:'123456789012',accountType:'DEVELOPMENT',environment:'development',riskTier:'LOW',region:'af-south-1',connectionType:'ACCESS_KEYS',connectionStatus:'PENDING'}]});
  vi.mocked(api.selectAccount).mockRejectedValue(new Error('Connection unavailable'));
  open();await screen.findAllByRole('option',{name:'Authorized account · 123456789012'});
  fireEvent.change(screen.getAllByRole('combobox',{name:'Active AWS account'})[0]!,{target:{value:'record-2'}});
- expect(await screen.findByText('Could not switch context. Your previous selection is retained. Please try again.')).toBeTruthy();
+ expect((await screen.findAllByText('Could not switch context. Your previous selection is retained. Please try again.')).length).toBeGreaterThan(0);
  expect(useAuthStore.getState().session?.user?.activeTenantId).toBe('tenant');
  expect(api.selectAccount).toHaveBeenCalledWith('record-2');
 });
