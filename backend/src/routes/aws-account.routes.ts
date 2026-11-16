@@ -47,6 +47,9 @@ router.post('/aws/accounts',requireNamedCapability('CONNECTION_MANAGE'),onboard)
 router.put('/aws/accounts/by-account-id/:awsAccountNumber',requireNamedCapability('CONNECTION_MANAGE'),onboard);
 
 async function onboard(req:AuthenticatedRequest,res:any){
+ // The authenticated, membership-checked server context owns every new account.
+ // Never accept a different organization from an onboarding payload.
+ assertAccountOrganization(req.tenantId!,req.body);
  const parsed=accountInput.parse(req.body),awsAccountNumber=String(req.params.awsAccountNumber??parsed.awsAccountNumber??parsed.accountId),tenantId=req.tenantId!,input:ManualAccountInput={...parsed,awsAccountNumber};
  logger.info({event:'aws_account_onboarding_started',routeHandlerReached:true,correlationId:req.correlationId,activeTenantId:tenantId,activeUserId:req.sessionUser!.id,submittedAwsAccountNumber:awsAccountNumber,prismaOperation:'transaction.findUnique/create/recover'},'AWS account onboarding started');
  try{
@@ -89,4 +92,12 @@ function activeRecordId(req:AuthenticatedRequest){return req.sessionUser?.active
 function setActiveAccount(req:AuthenticatedRequest,value:string|undefined){if(!req.sessionUser)return;req.sessionUser.activeAwsAccountRecordId=value;req.sessionUser.activeAccountId=value;req.session.user=req.sessionUser}
 function saveSession(req:AuthenticatedRequest){return new Promise<void>((resolve,reject)=>req.session.save(error=>error?reject(error):resolve()))}
 function safeDatabaseTarget(value:string){try{const url=new URL(value);return {host:url.hostname,port:url.port||'5432',name:url.pathname.replace(/^\//,'')||'unknown',schema:url.searchParams.get('schema')??'public'}}catch{return {host:'invalid',port:'unknown',name:'unknown',schema:'unknown'}}}
+export function assertAccountOrganization(activeTenantId:string,input:unknown){
+ if(!activeTenantId)throw new ApiError(409,'Select an organization before adding an AWS account.','TENANT_REQUIRED');
+ if(input&&typeof input==='object')for(const field of ['tenantId','organizationId','organisationId']){
+  const supplied=(input as Record<string,unknown>)[field];
+  if(supplied!==undefined&&supplied!==activeTenantId)throw new ApiError(403,'AWS accounts must belong to your active organization.','TENANT_VIOLATION');
+ }
+ return activeTenantId;
+}
 export default router;

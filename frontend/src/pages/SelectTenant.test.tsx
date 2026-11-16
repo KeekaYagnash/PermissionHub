@@ -5,11 +5,12 @@ import {MemoryRouter} from 'react-router-dom';
 import {useAuthStore} from '../store/auth';
 import {api} from '../lib/api';
 import SelectTenant from './SelectTenant';
+import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
 vi.mock('../lib/api',()=>({setCsrfToken:vi.fn(),api:{session:vi.fn(),selectTenant:vi.fn(),setOrganization:vi.fn()}}));
 afterEach(()=>{cleanup();useAuthStore.getState().clear();vi.resetAllMocks()});
 function open(){
  useAuthStore.getState().setSession({authenticated:true,authProvider:'cognito',devAuthAvailable:false,csrfToken:'',user:{id:'new',email:'new@example.com',displayName:'New user',provider:'cognito',providerSubject:'subject',permissions:[],memberships:[]}});
- render(<MemoryRouter><SelectTenant/></MemoryRouter>);
+ render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter><SelectTenant/></MemoryRouter></QueryClientProvider>);
 }
 describe('organisation onboarding',()=>{
  it('offers company setup instead of an empty tenant selector',()=>{

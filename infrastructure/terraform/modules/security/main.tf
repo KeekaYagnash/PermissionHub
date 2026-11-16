@@ -1,4 +1,7 @@
 resource "aws_security_group" "lambda" {
+  # Rules are managed individually below. Do not add inline ingress/egress,
+  # egress = [], or an exclusive rule set: those would conflict with standalone
+  # ownership and could remove console-managed rules during reconciliation.
   name        = "${var.name}-lambda"
   description = "PermissionHub Lambda functions"
   vpc_id      = var.vpc_id
@@ -6,6 +9,11 @@ resource "aws_security_group" "lambda" {
 }
 
 resource "aws_security_group_rule" "lambda_egress_all" {
+  # Preserve this resource address and all-IPv4 egress. It already includes TCP
+  # 443 (SES via NAT), PostgreSQL and other current Lambda dependencies.
+  # The additional console-created HTTPS rule is redundant and intentionally
+  # unmanaged here; adding another resource for it would require importing its
+  # actual rule first and is unnecessary for the desired network access.
   type              = "egress"
   security_group_id = aws_security_group.lambda.id
   from_port         = 0

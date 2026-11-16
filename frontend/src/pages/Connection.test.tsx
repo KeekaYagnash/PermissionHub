@@ -97,6 +97,8 @@ describe('Connection Add Account modal',()=>{
   expect(screen.queryByLabelText('Account name')).toBeNull();
   await user.click(screen.getByRole('button',{name:'Add account'}));
   expect(screen.getByRole('dialog',{name:'Add AWS account'})).toBeTruthy();
+  expect(within(screen.getByRole('dialog',{name:'Add AWS account'})).getByText('Organization: Disraptor')).toBeTruthy();
+  expect(screen.getByText('This AWS account will be added only to this organization. Existing accounts will not be moved.')).toBeTruthy();
   expect(screen.getByRole('button',{name:'Close add account'})).toBeTruthy();
   expect(document.querySelector('.connection-account-list')).toBeTruthy();
  });

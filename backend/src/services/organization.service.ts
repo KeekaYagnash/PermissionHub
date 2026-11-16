@@ -54,14 +54,31 @@ export class OrganizationService {
  async resend(user:SessionUser,tenantId:string,id:string){const item=await this.db.organizationInvitation.findFirst({where:{id,tenantId}});if(!item)throw new ApiError(404,'Invitation not found.','INVITATION_NOT_FOUND');return this.invite(user,tenantId,item.email,item.role,id)}
  async revoke(user:SessionUser,tenantId:string,id:string){return this.transaction(async tx=>{await this.admin(tx,user,tenantId);const result=await tx.organizationInvitation.updateMany({where:{id,tenantId,status:'PENDING'},data:{status:'REVOKED',revokedAt:new Date()}});if(!result.count)throw new ApiError(409,'Invitation is not pending.','INVITATION_NOT_PENDING');await this.audit(tx,user,tenantId,'INVITATION_REVOKED',{invitationId:id});return {revoked:true}})}
  async inspect(user:SessionUser,proof:string){const email=verifiedEmail(user),item=await this.db.organizationInvitation.findUnique({where:{tokenHash:tokenHash(proof)},include:{tenant:true}});if(!item||item.email!==email)throw new ApiError(403,'This invitation is not for your verified email address. Sign in with the invited account.','INVITATION_EMAIL_MISMATCH');if(item.status!=='PENDING')throw new ApiError(410,`This invitation is ${item.status.toLowerCase()}.`,'INVITATION_UNAVAILABLE');if(item.expiresAt<=new Date())throw new ApiError(410,'This invitation has expired. Ask the organisation administrator to resend it.','INVITATION_EXPIRED');return {organizationName:item.tenant.name,role:item.role,expiresAt:item.expiresAt}}
- async accept(user:SessionUser,proof:string){
+ async pendingInvitations(user:SessionUser){
+  const email=verifiedEmail(user);
+  const items=await this.db.organizationInvitation.findMany({where:{email,status:'PENDING',expiresAt:{gt:new Date()},tenant:{status:'ACTIVE'}},select:{id:true,role:true,expiresAt:true,tenant:{select:{name:true}}},orderBy:{createdAt:'desc'}});
+  return items.map(item=>({id:item.id,organizationName:item.tenant.name,role:item.role,expiresAt:item.expiresAt}));
+ }
+ async decline(user:SessionUser,id:string){
+  const email=verifiedEmail(user);
+  return this.transaction(async tx=>{
+   const item=await tx.organizationInvitation.findFirst({where:{id,email,status:'PENDING',expiresAt:{gt:new Date()},tenant:{status:'ACTIVE'}}});
+   if(!item)throw new ApiError(410,'This invitation is unavailable for your verified account.','INVITATION_UNAVAILABLE');
+   const result=await tx.organizationInvitation.updateMany({where:{id:item.id,email,status:'PENDING',expiresAt:{gt:new Date()}},data:{status:'DECLINED'}});
+   if(result.count!==1)throw new ApiError(409,'This invitation has already been updated.','INVITATION_UNAVAILABLE');
+   await this.audit(tx,user,item.tenantId,'INVITATION_DECLINED',{invitationId:item.id});return {declined:true};
+  });
+ }
+ async accept(user:SessionUser,proof:string){return this.acceptSelected(user,{tokenHash:tokenHash(proof)})}
+ async acceptPending(user:SessionUser,id:string){return this.acceptSelected(user,{id})}
+ private async acceptSelected(user:SessionUser,where:Prisma.OrganizationInvitationWhereUniqueInput){
   const email=verifiedEmail(user);requireProfile(user);
   const result=await this.transaction(async tx=>{
-   const item=await tx.organizationInvitation.findUnique({where:{tokenHash:tokenHash(proof)},include:{tenant:true}});
+   const item=await tx.organizationInvitation.findUnique({where,include:{tenant:true}});
    if(!item||item.email!==email)throw new ApiError(403,'Sign in with the invited, verified email address.','INVITATION_EMAIL_MISMATCH');
    if(item.status!=='PENDING'||item.expiresAt<=new Date()||item.tenant.status!=='ACTIVE')throw new ApiError(410,'This invitation is expired, revoked or already used. Ask an administrator for a new invitation.','INVITATION_UNAVAILABLE');
    if(!organizationRoles.includes(item.role as typeof organizationRoles[number]))throw new ApiError(403,'This invitation contains a role that cannot be assigned by an organisation administrator.','ROLE_NOT_ASSIGNABLE');
-   const consumed=await tx.organizationInvitation.updateMany({where:{id:item.id,tokenHash:tokenHash(proof),status:'PENDING',expiresAt:{gt:new Date()}},data:{status:'ACCEPTED',acceptedAt:new Date(),acceptedByUserId:user.id}});
+   const consumed=await tx.organizationInvitation.updateMany({where:{id:item.id,tokenHash:item.tokenHash,status:'PENDING',expiresAt:{gt:new Date()}},data:{status:'ACCEPTED',acceptedAt:new Date(),acceptedByUserId:user.id}});
    if(consumed.count!==1)throw new ApiError(409,'This invitation has already been used.','INVITATION_ALREADY_USED');
    const existing=await tx.tenantMembership.findUnique({where:{tenantId_userId:{tenantId:item.tenantId,userId:user.id}}});
    if(existing?.status!=='ACTIVE'){
@@ -72,7 +89,7 @@ export class OrganizationService {
    await tx.user.update({where:{id:user.id},data:{activeTenantId:item.tenantId,activeAwsAccountRecordId:null}});
    await this.audit(tx,user,item.tenantId,'INVITATION_ACCEPTED',{invitationId:item.id});return {tenantId:item.tenantId,name:item.tenant.name};
   });
-  try{await this.mailer.send(email,`You joined ${result.name}`,`Your verified account has joined ${result.name} on PermissionHub. Application roles do not grant AWS IAM credentials.`)}catch{try{await this.db.organizationInvitation.updateMany({where:{tokenHash:tokenHash(proof)},data:{deliveryStatus:'CONFIRMATION_FAILED'}})}catch{/* Joining succeeded even if confirmation delivery/metadata failed. */}}
+  try{await this.mailer.send(email,`You joined ${result.name}`,`Your verified account has joined ${result.name} on PermissionHub. Application roles do not grant AWS IAM credentials.`)}catch{try{await this.db.organizationInvitation.updateMany({where,data:{deliveryStatus:'CONFIRMATION_FAILED'}})}catch{/* Joining succeeded even if confirmation delivery/metadata failed. */}}
   return result;
  }
  async changeMember(user:SessionUser,tenantId:string,id:string,role?:ApplicationRole){

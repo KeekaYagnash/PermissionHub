@@ -19,3 +19,12 @@ it('password recovery includes entering code and choosing the new password',asyn
  await open();fireEvent.change(screen.getByLabelText('Email'),{target:{value:'new@example.com'}});fireEvent.click(screen.getByRole('button',{name:'Forgot password?'}));await screen.findByRole('heading',{name:'Reset your password'});fireEvent.change(screen.getByLabelText('New password'),{target:{value:'New-fake-password-123!'}});fireEvent.change(screen.getByLabelText('Verification code'),{target:{value:'654321'}});fireEvent.click(screen.getByRole('button',{name:'Set new password'}));await waitFor(()=>expect(cognito.confirmCognitoPasswordReset).toHaveBeenCalledWith('new@example.com','654321','New-fake-password-123!'));
 });
 it('does not render unconfigured Microsoft or Google sign-in buttons',async()=>{await open();expect(screen.queryByRole('button',{name:/Microsoft|Google/})).toBeNull()});
+it('omits hosted sign-in and its empty layout container on both authentication screens',async()=>{
+ await open();expect(screen.queryByRole('button',{name:'Use Cognito hosted sign in'})).toBeNull();expect(document.querySelector('.tenant-options')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Create account'}));expect(screen.getByRole('heading',{name:'Create your account'})).toBeTruthy();expect(screen.queryByRole('button',{name:'Use Cognito hosted sign in'})).toBeNull();expect(document.querySelector('.tenant-options')).toBeNull();
+});
+it('keeps email/password sign-in connected to Cognito and loads the authenticated backend session',async()=>{
+ const session={authenticated:true,authProvider:'cognito',devAuthAvailable:false};vi.mocked(api.session).mockResolvedValue(session);
+ await open();fireEvent.change(screen.getByLabelText('Email'),{target:{value:'member@example.com'}});fireEvent.change(screen.getByLabelText('Password'),{target:{value:'Test-only-password-123!'}});fireEvent.submit(screen.getByLabelText('Email').closest('form')!);
+ await waitFor(()=>expect(cognito.signInWithCognito).toHaveBeenCalledWith('member@example.com','Test-only-password-123!'));await waitFor(()=>expect(api.session).toHaveBeenCalled());await waitFor(()=>expect(useAuthStore.getState().session).toEqual(session));expect(cognito.startCognitoLogin).not.toHaveBeenCalled();
+});

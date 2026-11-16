@@ -21,6 +21,10 @@ run "reviewed_dev_ci_configuration_plans_without_aws" {
     migration_lambda_artifact_key    = "lambda/migration/test.zip"
   }
   assert {
+    condition     = local.lambda_common_environment.SES_REGION == "us-east-1" && local.lambda_common_environment.SES_FROM_EMAIL == "no-reply@disraptor-internal.net" && local.lambda_common_environment.SES_IDENTITY_ARN == "arn:aws:ses:us-east-1:143671530412:identity/disraptor-internal.net"
+    error_message = "Dev Lambda sender, SES region and identity ARN must remain aligned with the exact shared boundary grant."
+  }
+  assert {
     condition     = var.environment == "dev" && var.aws_region == "af-south-1" && var.lambda_artifact_bucket == "permissionhub-dev-lambda-artifacts"
     error_message = "CI configuration must target the expected development environment."
   }

@@ -8,6 +8,7 @@ import { isNavActive, visibleNavItems, type NavKey } from '../lib/navigation';
 import { ThemeControl } from './ThemeControl';
 import { useAuthStore } from '../store/auth';
 import { shouldAutoSelectAccount } from '../lib/auth';
+import {OrganizationPicker} from './OrganizationPicker';
 
 const icons:Record<NavKey,ComponentType<{size?:number}>>={
  overview:Home,
@@ -29,8 +30,9 @@ export default function Layout(){
  const closeDrawer=useCallback(()=>setDrawerOpen(false),[]);
  const menuButtonRef=useRef<HTMLButtonElement>(null);
  const location=useLocation();
- useEffect(()=>{if(shouldAutoSelectAccount(context.data))void api.selectAccount(context.data!.accounts[0]!.id).then(value=>{setSession(value);queryClient.clear()})},[context.data,queryClient,setSession]);
- useEffect(()=>setDrawerOpen(false),[location.pathname]);
+ const contextChanging=useAuthStore(state=>state.contextChanging);
+ useEffect(()=>{if(!contextChanging&&shouldAutoSelectAccount(context.data))void api.selectAccount(context.data!.accounts[0]!.id).then(value=>{setSession(value);queryClient.clear()}).catch(()=>{/* Keep selection available for a deliberate retry. */})},[context.data,contextChanging,queryClient,setSession]);
+ useEffect(()=>setDrawerOpen(false),[location.pathname,session?.user?.activeTenantId]);
  useEffect(()=>{
   const media=window.matchMedia('(min-width: 1024px)');
   const sync=()=>{if(media.matches)setDrawerOpen(false)};
@@ -42,7 +44,7 @@ export default function Layout(){
   <a className="skip-link" href="#main-content">Skip to main content</a>
   {session?.developmentAuthenticationActive&&<div className="development-auth-banner" role="status">Development authentication is active</div>}
   <AppHeader connection={data} context={context.data} contextError={Boolean(context.error)} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} menuButtonRef={menuButtonRef}/>
-  <main id="main-content" tabIndex={-1} inert={drawerOpen||undefined}><Outlet key={activeAwsAccountRecordId??'no-aws-account'}/></main>
+  <main id="main-content" tabIndex={-1} inert={drawerOpen||undefined}><Outlet key={`${session?.user?.activeTenantId}:${activeAwsAccountRecordId??'no-aws-account'}`}/></main>
   <MobileNavigationDrawer open={drawerOpen} onClose={closeDrawer} connection={data} context={context.data} returnFocusRef={menuButtonRef}/>
  </div>;
 }
@@ -53,7 +55,7 @@ function AppHeader({connection,context,contextError,drawerOpen,setDrawerOpen,men
  return <>
   <aside className="desktop-sidebar desktop-shell" aria-label="Desktop navigation drawer">
    <Brand/>
-   <OrganizationIdentity/>
+   <OrganizationPicker/>
    <DesktopNavigation/>
    <div className="desktop-sidebar-footer">
     {visibleNavItems(session).some(item=>['administration','connection'].includes(item.key))&&<span className="navigation-group-label">Organization management</span>}
@@ -94,6 +96,8 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
   document.body.style.overflow='hidden';
   const focusTimer=window.setTimeout(()=>closeRef.current?.focus(),0);
   const onKeyDown=(event:KeyboardEvent)=>{
+   // A portal dialog owns focus/Escape until its own guarded close succeeds.
+   if(document.querySelector('.modal[aria-modal="true"]'))return;
    if(event.key==='Escape'){event.preventDefault();onClose();return}
    if(event.key!=='Tab'||!drawerRef.current)return;
    const focusable=[...drawerRef.current.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),select:not([disabled]),textarea:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])')];
@@ -111,7 +115,7 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
   <aside id="mobile-nav-drawer" className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation" ref={drawerRef}>
    <div className="drawer-head"><Brand/><button ref={closeRef} className="icon-btn" onClick={onClose} aria-label="Close navigation menu"><X size={18}/></button></div>
    <nav className="drawer-nav" aria-label="Navigation drawer">{visibleNavItems(session,'drawer').map(item=>{const Icon=icons[item.key];const active=isNavActive(location.pathname,item.key),startManagement=item.key==='administration'||item.key==='connection'&&!visibleNavItems(session).some(link=>link.key==='administration');return <Fragment key={item.key}>{startManagement&&<span className="navigation-group-label">Organization management</span>}<NavLink to={item.path} aria-current={active?'page':undefined} className={active?'active':''}><Icon size={18}/><span><strong>{item.label}</strong><small>{item.description}</small></span></NavLink></Fragment>})}</nav>
-   <section className="drawer-utilities" aria-label="Utilities"><OrganizationIdentity/><h2>Active context</h2><ContextBar connection={connection} context={context} compact/><ThemeControl/><UserMenu/><img className="maker-logo" src="/DR_Logo_Colour.png" alt="Disraptor"/></section>
+   <section className="drawer-utilities" aria-label="Utilities"><OrganizationPicker/><h2>Active context</h2><ContextBar connection={connection} context={context} compact/><ThemeControl/><UserMenu/><img className="maker-logo" src="/DR_Logo_Colour.png" alt="Disraptor"/></section>
   </aside>
  </div>;
 }
@@ -119,20 +123,20 @@ function MobileNavigationDrawer({open,onClose,connection,context,returnFocusRef}
 function ConnectionDot({connection}:{connection:any}){return <span className={connection?.connected?'connection-dot connected':'connection-dot mock'} aria-label={connection?.connected?'AWS connected':'AWS disconnected'}/>}
 function ContextBar({connection,context,compact=false,contextError=false}:{connection:any;context:any;compact?:boolean;contextError?:boolean}){
  const session=useAuthStore(state=>state.session),setSession=useAuthStore(state=>state.setSession),queryClient=useQueryClient();
+ const contextChanging=useAuthStore(state=>state.contextChanging);
  const [changing,setChanging]=useState(false),[selectionError,setSelectionError]=useState('');
  const activeRecordId=session?.user?.activeAwsAccountRecordId??session?.user?.activeAccountId;
  const active=context?.accounts?.find((account:any)=>account.accountRecordId===activeRecordId);
  async function changeSelection(value:string,kind:'account'|'tenant'){
-  setChanging(true);setSelectionError('');
-  try{const next=await(kind==='account'?api.selectAccount(value):api.selectTenant(value));setSession(next);queryClient.clear()}
+  if(changing||contextChanging)return;setChanging(true);setSelectionError('');
+  try{const next=await(kind==='account'?api.selectAccount(value):api.selectTenant(value));await queryClient.cancelQueries();queryClient.clear();setSession(next)}
   catch{setSelectionError('Could not switch context. Your previous selection is retained. Please try again.')}
   finally{setChanging(false)}
  }
  const status=contextError?'Account context unavailable':changing?'Switching account…':!context?'Loading accounts…':!activeRecordId?'Select an AWS account to get started':connection?.connected?'Connected':active?.connectionStatus?.replaceAll('_',' ').toLowerCase()??'Checking connection…';
  return <div className={compact?'context-bar compact':'context-bar'}>
   <ConnectionDot connection={connection}/>
-  {context?.tenants?.length>1&&<select aria-label="Active tenant" disabled={changing} value={session?.user?.activeTenantId??''} onChange={event=>void changeSelection(event.target.value,'tenant')}>{context.tenants.map((item:any)=><option value={item.id} key={item.id}>{item.name}</option>)}</select>}
-  <select aria-label="Active AWS account" disabled={changing||!context||!context.accounts?.length} value={activeRecordId??''} onChange={event=>void changeSelection(event.target.value,'account')}><option value="" disabled>Select AWS account</option>{context?.accounts?.map((account:any)=><option value={account.accountRecordId} key={account.accountRecordId}>{account.accountName} · {account.awsAccountNumber}</option>)}</select>
+  <select aria-label="Active AWS account" disabled={changing||contextChanging||!context||!context.accounts?.length} value={activeRecordId??''} onChange={event=>void changeSelection(event.target.value,'account')}><option value="" disabled>Select AWS account</option>{context?.accounts?.map((account:any)=><option value={account.accountRecordId} key={account.accountRecordId}>{account.accountName} · {account.awsAccountNumber}</option>)}</select>
   {active&&<><span className={`account-type ${active.accountType.toLowerCase()}`}>{active.accountType.replaceAll('_',' ')}</span><span>{active.region}</span></>}
   <span className="context-status" role="status">{status}</span>
   {!activeRecordId&&visibleNavItems(session).some(item=>item.key==='connection')&&<Link className="context-next-action" to="/connection">Manage AWS connections</Link>}

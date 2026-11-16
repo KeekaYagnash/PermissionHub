@@ -1,4 +1,5 @@
 import { useEffect,useMemo,useRef,useState } from 'react';
+import {feedback} from '../store/feedback';
 import { useMutation,useQuery,useQueryClient } from '@tanstack/react-query';
 import { Link,useSearchParams } from 'react-router-dom';
 import { AlertTriangle,Check,ChevronRight,FileJson,FileKey2,KeyRound,RefreshCw,Search,ShieldCheck,UserRound,UsersRound,X } from 'lucide-react';
@@ -22,7 +23,7 @@ const defaultPolicy=JSON.stringify({Version:'2012-10-17',Statement:[{Effect:'All
 export default function NewRequest(){
  const [params]=useSearchParams(),qc=useQueryClient();
  const session=useAuthStore(state=>state.session);
- const [step,setStep]=useState(1),[maxUnlocked,setMaxUnlocked]=useState(1),[toast,setToast]=useState<string>(),[submitted,setSubmitted]=useState<any>();
+ const [step,setStep]=useState(1),[maxUnlocked,setMaxUnlocked]=useState(1),[submitted,setSubmitted]=useState<any>();
  const panelRef=useRef<HTMLElement>(null);
  const [targetType,setTargetType]=useState<TargetType>(),[target,setTarget]=useState<IamIdentity>(),[selectedUsers,setSelectedUsers]=useState<IamIdentity[]>([]);
  const isUser=targetType==='USER',isRole=targetType==='ROLE',isGroup=targetType==='GROUP';
@@ -67,9 +68,9 @@ export default function NewRequest(){
  const selectedGroupError=Boolean(groupFlow&&effectiveGroupMode==='EXISTING'&&target&&selectedGroupDetail.error&&!selectedGroupResolved);
  const currentGroupUsers=useMemo(()=>new Set((selectedGroupResolved?.users??[]).map(user=>user.userName)),[selectedGroupResolved]);
  const memberSearchResults=useMemo(()=>fuzzyIdentities((users.data?.data??[]).filter(identity=>identity.type==='USER'&&!currentGroupUsers.has(identity.name)),identitySearch,false),[users.data,identitySearch,currentGroupUsers]);
- const policyValidation=useMutation({mutationFn:(document:Record<string,unknown>)=>api.validatePolicy(document),onSuccess:()=>setToast('Policy validated. Access Analyzer findings are shown in review when available.')});
+ const policyValidation=useMutation({meta:{feedbackCompleted:false},mutationFn:(document:Record<string,unknown>)=>api.validatePolicy(document),onSuccess:()=>feedback.show('request-result','Policy validated. Access Analyzer findings are shown in review when available.','success')});
  const pendingDraftId=useRef<string|undefined>(undefined);
- const create=useMutation({mutationFn:async (payload:Parameters<typeof api.createRequest>[0])=>{if(pendingDraftId.current)return {id:pendingDraftId.current};const request=await api.createRequest(payload);pendingDraftId.current=request.id;return request},onSuccess:async request=>{const submittedRequest=await api.submitRequest(request.id);pendingDraftId.current=undefined;setSubmitted(submittedRequest);setToast(`Request ${submittedRequest.id} submitted for approval.`);await Promise.all([qc.invalidateQueries({queryKey:['requests']}),qc.invalidateQueries({queryKey:['activity']})])}});
+ const create=useMutation({meta:{feedbackCompleted:false},mutationFn:async (payload:Parameters<typeof api.createRequest>[0])=>{if(pendingDraftId.current)return {id:pendingDraftId.current};const request=await api.createRequest(payload);pendingDraftId.current=request.id;return request},onSuccess:async request=>{const submittedRequest=await api.submitRequest(request.id);pendingDraftId.current=undefined;setSubmitted(submittedRequest);feedback.show('request-result',`Request ${submittedRequest.id} submitted for approval.`,'success');await Promise.all([qc.invalidateQueries({queryKey:['requests']}),qc.invalidateQueries({queryKey:['activity']})])}});
  const preselected=params.get('policyArn');
  const previousAccount=useRef(activeAccountRecordId);
  useEffect(()=>{
@@ -178,7 +179,6 @@ function submit(){
  return <div className="page request-workflow">
   <PageHeader eyebrow="New request" title="Request an IAM permission change" description="Select the identity, permissions, scope, timing and justification. AWS changes are not made until approval and provisioning." />
   {isRole&&<div className="info-note compact"><strong>Requesting access for an IAM role</strong><p>Choose whether to create or update a role. A trust relationship controls who can assume it; attached policies control what it can do. Your request will be reviewed before any AWS change is made.</p></div>}
-  {toast&&<div className="toast" role="status"><Check size={15}/>{toast}<button onClick={()=>setToast(undefined)} aria-label="Dismiss notification"><X size={14}/></button></div>}
   <div className="wizard">
    <div className="mobile-step-header" aria-live="polite"><span>Step {step} of {steps.length}</span><strong>{steps[step-1]}</strong><i style={{width:`${(step/steps.length)*100}%`}}/></div>
    <aside className="step-nav" aria-label="Request steps"><ol>{steps.map((label,index)=>{const n=index+1,done=n<maxUnlocked&&stepValid(n),available=canOpenWizardStep(n,maxUnlocked);return <li key={label}><button aria-current={step===n?'step':undefined} className={`${step===n?'active':''} ${done?'done':''} ${!available?'disabled':''}`} onClick={()=>goToStep(n)} disabled={!available}><span>{done?<Check size={14}/>:n}</span><strong>{label}</strong></button></li>})}</ol></aside>

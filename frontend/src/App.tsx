@@ -5,6 +5,7 @@ import AuthGate from './components/AuthGate';
 import {PublicThemeControl} from './components/ThemeControl';
 import { useAuthStore } from './store/auth';
 import { can, type Capability } from './lib/authz';
+import {FeedbackCenter} from './components/Feedback';
 
 const Overview=lazy(()=>import('./pages/Overview'));
 const Requests=lazy(()=>import('./pages/Requests'));
@@ -24,7 +25,7 @@ const Profile=lazy(()=>import('./pages/Profile'));
 const CompleteProfile=lazy(()=>import('./pages/CompleteProfile'));
 
 export default function App(){
- return <><PublicThemeControl/><Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
+ return <><FeedbackCenter/><PublicThemeControl/><Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
   <Routes>
    <Route path="login" element={<Login/>}/>
    <Route path="auth/callback" element={<Login/>}/>

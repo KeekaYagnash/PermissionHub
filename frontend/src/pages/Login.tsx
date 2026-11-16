@@ -5,12 +5,16 @@ import {api} from '../lib/api';
 import {useAuthStore} from '../store/auth';
 import {cognitoEnabled,completeCognitoLogin,configuredProviders,confirmCognitoPasswordReset,confirmCognitoSignUp,emailNeedsVerification,ensureAccessToken,resendCognitoConfirmation,requestEmailVerification,signInWithCognito,signUpWithCognito,startCognitoLogin,startCognitoPasswordReset,verifyEmailAttribute} from '../lib/cognito';
 import {onboardingDestination} from '../lib/onboarding';
+import {usePendingFeedback} from '../components/Feedback';
+import {feedback} from '../store/feedback';
 
 type Mode='sign-in'|'sign-up'|'confirm'|'reset'|'verify';
 export default function Login(){
  const [mode,setMode]=useState<Mode>('sign-in'),[email,setEmail]=useState(''),[name,setName]=useState(''),[password,setPassword]=useState(''),[code,setCode]=useState('');
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[users,setUsers]=useState<{id:string;displayName:string;email:string;roles:string[]}[]>([]),[devAvailable,setDevAvailable]=useState(false),[loading,setLoading]=useState(true);
  const navigate=useNavigate(),setSession=useAuthStore(s=>s.setSession);
+ usePendingFeedback(busy,'Completing authentication…');
+ useEffect(()=>{if(error)feedback.show('authentication-result','Authentication could not be completed. Review the message in the form.','error')},[error]);
  async function finish(){
   if(emailNeedsVerification()){setMode('verify');setNotice('Verify your email address before joining or creating an organisation.');return}
   const linking=sessionStorage.getItem('permissionhub.identityLink');
@@ -36,8 +40,9 @@ export default function Login(){
   else if(mode==='reset'){await confirmCognitoPasswordReset(email,code,password);setPassword('');setCode('');setMode('sign-in');setNotice('Password updated. Sign in with your new password.');}
   else if(mode==='verify'){await verifyEmailAttribute(code);setCode('');await finish();}
   else{await signInWithCognito(email,password);setPassword('');await finish()}
+  feedback.show('authentication-result','Authentication step completed. Follow the next step shown in the form.','success');
  }catch(e){setError(message(e))}finally{setBusy(false)}}
- async function perform(work:()=>Promise<void>,success:string){setBusy(true);setError('');try{await work();setNotice(success)}catch(e){setError(message(e))}finally{setBusy(false)}}
+ async function perform(work:()=>Promise<void>,success:string){if(busy)return;setBusy(true);setError('');try{await work();setNotice(success);feedback.show('authentication-result',success,'success')}catch(e){setError(message(e))}finally{setBusy(false)}}
  const titles:Record<Mode,string>={'sign-in':'Sign in','sign-up':'Create your account',confirm:'Verify your email',reset:'Reset your password',verify:'Verify your email'};
 return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><img className="product-icon" src="/DR_Icon_Colour.png" alt=""/><div><strong>PermissionHub</strong><small>Multi-account AWS permission governance</small></div></div><div className="auth-intro"><ShieldCheck size={28}/><h1>{cognitoEnabled()?titles[mode]:'Development sign in'}</h1><p>{sessionStorage.getItem('permissionhub.invitation')?'Sign in or create an account using the invited email address. Your invitation will be kept while you verify your identity.':'Securely manage your organisation and AWS permission requests.'}</p></div>
  {error&&<div className="error-box" role="alert">{error}{error.includes('original method')&&<button className="link-button" onClick={()=>{sessionStorage.removeItem('permissionhub.identityLink');setError('');setMode('sign-in')}}>Return to original sign-in method</button>}</div>}{notice&&<div className="success-box" role="status">{notice}</div>}
@@ -54,7 +59,7 @@ return <main className="auth-page"><section className="auth-card"><div className
  {mode==='verify'&&<button type="button" className="link-button" disabled={busy} onClick={()=>void perform(requestEmailVerification,'A verification code has been sent.')}>Send verification code</button>}
  {!['sign-in','sign-up'].includes(mode)&&<button type="button" className="link-button" onClick={()=>{setMode('sign-in');setError('')}}>Back to sign in</button>}
  </form>
- {['sign-in','sign-up'].includes(mode)&&<div className="tenant-options">{configuredProviders().map(p=><button key={p.name} disabled={busy} onClick={()=>void perform(()=>startCognitoLogin(p.name),'Redirecting…')}>Continue with {p.label}</button>)}<button disabled={busy} onClick={()=>void perform(()=>startCognitoLogin(),'Redirecting…')}>Use Cognito hosted sign in</button></div>}
+ {['sign-in','sign-up'].includes(mode)&&configuredProviders().length>0&&<div className="tenant-options">{configuredProviders().map(p=><button key={p.name} disabled={busy} onClick={()=>void perform(()=>startCognitoLogin(p.name),'Redirecting…')}>Continue with {p.label}</button>)}</div>}
  </>:devAvailable?<div className="dev-auth"><p>Local development authentication</p>{users.map(user=><button key={user.id} disabled={busy} onClick={()=>void perform(async()=>{const session=await api.developmentLogin(user.id);setSession(session);navigate(onboardingDestination(session),{replace:true})},'Signed in')}><strong>{user.displayName}</strong><small>{user.email}</small></button>)}</div>:<p>Development authentication is disabled. Configure Cognito for deployed sign-in, or explicitly enable local development authentication.</p>}
  </section></main>;
 }
