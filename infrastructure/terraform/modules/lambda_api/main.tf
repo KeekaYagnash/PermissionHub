@@ -75,11 +75,23 @@ resource "aws_iam_role_policy" "runtime" {
         Resource = var.invitation_ses_identity_arn
         Condition = {
           StringEquals = {
-            "ses:FromAddress" = lookup(var.environment_variables, "SES_FROM_EMAIL", "info@disraptor.co.za")
+            "ses:FromAddress" = lower(trimspace(lookup(var.environment_variables, "SES_FROM_EMAIL", "no-reply@disraptor.co.za")))
           }
         }
     }])
   })
+  lifecycle {
+    precondition {
+      condition = var.invitation_ses_identity_arn == null ? true : try(
+        can(regex("^arn:aws:ses:us-east-1:[0-9]{12}:identity/", var.invitation_ses_identity_arn)) &&
+        contains([
+          lower(trimspace(lookup(var.environment_variables, "SES_FROM_EMAIL", "no-reply@disraptor.co.za"))),
+          split("@", lower(trimspace(lookup(var.environment_variables, "SES_FROM_EMAIL", "no-reply@disraptor.co.za"))))[1]
+        ], split(":identity/", var.invitation_ses_identity_arn)[1]), false
+      )
+      error_message = "SES sender and existing us-east-1 identity must match. An info@ email identity cannot authorize no-reply@. Use the existing disraptor-internal.net domain, or confirm that disraptor.co.za is already verified before selecting its domain identity."
+    }
+  }
 }
 
 resource "aws_lambda_function" "this" {

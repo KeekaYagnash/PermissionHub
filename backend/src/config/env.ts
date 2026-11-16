@@ -41,7 +41,8 @@ const schema=z.object({
  AWS_PROVISIONING_MODE:z.enum(['disabled','dry-run','live']).default('disabled'),
  ENABLE_LIVE_PROVISIONING:z.string().transform(v=>v==='true').default(false),
  PROVISIONING_CONFIRMATION:z.string().default(''),
- SES_FROM_EMAIL:z.string().default('info@disraptor.co.za')
+ SES_FROM_EMAIL:z.string().default('no-reply@disraptor.co.za')
+ ,SES_IDENTITY_ARN:z.string().optional()
  ,INVITATION_EMAIL_MODE:z.enum(['disabled','ses']).default('disabled')
  ,SES_REGION:z.string().default('us-east-1')
  ,NOTIFICATION_EMAIL_MODE:z.enum(['disabled','ses']).optional()

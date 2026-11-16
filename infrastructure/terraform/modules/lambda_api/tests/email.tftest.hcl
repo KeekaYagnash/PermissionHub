@@ -56,3 +56,40 @@ run "existing_domain_sender_is_scoped_to_configured_mailbox" {
     error_message = "Verified-domain sending must still be restricted to the configured mailbox."
   }
 }
+
+run "no_reply_uses_existing_internal_domain" {
+  command = plan
+  variables {
+    invitation_ses_identity_arn = "arn:aws:ses:us-east-1:143671530412:identity/disraptor-internal.net"
+    environment_variables       = { APP_AWS_REGION = "af-south-1", SES_REGION = "us-east-1", SES_FROM_EMAIL = "no-reply@disraptor-internal.net", SES_IDENTITY_ARN = "arn:aws:ses:us-east-1:143671530412:identity/disraptor-internal.net" }
+  }
+  assert {
+    condition = length([for statement in jsondecode(aws_iam_role_policy.runtime.policy).Statement : statement
+      if try(statement.Sid == "SendTransactionalEmail" && statement.Resource == "arn:aws:ses:us-east-1:143671530412:identity/disraptor-internal.net" && statement.Condition.StringEquals["ses:FromAddress"] == "no-reply@disraptor-internal.net", false)
+    ]) == 1
+    error_message = "The reviewed no-reply fallback must use its existing matching us-east-1 domain identity."
+  }
+}
+
+run "co_za_no_reply_requires_matching_existing_domain_configuration" {
+  command = plan
+  variables {
+    invitation_ses_identity_arn = "arn:aws:ses:us-east-1:143671530412:identity/disraptor.co.za"
+    environment_variables       = { APP_AWS_REGION = "af-south-1", SES_REGION = "us-east-1", SES_FROM_EMAIL = "no-reply@disraptor.co.za" }
+  }
+  assert {
+    condition = length([for statement in jsondecode(aws_iam_role_policy.runtime.policy).Statement : statement
+      if try(statement.Sid == "SendTransactionalEmail" && statement.Resource == "arn:aws:ses:us-east-1:143671530412:identity/disraptor.co.za" && statement.Condition.StringEquals["ses:FromAddress"] == "no-reply@disraptor.co.za", false)
+    ]) == 1
+    error_message = "The primary sender requires a matching domain identity; this mock cannot establish SES verification status."
+  }
+}
+
+run "info_email_identity_cannot_authorize_no_reply" {
+  command = plan
+  variables {
+    invitation_ses_identity_arn = "arn:aws:ses:us-east-1:143671530412:identity/info@disraptor.co.za"
+    environment_variables       = { SES_REGION = "us-east-1", SES_FROM_EMAIL = "no-reply@disraptor.co.za" }
+  }
+  expect_failures = [aws_iam_role_policy.runtime]
+}

@@ -1,6 +1,7 @@
 const messages={
  EMAIL_DISABLED:'Email delivery is not configured. Enable the email mode and provide the existing SES identity ARN in the deployed Terraform configuration.',
- EMAIL_SENDER_NOT_ALLOWED:'Configure an existing verified PermissionHub SES sender: info@disraptor.co.za or a mailbox under disraptor-internal.net.',
+ EMAIL_SENDER_NOT_ALLOWED:'Configure a PermissionHub no-reply sender backed by an existing verified SES domain in us-east-1. Legacy verified sender configuration remains supported.',
+ EMAIL_SENDER_IDENTITY_MISMATCH:'The configured SES identity does not authorize this sender in us-east-1. An individually verified info@ address cannot authorize a no-reply address. Select no-reply@disraptor-internal.net with its existing verified domain, or confirm the existing disraptor.co.za domain verification and matching IAM permissions.',
  EMAIL_ACCESS_DENIED:'The platform API role needs ses:SendEmail for the us-east-1 sender identity, allowed by both its IAM policy and permissions boundary.',
  EMAIL_BOUNDARY_DENIED:'The platform runtime permissions boundary blocks SES. Update the independent bootstrap boundary as well as the API role policy.',
  EMAIL_IDENTITY_NOT_VERIFIED:'SES rejected an unverified sender or sandbox recipient in us-east-1. Check the existing sender identity and SES production-access status; do not verify unrelated contact identities.',

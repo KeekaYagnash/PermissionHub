@@ -10,7 +10,8 @@ locals {
   lambda_common_environment = {
     INVITATION_EMAIL_MODE                  = var.invitation_ses_identity_arn == null ? "disabled" : "ses"
     NOTIFICATION_EMAIL_MODE                = var.invitation_ses_identity_arn == null ? "disabled" : "ses"
-    SES_FROM_EMAIL                         = var.invitation_sender_email == "" ? "info@disraptor.co.za" : var.invitation_sender_email
+    SES_FROM_EMAIL                         = var.invitation_sender_email == "" ? "no-reply@disraptor.co.za" : var.invitation_sender_email
+    SES_IDENTITY_ARN                       = var.invitation_ses_identity_arn == null ? "" : var.invitation_ses_identity_arn
     SES_REGION                             = "us-east-1"
     NODE_ENV                               = "production"
     APP_AWS_REGION                         = var.aws_region
