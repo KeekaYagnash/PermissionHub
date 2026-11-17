@@ -2,6 +2,7 @@ import {z} from 'zod';
 import {env,liveProvisioningEnabled,liveTestAllowedPrincipals,isLocalProvisioningEnabled} from '../config/env.js';
 import type {AppRole,AwsAccountContext,PermissionRequest} from '../types.js';
 import {ApiError} from '../utils/http.js';
+import {validateRoleTrust} from './role-trust.service.js';
 
 export const reviewActions=['APPROVE','APPROVE_AND_PROVISION','REJECT','REQUEST_INFORMATION'] as const;
 export type ReviewAction=typeof reviewActions[number];
@@ -82,6 +83,7 @@ export function buildProvisioningPlan(request:PermissionRequest,account:AwsAccou
   for(const member of createUsers)operations.push({service:'iam',operation:'CreateUser',executed:false,targetName:member.userName,targetArn:member.userArn,userName:member.userName});
   for(const member of request.members??[])operations.push({service:'iam',operation:member.operation==='REMOVE'?'RemoveUserFromGroup':'AddUserToGroup',executed:false,targetName:request.targetName,targetArn:request.targetArn,groupName:request.targetName,userName:member.userName});
  }
+ if(request.targetType==='ROLE'&&(request.role?.mode==='CREATE'||request.role?.updateAction==='UPDATE_TRUST'))for(const message of validateRoleTrust(request.role.trustPolicyDocument,account.accountId))errors.push({field:'role.trustPolicyDocument',message});
  if(request.targetType==='ROLE'&&request.role?.mode==='CREATE'&&!request.role.trustPolicyDocument)errors.push({field:'role.trustPolicyDocument',message:'A trust policy document is required to create an IAM role.'});
  if(request.targetType==='ROLE'&&request.role?.updateAction==='UPDATE_TRUST'&&!request.role.trustPolicyDocument)errors.push({field:'role.trustPolicyDocument',message:'A trust policy document is required to update the role trust relationship.'});
  if(!request.items.length&&request.targetType!=='GROUP'&&!createUsers.length&&!(request.targetType==='ROLE'&&(request.role?.mode==='CREATE'||request.role?.updateAction==='UPDATE_TRUST')))errors.push({field:'items',message:'The request does not contain any permission items.'});
@@ -97,7 +99,7 @@ export function buildProvisioningPlan(request:PermissionRequest,account:AwsAccou
 export function validateGeneratedPolicyDocument(document:Record<string,unknown>|undefined){
  if(!document)return ['A reviewed generated policy document is required.'];
  const errors:string[]=[];if(document.Version!=='2012-10-17')errors.push('The generated policy Version must be 2012-10-17.');
- const statements=document.Statement;if(!Array.isArray(statements)||statements.length===0)return [...errors,'The generated policy must contain at least one statement.'];
+ const statements=Array.isArray(document.Statement)?document.Statement:document.Statement?[document.Statement]:[];if(statements.length===0)return [...errors,'The generated policy must contain at least one statement.'];
  statements.forEach((statement,index)=>{if(!statement||typeof statement!=='object'){errors.push(`Statement ${index+1} must be an object.`);return}const value=statement as Record<string,unknown>;if(value.Effect!=='Allow'&&value.Effect!=='Deny')errors.push(`Statement ${index+1} must use Effect Allow or Deny.`);if(value.Action===undefined&&value.NotAction===undefined)errors.push(`Statement ${index+1} must define Action or NotAction.`);if(value.Action!==undefined&&value.NotAction!==undefined)errors.push(`Statement ${index+1} cannot define both Action and NotAction.`);if(value.Resource===undefined&&value.NotResource===undefined)errors.push(`Statement ${index+1} must define Resource or NotResource.`);if(value.Resource!==undefined&&value.NotResource!==undefined)errors.push(`Statement ${index+1} cannot define both Resource and NotResource.`);for(const field of ['Action','NotAction','Resource','NotResource'] as const){const entry=value[field];if(entry!==undefined&&!(typeof entry==='string'&&entry.length>0)&&!(Array.isArray(entry)&&entry.length>0&&entry.every(item=>typeof item==='string'&&item.length>0)))errors.push(`Statement ${index+1} ${field} must be a non-empty string or string array.`)}});return errors;
 }
 

@@ -301,6 +301,43 @@ describe('New Request IAM user group membership payload',()=>{
 });
 
 describe('New Request IAM role flow',()=>{
+ it('retains visual actions and allows continuation without silently requiring an attached source policy',async()=>{
+  const created={id:'TES-PR-1100',targetType:'ROLE',targetName:'DeploymentRole',items:[],submittedAt:new Date().toISOString()};
+  vi.mocked(api.createRequest).mockResolvedValue(created as never);vi.mocked(api.submitRequest).mockResolvedValue(created as never);
+  renderNewRequest();
+  await userEvent.click(await screen.findByRole('button',{name:/iam role or workload/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/update an existing iam role/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click((await screen.findByText('DeploymentRole')).closest('button')!);
+  await userEvent.click(screen.getByRole('button',{name:/^add permissions/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:'Existing attached policy'}));
+  await userEvent.click(screen.getByRole('checkbox',{name:/s3:ListBucket/i}));
+  expect((screen.getByRole('button',{name:/continue/i}) as HTMLButtonElement).disabled).toBe(false);
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/back/i}));
+  expect((screen.getByRole('checkbox',{name:/s3:ListBucket/i}) as HTMLInputElement).checked).toBe(true);
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  fireEvent.change(screen.getByLabelText(/request title/i),{target:{value:'Add visual role permissions'}});
+  fireEvent.change(screen.getByLabelText(/business justification/i),{target:{value:'Read the required S3 bucket inventory for the approved reporting workload.'}});
+  expect((screen.getByRole('button',{name:/continue/i}) as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.click(screen.getByRole('checkbox',{name:/acknowledge this production role/i}));
+  await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  await userEvent.click(screen.getByRole('button',{name:/submit request/i}));
+  await waitFor(()=>expect(api.createRequest).toHaveBeenCalledOnce());
+  expect(vi.mocked(api.createRequest).mock.calls[0]![0]).toMatchObject({targetType:'ROLE',duration:'Permanent',permanentAccessAcknowledged:true,items:[{mode:'SPECIFIC_ACTIONS',actions:['s3:ListBucket'],generatedPolicyDocument:{Statement:[{Action:['s3:ListBucket'],Resource:'*'}]}}]});
+  const payload=vi.mocked(api.createRequest).mock.calls[0]![0];expect(payload).not.toHaveProperty('expiryDate',expect.anything());
+  expect(payload).not.toHaveProperty('items.0.generatedPolicyDocument.Statement.0.Condition');
+ });
+ it('defaults non-service role trust to a wildcard restricted to the selected AWS account',async()=>{
+  renderNewRequest();await userEvent.click(await screen.findByRole('button',{name:/iam role or workload/i}));await userEvent.click(screen.getByRole('button',{name:/continue/i}));await userEvent.click(screen.getByRole('button',{name:/create a new iam role/i}));await userEvent.click(screen.getByRole('button',{name:/continue/i}));
+  fireEvent.change(screen.getByLabelText('Trusted principal type'),{target:{value:'AWS'}});
+  expect((screen.getAllByLabelText(/trusted principal/i).find(item=>item.tagName==='INPUT') as HTMLInputElement).value).toBe('*');
+  expect(screen.getByText(/Only principals in AWS account 143671530412/i)).toBeTruthy();
+  expect(screen.getByText(/"aws:PrincipalAccount": "143671530412"/)).toBeTruthy();
+ });
  it('has no default role action or role selection and never shows Access Duration',async()=>{
   renderNewRequest();
   await userEvent.click(await screen.findByRole('button',{name:/iam role or workload/i}));
@@ -346,6 +383,7 @@ describe('New Request IAM role flow',()=>{
   fireEvent.change(screen.getByLabelText(/request title/i),{target:{value:'Create finance role'}});
   await userEvent.selectOptions(screen.getByLabelText(/approver/i),'Security Reviewer');
   fireEvent.change(screen.getByLabelText(/business justification/i),{target:{value:'Create a finance reporting role for the demo workload validation.'}});
+  await userEvent.click(screen.getByRole('checkbox',{name:/acknowledge this production role/i}));
   await userEvent.click(screen.getByRole('button',{name:/continue/i}));
   expect(await screen.findByText(/Create IAM role FinanceReportingRole and attach AmazonS3ReadOnlyAccess/i)).toBeTruthy();
   expect(screen.getByText(/IAM roles do not expire/i)).toBeTruthy();
@@ -366,6 +404,7 @@ describe('New Request IAM role flow',()=>{
   fireEvent.change(screen.getByLabelText(/request title/i),{target:{value:'Remove role policy'}});
   await userEvent.selectOptions(screen.getByLabelText(/approver/i),'Security Reviewer');
   fireEvent.change(screen.getByLabelText(/business justification/i),{target:{value:'Remove inherited S3 read access from the deployment role for validation.'}});
+  await userEvent.click(screen.getByRole('checkbox',{name:/acknowledge this production role/i}));
   await userEvent.click(screen.getByRole('button',{name:/continue/i}));
   expect(await screen.findByText(/Update DeploymentRole by removing AmazonS3ReadOnlyAccess/i)).toBeTruthy();
  });

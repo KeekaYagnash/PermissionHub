@@ -46,6 +46,16 @@ async function authenticatedAgent(userId='user_org_admin_dev'){
 }
 
 describe('safe request review HTTP workflow',()=>{
+ it('accepts acknowledged production permanent role requests into the normal approval path, not provisioning',async()=>{
+  const item=pending('PR-PRODUCTION-ROLE');item.targetType='ROLE';item.targetName='ScopedRole';item.targetArn='arn:aws:iam::143671530412:role/permissionhub/ScopedRole';item.duration='Permanent';item.expiryDate=undefined;item.role={mode:'CREATE',name:'ScopedRole',trustedPrincipalType:'AWS',trustedPrincipal:'*',trustPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'sts:AssumeRole',Principal:{AWS:'*'},Condition:{StringEquals:{'aws:PrincipalAccount':account.accountId}}}]}};
+  vi.spyOn(IamIdentityService.prototype,'getRole').mockResolvedValue(undefined);
+  const mutate=vi.spyOn(IamProvisioningService.prototype,'createRole'),{agent,csrf}=await authenticatedAgent();
+  await agent.post('/api/requests').set('x-csrf-token',csrf).send(item).expect(422).expect(response=>expect(response.body.error.code).toBe('PERMANENT_ACKNOWLEDGEMENT_REQUIRED'));
+  const response=await agent.post('/api/requests').set('x-csrf-token',csrf).send({...item,permanentAccessAcknowledged:true}).expect(201);
+  addedIds.push(response.body.data.id);expect(response.body.data).toMatchObject({status:'Draft',requiredApprovalStages:['ACCOUNT_APPROVER','SECURITY_REVIEWER','PROVISIONER']});expect(response.body.data.notes).toContain('acknowledged permanent production');expect(mutate).not.toHaveBeenCalled();
+  const unsafe={...item,permanentAccessAcknowledged:true,role:{...item.role,trustPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'sts:AssumeRole',Principal:'*'}]}}};
+  await agent.post('/api/requests').set('x-csrf-token',csrf).send(unsafe).expect(422).expect(result=>expect(result.body.error.code).toBe('ROLE_TRUST_INVALID'));
+ });
  it('persists an information request and requires an owner response before review resumes',async()=>{
   const item=pending('PR-INFORMATION-RESPONSE');requests.unshift(item);const admin=await authenticatedAgent();
   await admin.agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',admin.csrf).send({action:'REQUEST_INFORMATION',comment:'Explain the required resource access.'}).expect(200);

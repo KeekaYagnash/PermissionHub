@@ -1,0 +1,63 @@
+/* Adapted from docs/design/minimalism-design.md; preserve all existing controls. */
+:root,:root[data-theme="light"] {
+  --brand-blue:#0499F2;
+  --ph-bg-page:#fafafa;
+  --ph-bg-surface:#fff;
+  --ph-bg-muted:#f2f2f2;
+  --ph-bg-raised:#fff;
+  --ph-bg-input:#fff;
+  --ph-bg-hover:#f2f2f2;
+  --ph-bg-selected:#e8f5fe;
+  --ph-text-primary:#0f0f0f;
+  --ph-text-secondary:#525252;
+  --ph-text-muted:#666;
+  --ph-border:#e8e8e8;
+  --ph-border-strong:#b5b5b5;
+  --panel-radius:8px;
+  --panel-shadow:0 1px 2px rgb(0 0 0 / 4%);
+}
+:root[data-theme="dark"] {
+  --ph-bg-page:#0c0c0c;
+  --ph-bg-surface:#141414;
+  --ph-bg-muted:#1c1c1c;
+  --ph-bg-raised:#1c1c1c;
+  --ph-bg-input:#141414;
+  --ph-bg-hover:#242424;
+  --ph-bg-selected:#102d40;
+  --ph-text-primary:#f5f5f5;
+  --ph-text-secondary:#b5b5b5;
+  --ph-text-muted:#a0a0a0;
+  --ph-border:#303030;
+  --ph-border-strong:#616161;
+  --panel-shadow:none;
+}
+:is(.request-workflow,.organizations-page,.auth-page) {line-height:1.55}
+:is(.request-workflow,.organizations-page) :is(.panel,.step-section,.summary-card) {border-radius:8px;box-shadow:var(--panel-shadow)}
+.request-workflow .wizard {gap:24px;align-items:start}
+.request-workflow .wizard-content {min-width:0}
+.request-workflow :is(.form-grid,.review-grid) {gap:16px}
+.request-workflow .field {gap:6px;min-width:0}
+.request-workflow .field>span {font-size:13px;font-weight:600}
+.request-workflow :is(.step-subhead,h3) {margin-block:20px 10px;font-weight:600}
+.request-workflow :is(.policy-list,.action-picker,.existing-policy-flow,.custom-policy) {margin-top:16px}
+.request-workflow :is(.policy-list,.action-picker)>label {padding:12px 16px;gap:12px;border-radius:6px}
+.request-workflow :is(.policy-list,.action-picker)>label.selected {border-color:var(--brand-blue);background:var(--ph-bg-selected)}
+.request-workflow :is(.warning,.info-note,.error-panel) {padding:14px 16px;margin-block:16px;border-radius:8px;line-height:1.55}
+.request-workflow .ack {display:flex;align-items:flex-start;gap:10px}
+.request-workflow .ack input {margin-top:4px;flex-shrink:0;accent-color:var(--brand-blue)}
+.request-workflow .wizard-actions {gap:12px;padding-top:20px;margin-top:24px;border-top:1px solid var(--ph-border)}
+:is(.request-workflow,.organizations-page,.auth-page) :is(.btn.primary,.btn-primary,.primary-action),.request-workflow .wizard-actions button:last-child:not(:first-child) {background:#0499F2;color:#071b2c;border-color:#0499F2;box-shadow:none;font-weight:600}
+:is(.request-workflow,.organizations-page,.auth-page) :is(button,input,textarea,select):focus-visible {outline:2px solid var(--ph-focus-ring);outline-offset:3px}
+.linked-invitation {display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.linked-invitation :is(h2,p) {flex-basis:100%;margin:0}
+.organizations-page {gap:24px}
+.organizations-page .membership-list article {padding-block:16px}
+@media(max-width:1000px){.request-workflow .wizard{gap:16px}}
+@media(max-width:720px){
+  .request-workflow :is(.form-grid,.review-grid){grid-template-columns:minmax(0,1fr)}
+  .request-workflow :is(.wizard-actions,.toolbar,.button-row){flex-wrap:wrap;gap:10px}
+  :is(.request-workflow,.organizations-page,.auth-page) :is(button,.btn,select){min-height:44px}
+  .request-workflow :is(.policy-list,.action-picker)>label{padding:12px;overflow-wrap:anywhere}
+  .request-workflow :is(pre,textarea,.json-editor){max-width:100%;overflow-x:auto}
+  .linked-invitation>.btn{flex:1 1 180px}
+}

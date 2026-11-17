@@ -6,6 +6,7 @@ import App from './App';
 import './index.css';
 import './styles/refresh.css';
 import './styles/branding.css';
+import './styles/workflow-minimal.css';
 import {applyThemePreference,readThemePreference} from './lib/theme';
 import {createMutationFeedback} from './lib/mutationFeedback';
 

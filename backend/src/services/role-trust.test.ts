@@ -1,0 +1,7 @@
+import {it,expect} from 'vitest';
+import {validateRoleTrust,trustNeedsSecurityReview} from './role-trust.service.js';
+const trust=(Principal:unknown,Condition?:unknown)=>({Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'sts:AssumeRole',Principal,Condition}]});
+it('allows explicit service and selected-account restricted AWS principals',()=>{expect(validateRoleTrust(trust({Service:'lambda.amazonaws.com'}),'123456789012')).toEqual([]);expect(validateRoleTrust(trust({AWS:'*'},{StringEquals:{'aws:PrincipalAccount':'123456789012'}}),'123456789012')).toEqual([])});
+it.each([undefined,{StringLike:{'aws:PrincipalAccount':'*'}},{StringEquals:{'aws:PrincipalAccount':'999999999999'}},{StringEquals:{'aws:PrincipalAccount':['123456789012','999999999999']}}])('blocks unrestricted or wrong-account wildcard trust (%j)',condition=>{expect(validateRoleTrust(trust('*',condition),'123456789012').length).toBeGreaterThan(0)});
+it('blocks malformed trust and unknown STS actions',()=>{expect(validateRoleTrust(null,'123456789012').length).toBeGreaterThan(0);expect(validateRoleTrust({Version:'2012-10-17',Statement:[{Effect:'Allow',Principal:{Service:'*'},Action:'sts:*'}]},'123456789012').length).toBeGreaterThan(0)});
+it('routes AWS-principal trust to security review based on the actual document, not client labels',()=>{expect(trustNeedsSecurityReview(trust({AWS:'*'},{StringEquals:{'aws:PrincipalAccount':'123456789012'}}))).toBe(true);expect(trustNeedsSecurityReview(trust({Service:'lambda.amazonaws.com'}))).toBe(false)});
