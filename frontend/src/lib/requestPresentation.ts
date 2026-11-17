@@ -36,8 +36,8 @@ export function approvalStages(request:PermissionRequest){
   {label:'Request submitted',state:submitted?'complete':'waiting',detail:request.submittedAt},
   {label:info?'Information requested':'Approval',state:rejected?'failed':approved?'complete':submitted?'active':'waiting',detail:info?request.approvalComment:request.approver},
   {label:'Provisioning',state:request.status==='Provisioning failed'?'failed':provisioning?'complete':approved?'active':'waiting',detail:request.status==='Provisioning failed'?'Failed':approved?'Ready':'Waiting'},
-  {label:'Access granted',state:granted?'complete':'waiting',detail:request.expiryDate?`Expires ${formatDate(request.expiryDate)}`:granted?'No automatic expiry':'Waiting'}
+  {label:'Access granted',state:granted?'complete':'waiting',detail:granted&&request.expiryDate?`Expires ${formatDate(request.expiryDate)}`:granted?'No automatic expiry':'Waiting'}
  ] as const;
 }
 export function shortDate(value?:string){return value?new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric'}).format(new Date(value)):'Draft'}
-export function formatDate(value?:string){return value?new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)):'Not available'}
+export function formatDate(value?:string){return value&&Number.isFinite(Date.parse(value))?new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)):'Not available'}

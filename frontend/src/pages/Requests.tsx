@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect,useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import { api } from '../lib/api';
 import { permissionLabel, requestSearchText, scopeLabel, sortRequests } from '../lib/requestQueue';
-import { EmptyState, LoadingSkeleton, PageHeader, ResponsiveTable, RiskBadge, SearchToolbar, StatusBadge, type TableColumn } from '../components/ui';
+import { EmptyState,ErrorState, LoadingSkeleton, PageHeader, ResponsiveTable, RiskBadge, SearchToolbar, StatusBadge, type TableColumn } from '../components/ui';
 import { can } from '../lib/authz';
 import { useAuthStore } from '../store/auth';
 import { accountLabel, expiringSoon, isClosedRequest, isGrantedRequest, isOpenRequest, needsRequesterResponse, requestRisk } from '../lib/requestPresentation';
@@ -21,12 +21,13 @@ export default function Requests(){
  const session=useAuthStore(state=>state.session),userId=session?.user?.id,canViewAll=can(session,'REQUEST_VIEW_ALL'),canReview=can(session,'REQUEST_REVIEW');
  const [params,setParams]=useSearchParams(),navigate=useNavigate();
  const [search,setSearch]=useState(''),[sort,setSort]=useState('submitted-desc');
- const tabs=canViewAll?['All','Needs review','Provisioning','Granted','Closed']:canReview?['Needs my attention','Reviewed','My requests']:['All','Open','Granted','Closed','Needs my response'];
+ const tabs=canViewAll?['All','Needs review','Provisioning','Granted','Closed']:canReview?['All','Needs my attention','Reviewed','My requests']:['All','Open','Granted','Closed','Needs my response'];
  const active=params.get('filter')??params.get('status')??tabs[0]!;
- const {data,isLoading}=useQuery({queryKey:['requests','list'],queryFn:()=>api.requests()});
+ const {data,isLoading,error,refetch,hasNextPage,isFetchingNextPage,fetchNextPage}=useInfiniteQuery({queryKey:['requests','list',session?.user?.activeTenantId,session?.user?.activeAwsAccountRecordId],initialPageParam:1,queryFn:({pageParam,signal})=>api.requests({page:pageParam},signal),getNextPageParam:page=>page.pagination.page<page.pagination.totalPages?page.pagination.page+1:undefined,refetchInterval:5000});
+ useEffect(()=>{if(hasNextPage&&!isFetchingNextPage&&!error)void fetchNextPage()},[hasNextPage,isFetchingNextPage,error,fetchNextPage]);
  const rows=useMemo(()=>{
   const term=search.trim().toLowerCase();
-  return (data?.data??[])
+  return [...new Map((data?.pages.flatMap(page=>page.data)??[]).map(request=>[request.id,request])).values()]
    .filter(request=>filterForPersona(request,active,{userId,canReview,canViewAll}))
    .filter(request=>!term||requestSearchText(request).includes(term))
    .sort((a,b)=>sortRequests(a,b,sort));
@@ -49,6 +50,8 @@ export default function Requests(){
    <select value={sort} onChange={event=>setSort(event.target.value)} aria-label="Sort requests">{sortOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select>
   </SearchToolbar>
   <div className="filter-row segmented" aria-label="Request filters">{tabs.map(filter=><button className={active===filter?'active':''} onClick={()=>setParams(filter===tabs[0]?{}:{filter})} key={filter}>{filter}</button>)}</div>
+  {error&&<ErrorState title="Unable to refresh requests" body="Previously loaded requests remain available. Check your connection and retry." onRetry={()=>void refetch()}/>}
+  {isFetchingNextPage&&<p role="status">Loading more requests…</p>}
   {isLoading?<LoadingSkeleton rows={8}/>:rows.length?<ResponsiveTable rows={rows} columns={columns} getRowKey={row=>row.id} onRowClick={row=>navigate(`/requests/${row.id}`)} emptyTitle="No matching requests" emptyBody="Try another search or status filter." rowActionLabel="Open request"/>:<EmptyState title={emptyTitle(active,canReview,canViewAll)} body={emptyBody(active,canReview,canViewAll)}/>}
  </div>;
 }
@@ -59,7 +62,7 @@ function filterForPersona(request:PermissionRequest,active:string,{userId,canRev
  if(active==='Closed')return isClosedRequest(request);
  if(active==='Needs my response')return needsRequesterResponse(request,userId);
  if(active==='Needs my attention'||active==='Needs review')return request.status==='Pending approval'||request.status==='More information required';
- if(active==='Reviewed')return ['Approved','Rejected','Provisioned','Expired','Revoked'].includes(request.status);
+ if(active==='Reviewed')return ['Approved','Rejected','Provisioning','Provisioning failed','Provisioned','Expired','Revoked'].includes(request.status);
  if(active==='Provisioning')return ['Approved','Provisioning','Provisioning failed'].includes(request.status);
  if(active==='Expiring')return expiringSoon(request);
  return request.status===active;

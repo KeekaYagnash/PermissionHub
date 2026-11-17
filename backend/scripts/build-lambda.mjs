@@ -31,7 +31,7 @@ await Promise.all(entries.map(entry => build({
 
 for (const entry of entries) {
   const packageRoot = resolve(packagesOut, entry);
-  const includePrismaClient = entry === 'api' || entry === 'migration';
+  const includePrismaClient = entry === 'api' || entry === 'provisioning' || entry === 'migration';
   await mkdir(resolve(packageRoot, 'dist/lambda'), { recursive: true });
   await cp(resolve(out, `dist/lambda/${entry}.js`), resolve(packageRoot, `dist/lambda/${entry}.js`));
   await writePackageJson(packageRoot, includePrismaClient, entry === 'migration');

@@ -1,3 +1,4 @@
+import {receiveSession,shareSession,shareSignOut,startSessionChannel} from './sessionChannel';
 const config = {
   mode: import.meta.env.VITE_AUTH_MODE,
   region: import.meta.env.VITE_COGNITO_REGION,
@@ -20,6 +21,7 @@ export const cognitoDomain = () => {
 };
 
 export const cognitoEnabled = () => config.mode === 'cognito' && Boolean(config.domain && config.clientId);
+if(cognitoEnabled())startSessionChannel();
 
 export function getAccessToken() {
   const raw = sessionStorage.getItem(tokenKey);
@@ -82,6 +84,7 @@ async function exchangeCognitoCode(code: string,state?:string|null) {
   const tokens = await response.json() as { access_token: string; id_token?: string; refresh_token?:string;expires_in?: number };
   if(!tokens.id_token||tokenClaims(tokens.id_token).nonce!==transaction.nonce)throw new Error('Sign-in nonce is invalid. Start sign in again.');
   sessionStorage.setItem(tokenKey, JSON.stringify({ ...tokens, source:'oauth',expires_at: Date.now() + ((tokens.expires_in ?? 3600) - 30) * 1000 }));
+  shareSession();
   sessionStorage.removeItem(verifierKey);
 }
 
@@ -148,13 +151,22 @@ export async function refreshCognitoTokens(){
    const result=await cognitoRequest<{AuthenticationResult?:{AccessToken:string;IdToken?:string;ExpiresIn?:number}}>('InitiateAuth',{AuthFlow:'REFRESH_TOKEN_AUTH',ClientId:config.clientId,AuthParameters:{REFRESH_TOKEN:old.refresh_token}});
    if(!result.AuthenticationResult)throw new Error('Your session has expired. Sign in again.');storeTokens({...result.AuthenticationResult,RefreshToken:old.refresh_token});
   }
- })().catch(()=>{sessionStorage.removeItem(tokenKey);throw new Error('Your session has expired. Sign in again.')}).finally(()=>{refreshing=undefined});return refreshing;
+  shareSession();
+ })().catch(()=>{sessionStorage.removeItem(tokenKey);shareSignOut();throw new Error('Your session has expired. Sign in again.')}).finally(()=>{refreshing=undefined});return refreshing;
 }
-export async function ensureAccessToken(){if(cognitoEnabled()&&!getAccessToken()&&storedTokens().refresh_token)await refreshCognitoTokens();return getAccessToken()}
+export async function ensureAccessToken(){
+ if(cognitoEnabled()&&!sessionStorage.getItem(tokenKey))await receiveSession();
+ if(cognitoEnabled()&&!getAccessToken()&&storedTokens().refresh_token){
+  const refresh=async()=>{if(!getAccessToken())await refreshCognitoTokens()};
+  if(typeof navigator!=='undefined'&&navigator.locks)await navigator.locks.request('permissionhub.cognito.refresh',refresh);else await refresh();
+ }
+ return getAccessToken();
+}
 
 export async function clearCognitoSession() {
   const old=storedTokens();
   sessionStorage.removeItem(tokenKey);
+  shareSignOut();
   sessionStorage.removeItem(verifierKey);sessionStorage.removeItem(transactionKey);
   sessionStorage.removeItem('permissionhub.identityLink');
   if(old.access_token)await cognitoRequest('GlobalSignOut',{AccessToken:old.access_token}).catch(()=>undefined);
@@ -214,6 +226,7 @@ function storeTokens(tokens: { AccessToken: string; IdToken?: string; RefreshTok
     source:'password',
     expires_at: Date.now() + ((tokens.ExpiresIn ?? 3600) - 30) * 1000
   }));
+  shareSession();
 }
 
 function cognitoErrorMessage(code?: string, message?: string) {

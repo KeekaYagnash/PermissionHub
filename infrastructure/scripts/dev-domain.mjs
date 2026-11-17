@@ -25,10 +25,20 @@ export async function inspectZone(credentials,request=fetch){
  const records=await get(`/zones/${zone.id}/dns_records?name=${domain}`);
  return {zoneId:zone.id,records,get};
 }
+export function describeAwsFailure(args,result){
+ // Parse only recognized identifiers, never echo stderr (it may contain secrets).
+ const code=/An error occurred \(([A-Za-z0-9]+)\) when calling/.exec(result.stderr??'')?.[1];
+ const readingSecret=args[0]==='secretsmanager'&&args[1]==='get-secret-value';
+ if(readingSecret&&['AccessDenied','AccessDeniedException','UnauthorizedOperation'].includes(code))return '[AWS_ACCESS_DENIED] Secrets Manager GetSecretValue was denied for the Cloudflare dev secret in af-south-1. Apply the independent github-dev bootstrap policy permissionhub-github-terraform-domain-dev and its attachment to permissionhub-github-terraform-dev, then rerun. A code merge alone cannot grant AWS permissions. Secret values and AWS response withheld.';
+ if(readingSecret&&code==='ResourceNotFoundException')return '[AWS_SECRET_NOT_FOUND] The configured Cloudflare dev secret was not found in af-south-1. Verify its ARN (IAMOps-OHd0cA starts with capital O), account and region. Secret values withheld.';
+ if(code==='ExpiredToken'||code==='ExpiredTokenException')return '[AWS_CREDENTIALS_EXPIRED] Deployment AWS credentials expired. Renew OIDC authentication and rerun. Response withheld.';
+ if(result.error?.code==='ENOENT')return '[AWS_CLI_MISSING] Install AWS CLI v2 before loading the Cloudflare dev secret.';
+ return '[AWS_READ_FAILED] AWS read-only operation failed. Verify deployment identity, region and network access. Response withheld.';
+}
 function run(tool,args,env=process.env){
  const result=spawnSync(tool,args,{env,encoding:'utf8',maxBuffer:64*1024*1024,windowsHide:true});
  // Never echo secret-bearing subprocess output or errors.
- if(result.status!==0)throw Error(`${tool==='aws'?'AWS read-only operation':'Terraform inspection'} failed; inspect access/configuration. Output withheld.`);
+ if(result.status!==0)throw Error(tool==='aws'?describeAwsFailure(args,result):'Terraform inspection failed; inspect access/configuration. Output withheld.');
  return result.stdout;
 }
 export function checkOwnership(state,certificates,records){

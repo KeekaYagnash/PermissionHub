@@ -5,7 +5,11 @@ import type {AccountType,PermissionRequest,PermissionRequestItem,RequestStatus,S
 import { ApiError } from '../utils/http.js';
 import {requests as memoryRequests} from './mock.service.js';
 import {requestNotifications} from './request-notification.runtime.js';
-import {grants as memoryGrants} from './mock.service.js';
+import {grants as memoryGrants,auditEvents as memoryAuditEvents} from './mock.service.js';
+import {createHash} from 'node:crypto';
+import type {QueuedProvisioningContext} from './provisioning-queue.service.js';
+export const reviewRecordId=(requestId:string,actorId:string,key:string)=>createHash('sha256').update(`${requestId}:${actorId}:${key}`).digest('hex');
+export interface ReviewPersistence {actorId:string;action:string;key?:string;stage:string;job?:{id:string;context:QueuedProvisioningContext}}
 
 type JsonObject=Record<string,unknown>;
 
@@ -43,8 +47,9 @@ function iso(value:Date|null|undefined){return value?.toISOString()}
 function list<T>(value:unknown):T[]{return Array.isArray(value)?value as T[]:[]}
 function object<T extends JsonObject>(value:unknown):T|undefined{return value&&typeof value==='object'&&!Array.isArray(value)?value as T:undefined}
 
-function toDomain(row:DbRequest&{items:DbRequestItem[]}):PermissionRequest{
+function toDomain(row:DbRequest&{items:DbRequestItem[];approvals?:{approverUserId:string|null}[]}):PermissionRequest{
  return {
+  reviewedByUserIds:[...new Set((row.approvals??[]).map(item=>item.approverUserId).filter((id):id is string=>Boolean(id)))],
   id:row.id,title:row.title,tenantId:row.tenantId??undefined,awsOrganisationId:row.awsOrganisationId??undefined,ouId:row.ouId??undefined,awsAccountId:row.awsAccountId??undefined,accountType:row.accountType as AccountType|undefined,requesterUserId:row.requesterUserId??undefined,requester:row.requester,approver:row.approver,approverUserId:row.approverUserId??undefined,targetSubjectType:row.targetSubjectType?targetFromDb(row.targetSubjectType):undefined,targetType:targetFromDb(row.targetType),targetName:row.targetName,targetArn:row.targetArn,group:object(row.group),role:object(row.role),members:list(row.members),approvalPolicyId:row.approvalPolicyId??undefined,requiredApprovalStages:list<string>(row.requiredApprovalStages),completedApprovalStages:list<string>(row.completedApprovalStages),provisioningAccountId:row.provisioningAccountId??undefined,provisioningRoleArn:row.provisioningRoleArn??undefined,items:row.items.map(toDomainItem),scope:object(row.scope) as PermissionRequest['scope']??{type:'ALL',resources:[]},duration:row.duration,startDate:row.startDate.toISOString(),expiryDate:iso(row.expiryDate),priority:row.priority as PermissionRequest['priority'],justification:row.justification,notes:row.notes??undefined,status:statusFromDb[row.status],submittedAt:iso(row.submittedAt),createdAt:row.createdAt.toISOString(),approvalComment:row.approvalComment??undefined,provisioningResult:row.provisioningResult??undefined,simulationResult:row.simulationResult??undefined,timeline:list(row.timeline)
  };
 }
@@ -62,11 +67,29 @@ function tenantAcronym(name:string|undefined){
 
 function useMemoryOnly(){return process.env.VITEST==='true'||process.env.NODE_ENV==='test'}
 function persistenceError(operation:string,error:unknown){
- logger.error({err:error,operation},'Permission request persistence failed');
+ logger.error({code:(error as {code?:string})?.code??'DATABASE_ERROR',operation},'Permission request persistence failed');
  return new ApiError(500,'PermissionHub could not persist the permission request. No request was created.','REQUEST_PERSISTENCE_FAILED',{operation});
+}
+async function persistTimeline(tx:Prisma.TransactionClient,request:PermissionRequest,actorId?:string){
+ for(const [index,event] of request.timeline.entries()){
+  const id=createHash('sha256').update(`${request.id}:${index}:${event.label}:${event.timestamp}`).digest('hex');
+  await tx.auditEvent.upsert({where:{id},update:{},create:{id,actor:actorId??'System',actorUserId:actorId,tenantId:request.tenantId,awsAccountId:request.awsAccountId,requestId:request.id,action:event.label,result:/failed/i.test(event.label)?'FAILED':'SUCCESS',timestamp:new Date(event.timestamp),newState:dbJson({status:request.status})}});
+ }
 }
 
 export const requestRepository={
+ async activity(tenantId:string,accountId:string,accountNumber:string){
+  if(useMemoryOnly())return memoryAuditEvents.filter(event=>event.tenantId===tenantId&&[accountId,accountNumber].includes(event.awsAccountId??''));
+  const rows=await prisma.auditEvent.findMany({where:{tenantId,awsAccountId:{in:[accountId,accountNumber]}},orderBy:{timestamp:'desc'}});
+  return rows.map(row=>({...row,timestamp:row.timestamp.toISOString(),actorUserId:row.actorUserId??undefined,tenantId:row.tenantId??undefined,requestId:row.requestId??undefined,awsAccountId:row.awsAccountId??undefined}));
+ },
+ async reviewedOperation(requestId:string,actorId:string,key:string,action:string){
+  if(useMemoryOnly())return false;
+  const id=reviewRecordId(requestId,actorId,key);
+  const review=await prisma.approval.findUnique({where:{id}});
+  if(review&&review.decision!==action)throw new ApiError(409,'This operation key was already used for another review action.','IDEMPOTENCY_CONFLICT');
+  return review?.requestId===requestId&&review.approverUserId===actorId;
+ },
  async claimProvisioning(request:PermissionRequest){
   if(useMemoryOnly())return ['Approved','Provisioning failed'].includes(request.status);
   const result=await prisma.request.updateMany({where:{id:request.id,tenantId:request.tenantId,status:{in:['APPROVED','PROVISIONING_FAILED']}},data:{status:'PROVISIONING'}});
@@ -75,13 +98,13 @@ export const requestRepository={
  async list(input:{tenantId:string;accountId:string;accountNumber:string;user:SessionUser}){
   if(useMemoryOnly())return memoryRequests;
   try{
-   const rows=await prisma.request.findMany({where:{tenantId:input.tenantId,OR:[{awsAccountId:input.accountId},{awsAccountId:input.accountNumber},{awsAccountId:null}]},include:{items:true},orderBy:{createdAt:'desc'}});
+   const rows=await prisma.request.findMany({where:{tenantId:input.tenantId,OR:[{awsAccountId:input.accountId},{awsAccountId:input.accountNumber},{awsAccountId:null}]},include:{items:true,approvals:true},orderBy:{createdAt:'desc'}});
    return rows.map(toDomain);
   }catch(error){throw persistenceError('request.list',error)}
  },
- async find(id:string){
+ async find(id:string,tenantId?:string){
   if(useMemoryOnly())return memoryRequests.find(item=>item.id===id);
-  try{const row=await prisma.request.findUnique({where:{id},include:{items:true,grants:true}});if(row)for(const grant of row.grants){const response=object(grant.provisioningResponse),metadata=object(response?._permissionHub);const mapped={id:grant.id,requestId:grant.requestId,awsAccountId:grant.awsAccountId??undefined,targetType:targetFromDb(grant.targetType),targetName:grant.targetName,targetArn:grant.targetArn,policyArn:grant.policyArn,attachedAt:grant.attachedAt.toISOString(),activatedAt:iso(grant.activatedAt),expiresAt:iso(grant.expiresAt),revokedAt:iso(grant.revokedAt),provisioningResponse:response?.response??grant.provisioningResponse,revocationResponse:grant.revocationResponse,groupMembersAdded:list<string>(metadata?.groupMembersAdded)};const index=memoryGrants.findIndex(item=>item.id===grant.id);if(index<0)memoryGrants.push(mapped);else memoryGrants[index]=mapped}return row?toDomain(row):undefined}catch(error){throw persistenceError('request.find',error)}
+  try{const row=await prisma.request.findUnique({where:{id,...(tenantId?{tenantId}:{})},include:{items:true,grants:true,approvals:true}});if(row)for(const grant of row.grants){const response=object(grant.provisioningResponse),metadata=object(response?._permissionHub);const mapped={id:grant.id,requestId:grant.requestId,awsAccountId:grant.awsAccountId??undefined,targetType:targetFromDb(grant.targetType),targetName:grant.targetName,targetArn:grant.targetArn,policyArn:grant.policyArn,attachedAt:grant.attachedAt.toISOString(),activatedAt:iso(grant.activatedAt),expiresAt:iso(grant.expiresAt),revokedAt:iso(grant.revokedAt),provisioningResponse:response?.response??grant.provisioningResponse,revocationResponse:grant.revocationResponse,groupMembersAdded:list<string>(metadata?.groupMembersAdded)};const index=memoryGrants.findIndex(item=>item.id===grant.id);if(index<0)memoryGrants.push(mapped);else memoryGrants[index]=mapped}return row?toDomain(row):undefined}catch(error){throw persistenceError('request.find',error)}
  },
  async nextId(tenantName:string|undefined){
   const prefix=`${tenantAcronym(tenantName)}-PR`;
@@ -101,24 +124,29 @@ export const requestRepository={
     const sequence=await tx.$queryRaw<Array<{value:string}>>`SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM '[0-9]+$') AS bigint)),1000)::text AS value FROM "Request" WHERE id LIKE ${prefix+'-%'}`;
     request.id=`${prefix}-${Number(sequence[0]?.value??1000)+1}`;
     request.items.forEach((item,index)=>{if(item.generatedPolicyName===`PH-${previousId}-${index+1}`)item.generatedPolicyName=`PH-${request.id}-${index+1}`});
-    await tx.request.create({data:{id:request.id,title:request.title,tenantId:request.tenantId,awsOrganisationId:request.awsOrganisationId,ouId:request.ouId,awsAccountId:request.awsAccountId,accountType:request.accountType,requesterUserId:request.requesterUserId,requester:request.requester,approver:request.approver,approverUserId:request.approverUserId,targetSubjectType:request.targetSubjectType?targetToDb(request.targetSubjectType):undefined,targetType:targetToDb(request.targetType),targetName:request.targetName,targetArn:request.targetArn,permissionSource:undefined,group:dbJson(request.group),role:dbJson(request.role),members:dbJson(request.members),scope:dbJson(request.scope)!,duration:request.duration,startDate:new Date(request.startDate),expiryDate:date(request.expiryDate),priority:request.priority,justification:request.justification,notes:request.notes,approvalPolicyId:request.approvalPolicyId,requiredApprovalStages:dbJson(request.requiredApprovalStages),completedApprovalStages:dbJson(request.completedApprovalStages),provisioningAccountId:request.provisioningAccountId,provisioningRoleArn:request.provisioningRoleArn,status:statusToDb[request.status],approvalComment:request.approvalComment,provisioningResult:dbJson(request.provisioningResult),simulationResult:dbJson(request.simulationResult),timeline:dbJson(request.timeline)!,submittedAt:date(request.submittedAt),createdAt:new Date(request.createdAt),items:{create:request.items.map(item=>({mode:item.mode,operation:item.operation,policyArn:item.policyArn,policyName:item.policyName,generatedPolicyName:item.generatedPolicyName,requestedPolicyName:item.requestedPolicyName,actions:item.actions??[],generatedPolicyDocument:dbJson(item.generatedPolicyDocument)}))}}});
+    await tx.request.create({data:{id:request.id,title:request.title,tenantId:request.tenantId,awsOrganisationId:request.awsOrganisationId,ouId:request.ouId,awsAccountId:request.awsAccountId,accountType:request.accountType,requesterUserId:request.requesterUserId,requester:request.requester,approver:request.approver,approverUserId:request.approverUserId,targetSubjectType:request.targetSubjectType?targetToDb(request.targetSubjectType):undefined,targetType:targetToDb(request.targetType),targetName:request.targetName,targetArn:request.targetArn,permissionSource:undefined,group:dbJson(request.group),role:dbJson(request.role),members:dbJson(request.members),scope:dbJson(request.scope)!,duration:request.duration,startDate:new Date(request.startDate),expiryDate:date(request.expiryDate),priority:request.priority,justification:request.justification,notes:request.notes,approvalPolicyId:request.approvalPolicyId,requiredApprovalStages:dbJson(request.requiredApprovalStages),completedApprovalStages:dbJson(request.completedApprovalStages),provisioningAccountId:request.provisioningAccountId,provisioningRoleArn:request.provisioningRoleArn,status:statusToDb[request.status],approvalComment:request.approvalComment??null,provisioningResult:dbJson(request.provisioningResult),simulationResult:dbJson(request.simulationResult),timeline:dbJson(request.timeline)!,submittedAt:date(request.submittedAt),createdAt:new Date(request.createdAt),items:{create:request.items.map(item=>({mode:item.mode,operation:item.operation,policyArn:item.policyArn,policyName:item.policyName,generatedPolicyName:item.generatedPolicyName,requestedPolicyName:item.requestedPolicyName,actions:item.actions??[],generatedPolicyDocument:dbJson(item.generatedPolicyDocument)}))}}});
    });
   }catch(error){throw persistenceError('request.create',error)}
   return request;
  },
- async save(request:PermissionRequest,expectedApprovalStages?:string[]){
-  if(useMemoryOnly()){const index=memoryRequests.findIndex(item=>item.id===request.id);if(index>=0)memoryRequests[index]=request;else memoryRequests.unshift(request);await requestNotifications.record(request);return request}
+ async save(request:PermissionRequest,expectedApprovalStages?:string[],review?:ReviewPersistence,expectedStatus?:RequestStatus){
+  if(useMemoryOnly()){if(review)request.reviewedByUserIds=[...new Set([...(request.reviewedByUserIds??[]),review.actorId])];const index=memoryRequests.findIndex(item=>item.id===request.id);if(index>=0)memoryRequests[index]=request;else memoryRequests.unshift(request);await requestNotifications.record(request);return request}
   try{
    await prisma.$transaction(async tx=>{
-    await tx.request.update({where:{id:request.id,...(expectedApprovalStages?{status:'PENDING_APPROVAL' as const,OR:[{completedApprovalStages:{equals:expectedApprovalStages}},...(expectedApprovalStages.length===0?[{completedApprovalStages:{equals:Prisma.DbNull}}]:[])]}:{})},data:{title:request.title,approver:request.approver,approverUserId:request.approverUserId,targetName:request.targetName,targetArn:request.targetArn,group:dbJson(request.group),role:dbJson(request.role),members:dbJson(request.members),scope:dbJson(request.scope)!,duration:request.duration,startDate:new Date(request.startDate),expiryDate:date(request.expiryDate),priority:request.priority,justification:request.justification,notes:request.notes,requiredApprovalStages:dbJson(request.requiredApprovalStages),completedApprovalStages:dbJson(request.completedApprovalStages),status:statusToDb[request.status],approvalComment:request.approvalComment,provisioningResult:dbJson(request.provisioningResult),simulationResult:dbJson(request.simulationResult),timeline:dbJson(request.timeline)!,submittedAt:date(request.submittedAt)}});
+    await tx.request.update({where:{id:request.id,tenantId:request.tenantId,...(expectedStatus?{status:statusToDb[expectedStatus]}:{}),...(expectedApprovalStages?{status:'PENDING_APPROVAL' as const,OR:[{completedApprovalStages:{equals:expectedApprovalStages}},...(expectedApprovalStages.length===0?[{completedApprovalStages:{equals:Prisma.DbNull}}]:[])]}:{})},data:{title:request.title,approver:request.approver,approverUserId:request.approverUserId,targetName:request.targetName,targetArn:request.targetArn,group:dbJson(request.group),role:dbJson(request.role),members:dbJson(request.members),scope:dbJson(request.scope)!,duration:request.duration,startDate:new Date(request.startDate),expiryDate:date(request.expiryDate),priority:request.priority,justification:request.justification,notes:request.notes,requiredApprovalStages:dbJson(request.requiredApprovalStages),completedApprovalStages:dbJson(request.completedApprovalStages),status:statusToDb[request.status],approvalComment:request.approvalComment??null,provisioningResult:dbJson(request.provisioningResult),simulationResult:dbJson(request.simulationResult),timeline:dbJson(request.timeline)!,submittedAt:date(request.submittedAt)}});
     await tx.requestItem.deleteMany({where:{requestId:request.id}});
+    await persistTimeline(tx,request,review?.actorId);
+    if(review){
+     await tx.approval.create({data:{...(review.key?{id:reviewRecordId(request.id,review.actorId,review.key)}:{}),requestId:request.id,approverUserId:review.actorId,approver:review.actorId,stage:review.stage,decision:review.action,comment:request.approvalComment??''}});
+     if(review.job)await tx.provisioningJob.create({data:{id:review.job.id,requestId:request.id,mode:'LIVE',operation:'PROVISION',status:'QUEUED',response:dbJson(review.job.context)}});
+    }
     for(const grant of memoryGrants.filter(item=>item.requestId===request.id)){
      const data={requestId:request.id,awsAccountId:grant.awsAccountId,targetType:targetToDb(grant.targetType),targetName:grant.targetName,targetArn:grant.targetArn,policyArn:grant.policyArn,attachedAt:new Date(grant.attachedAt),activatedAt:date(grant.activatedAt),expiresAt:date(grant.expiresAt),revokedAt:date(grant.revokedAt),revocationStatus:grant.revokedAt?'REVOKED':grant.revocationStatus??'PENDING',provisioningResponse:dbJson({response:grant.provisioningResponse,_permissionHub:{groupMembersAdded:grant.groupMembersAdded??[]}})!,revocationResponse:dbJson(grant.revocationResponse)};
      await tx.permissionGrant.upsert({where:{id:grant.id},create:{id:grant.id,...data},update:data});
     }
     if(request.items.length)await tx.requestItem.createMany({data:request.items.map(item=>({requestId:request.id,mode:item.mode,operation:item.operation,policyArn:item.policyArn,policyName:item.policyName,generatedPolicyName:item.generatedPolicyName,requestedPolicyName:item.requestedPolicyName,actions:item.actions??[],generatedPolicyDocument:dbJson(item.generatedPolicyDocument)}))});
    });
-  }catch(error){if(expectedApprovalStages&&(error as {code?:string}).code==='P2025')throw new ApiError(409,'This request was reviewed by another person. Refresh before continuing.','REVIEW_CONFLICT');throw persistenceError('request.save',error)}
+  }catch(error){if(expectedStatus&&(error as {code?:string}).code==='P2025')throw new ApiError(409,'This request changed while the operation was running. Refresh before continuing.','REQUEST_STATE_CONFLICT');if(expectedApprovalStages&&(error as {code?:string}).code==='P2025')throw new ApiError(409,'This request was reviewed by another person. Refresh before continuing.','REVIEW_CONFLICT');throw persistenceError('request.save',error)}
   await requestNotifications.record(request);
   return request;
  }

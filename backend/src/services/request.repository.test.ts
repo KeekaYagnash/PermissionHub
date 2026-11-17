@@ -2,7 +2,7 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import type {PermissionRequest} from '../types.js';
 
 const db=vi.hoisted(()=>({
- query:vi.fn(),create:vi.fn(),claim:vi.fn(),find:vi.fn(),update:vi.fn(),deleteItems:vi.fn(),createItems:vi.fn(),grant:vi.fn(),transaction:vi.fn()
+ query:vi.fn(),create:vi.fn(),claim:vi.fn(),find:vi.fn(),update:vi.fn(),deleteItems:vi.fn(),createItems:vi.fn(),grant:vi.fn(),transaction:vi.fn(),audit:vi.fn(),review:vi.fn(),job:vi.fn()
 }));
 vi.mock('../config/database.js',()=>({prisma:{
  $transaction:db.transaction,request:{updateMany:db.claim,findUnique:db.find}
@@ -15,11 +15,16 @@ const request=():PermissionRequest=>({id:'ORG-PR-1001',tenantId:'tenant-a',awsAc
 beforeEach(()=>{
  vi.stubEnv('VITEST','false');vi.stubEnv('NODE_ENV','development');
  vi.resetAllMocks();
- db.transaction.mockImplementation(async operation=>operation({$queryRaw:db.query,request:{create:db.create,update:db.update},requestItem:{deleteMany:db.deleteItems,createMany:db.createItems},permissionGrant:{upsert:db.grant}}));
+ db.transaction.mockImplementation(async operation=>operation({$queryRaw:db.query,request:{create:db.create,update:db.update},requestItem:{deleteMany:db.deleteItems,createMany:db.createItems},permissionGrant:{upsert:db.grant},auditEvent:{upsert:db.audit},approval:{create:db.review},provisioningJob:{create:db.job}}));
 });
 afterEach(()=>{vi.unstubAllEnvs();grants.splice(0,grants.length,...grants.filter(grant=>grant.id!=='owned-test-grant'))});
 
 describe('PostgreSQL repository boundary (mocked Prisma)',()=>{
+ it('persists approval, timeline and queued work in the same database transaction',async()=>{
+  const value=request();value.timeline=[{label:'Approved',timestamp:new Date().toISOString()}];
+  await requestRepository.save(value,[],{actorId:'reviewer',action:'APPROVE_AND_PROVISION',key:'stable-operation',stage:'ACCOUNT_APPROVER',job:{id:'job',context:{actorUserId:'reviewer',tenantId:'tenant-a',accountRecordId:'account-a'}}});
+  expect(db.transaction).toHaveBeenCalledOnce();expect(db.review).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({requestId:value.id,approverUserId:'reviewer',decision:'APPROVE_AND_PROVISION'})}));expect(db.job).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({status:'QUEUED'})}));expect(db.audit).toHaveBeenCalledOnce();
+ });
  it('allocates the ID under a transaction lock and creates items atomically',async()=>{
   db.query.mockResolvedValueOnce([]).mockResolvedValueOnce([{value:'1017'}]);
   const value=request();await requestRepository.create(value);

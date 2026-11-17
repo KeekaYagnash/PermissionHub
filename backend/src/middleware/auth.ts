@@ -38,12 +38,19 @@ export function tenantScope(req:AuthenticatedRequest,_res:Response,next:NextFunc
  req.tenantId=user.activeTenantId;next();
 }
 export async function accountScope(req:AuthenticatedRequest,_res:Response,next:NextFunction){
+ return resolveAccountScope(req,next,true);
+}
+/** Historical requests remain readable when AWS credentials or discovery fail. */
+export async function accountHistoryScope(req:AuthenticatedRequest,_res:Response,next:NextFunction){
+ return resolveAccountScope(req,next,false);
+}
+async function resolveAccountScope(req:AuthenticatedRequest,next:NextFunction,requireConnected:boolean){
  try{const user=req.sessionUser!,headerRecordId=req.headers['x-aws-account-record-id']?.toString(),requested=user.activeAwsAccountRecordId??user.activeAccountId;
   if(headerRecordId&&headerRecordId!==requested)return next(new ApiError(403,'The requested AWS account does not match the active server session.','AWS_ACCOUNT_CONTEXT_MISMATCH'));
   if(!requested)return next(new ApiError(409,'Select an authorised AWS account before using this endpoint.','AWS_ACCOUNT_REQUIRED'));
   await awsAccountRepository.refreshManualAccounts(req.tenantId!);
   const account=identityDomain.account(user,requested);if(!account||!authorization.canViewAccount(user,account.id))return next(new ApiError(403,'AWS account access is not permitted.','AWS_ACCOUNT_FORBIDDEN'));
-  if(!['CONNECTED','DEGRADED'].includes(account.connectionStatus))return next(new ApiError(409,'Validate and connect this AWS account before using AWS data.','AWS_ACCOUNT_NOT_CONNECTED'));
+  if(requireConnected&&!['CONNECTED','DEGRADED'].includes(account.connectionStatus))return next(new ApiError(409,'Validate and connect this AWS account before using AWS data.','AWS_ACCOUNT_NOT_CONNECTED'));
   req.awsAccountContext=account;next();
  }catch(error){next(error)}
 }
