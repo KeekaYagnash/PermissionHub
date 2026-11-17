@@ -58,7 +58,7 @@ Do not automate this procedure.
 5. Restart the backend after setting live environment values.
 6. Create a low-risk, temporary request targeting the disposable user.
 7. Review the generated policy and exact `CreatePolicy -> AttachUserPolicy` plan.
-8. Type the required `PROVISION <request-id>` phrase and accept both confirmations.
+8. Review the account, environment, target and requested permissions. Check both initially unchecked acknowledgements, then choose Approve & provision. Acknowledgements are not authorization: the server still enforces the approval stage, account consent, live configuration, identity checks and expiry safeguards. The acknowledgement audit event is saved with approval in the same transaction.
 9. Verify the generated policy and attachment in IAM and CloudTrail.
 10. Immediately test revoke and verify removal.
 11. Delete the disposable user and generated test policy after validation.

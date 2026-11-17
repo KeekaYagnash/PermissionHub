@@ -19,7 +19,7 @@ const requiredComment=(message:string)=>z.preprocess(value=>value===undefined||v
 
 export const reviewSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('APPROVE'),comment:optionalComment,idempotencyKey:z.string().min(8).max(120).optional()}),
- z.object({action:z.literal('APPROVE_AND_PROVISION'),comment:optionalComment,idempotencyKey:z.string().min(8).max(120).optional(),confirmation:z.object({phrase:z.string().min(1),safeTargetConfirmed:z.literal(true),awsMutationConfirmed:z.literal(true),manualCleanupAccepted:z.boolean().optional()}).optional()}),
+ z.object({action:z.literal('APPROVE_AND_PROVISION'),comment:optionalComment,idempotencyKey:z.string().min(8).max(120).optional(),confirmation:z.object({permissionsReviewed:z.literal(true),liveChangesAcknowledged:z.literal(true)}).optional()}),
  z.object({action:z.literal('REJECT'),comment:requiredComment('Provide a reason for rejecting this request.'),idempotencyKey:z.string().min(8).max(120).optional()}),
  z.object({action:z.literal('REQUEST_INFORMATION'),comment:requiredComment('Explain what additional information is required.'),idempotencyKey:z.string().min(8).max(120).optional()}),
 ]);

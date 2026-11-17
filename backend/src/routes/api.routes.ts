@@ -119,7 +119,7 @@ async function handleReview(req:AuthenticatedRequest,res:Response,forcedAction?:
   if(!plan.valid)throw incompletePlan(plan);
   if(isFinalStage&&provisioningMode()==='live'){
    const capabilities=capabilitiesFor(req,request,account);if(!capabilities.provisioningAllowed)throw new ApiError(409,'Live provisioning prerequisites are not satisfied.','LIVE_PROVISIONING_NOT_READY',{blockingReasons:capabilities.blockingReasons});
-   if(!input.confirmation||input.confirmation.phrase!==`PROVISION ${request.id}`)throw new ApiError(422,`Type PROVISION ${request.id} and confirm both live-change acknowledgements.`,'LIVE_CONFIRMATION_REQUIRED');
+   if(!input.confirmation?.permissionsReviewed||!input.confirmation.liveChangesAcknowledged)throw new ApiError(422,'Review the requested permissions and target identity, then acknowledge the live AWS changes. Both acknowledgements are required.','LIVE_CONFIRMATION_REQUIRED');
   }
  }
  request.approvalComment=input.comment;
@@ -138,7 +138,7 @@ async function handleReview(req:AuthenticatedRequest,res:Response,forcedAction?:
  audit(req,input.comment?'REQUEST_APPROVED_WITH_COMMENT':'REQUEST_APPROVED',request.id,'SUCCESS',undefined,{status:request.status,stage,comment:input.comment,provisioningMode:provisioningMode(),plannedOperations:plan.plannedOperations,awsMutationOccurred:false});
  const queued=input.action==='APPROVE_AND_PROVISION'&&remaining===0&&provisioningMode()==='live'&&useProvisioningQueue();
  const queuedId=operationKey?`job_${reviewRecordId(request.id,req.sessionUser!.id,operationKey)}`:randomUUID();
- await requestRepository.save(request,expectedApprovalStages,{actorId:req.sessionUser!.id,action:input.action,key:operationKey,stage,...(queued?{job:{id:queuedId,context:{...jobContext(req),approvalId:reviewRecordId(request.id,req.sessionUser!.id,operationKey)}}}:{})});
+ await requestRepository.save(request,expectedApprovalStages,{actorId:req.sessionUser!.id,action:input.action,key:operationKey,stage,...(input.action==='APPROVE_AND_PROVISION'&&remaining===0&&provisioningMode()==='live'&&input.confirmation?{acknowledgement:{...input.confirmation,acknowledgedAt:new Date().toISOString(),awsAccountNumber:account.accountId,accountName:account.accountName}}:{}),...(queued?{job:{id:queuedId,context:{...jobContext(req),approvalId:reviewRecordId(request.id,req.sessionUser!.id,operationKey)}}}:{})});
  if(queued){await dispatchProvisioningJob(queuedId);return res.status(202).json({data:{request:{...approvalView(request),preview:preview(request)},reviewAction:input.action,provisioning:{mode:'live',executed:false,queued:true,jobId:queuedId,message:'Approval saved. Provisioning is queued.'}}});}
  let provisioning:unknown;
  if(input.action==='APPROVE_AND_PROVISION'&&remaining===0)provisioning=(await runProvisioning(req,request,plan)).provisioning;
