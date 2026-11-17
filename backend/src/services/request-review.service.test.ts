@@ -15,6 +15,8 @@ it('accepts valid single-statement custom JSON but blocks structural conflicts, 
 });
 
 describe('review action comment validation',()=>{
+ it('accepts the two acknowledgements without a typed phrase',()=>expect(parseReviewInput({action:'APPROVE_AND_PROVISION',confirmation:{permissionsReviewed:true,liveChangesAcknowledged:true}})).toMatchObject({confirmation:{permissionsReviewed:true,liveChangesAcknowledged:true}}));
+ it.each([{}, {permissionsReviewed:true}, {liveChangesAcknowledged:true}, {permissionsReviewed:false,liveChangesAcknowledged:true}, {permissionsReviewed:true,liveChangesAcknowledged:false}, {permissionsReviewed:'true',liveChangesAcknowledged:true}, {phrase:'PROVISION PR-1008'}])('rejects incomplete or non-boolean acknowledgements (%j)',confirmation=>expect(()=>parseReviewInput({action:'APPROVE_AND_PROVISION',confirmation})).toThrow());
  it.each(['APPROVE','APPROVE_AND_PROVISION'] as const)('%s accepts an omitted or blank comment',action=>{
   expect(parseReviewInput({action})).not.toHaveProperty('comment');
   expect(parseReviewInput({action,comment:'   '})).not.toHaveProperty('comment');

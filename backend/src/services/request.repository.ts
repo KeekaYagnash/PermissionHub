@@ -9,9 +9,13 @@ import {grants as memoryGrants,auditEvents as memoryAuditEvents} from './mock.se
 import {createHash} from 'node:crypto';
 import type {QueuedProvisioningContext} from './provisioning-queue.service.js';
 export const reviewRecordId=(requestId:string,actorId:string,key:string)=>createHash('sha256').update(`${requestId}:${actorId}:${key}`).digest('hex');
-export interface ReviewPersistence {actorId:string;action:string;key?:string;stage:string;job?:{id:string;context:QueuedProvisioningContext}}
+export interface ReviewPersistence {actorId:string;action:string;key?:string;stage:string;acknowledgement?:{permissionsReviewed:true;liveChangesAcknowledged:true;acknowledgedAt:string;awsAccountNumber:string;accountName:string};job?:{id:string;context:QueuedProvisioningContext}}
 
 type JsonObject=Record<string,unknown>;
+function acknowledgementAudit(request:PermissionRequest,review?:ReviewPersistence){
+ const acknowledgement=review?.acknowledgement;if(!review||!acknowledgement)return undefined;
+ return {id:reviewRecordId(request.id,review.actorId,`${review.key}:live-acknowledgement`),timestamp:acknowledgement.acknowledgedAt,actor:review.actorId,actorUserId:review.actorId,tenantId:request.tenantId,awsAccountId:request.awsAccountId,requestId:request.id,action:'LIVE_PROVISIONING_ACKNOWLEDGED',result:'SUCCESS' as const,newState:{...acknowledgement}};
+}
 
 const statusToDb:Record<RequestStatus,DbRequestStatus>={
  'Draft':'DRAFT',
@@ -130,12 +134,14 @@ export const requestRepository={
   return request;
  },
  async save(request:PermissionRequest,expectedApprovalStages?:string[],review?:ReviewPersistence,expectedStatus?:RequestStatus){
-  if(useMemoryOnly()){if(review)request.reviewedByUserIds=[...new Set([...(request.reviewedByUserIds??[]),review.actorId])];const index=memoryRequests.findIndex(item=>item.id===request.id);if(index>=0)memoryRequests[index]=request;else memoryRequests.unshift(request);await requestNotifications.record(request);return request}
+  if(useMemoryOnly()){const acknowledgement=acknowledgementAudit(request,review);if(acknowledgement&&!memoryAuditEvents.some(event=>event.id===acknowledgement.id))memoryAuditEvents.unshift(acknowledgement);if(review)request.reviewedByUserIds=[...new Set([...(request.reviewedByUserIds??[]),review.actorId])];const index=memoryRequests.findIndex(item=>item.id===request.id);if(index>=0)memoryRequests[index]=request;else memoryRequests.unshift(request);await requestNotifications.record(request);return request}
   try{
    await prisma.$transaction(async tx=>{
     await tx.request.update({where:{id:request.id,tenantId:request.tenantId,...(expectedStatus?{status:statusToDb[expectedStatus]}:{}),...(expectedApprovalStages?{status:'PENDING_APPROVAL' as const,OR:[{completedApprovalStages:{equals:expectedApprovalStages}},...(expectedApprovalStages.length===0?[{completedApprovalStages:{equals:Prisma.DbNull}}]:[])]}:{})},data:{title:request.title,approver:request.approver,approverUserId:request.approverUserId??null,targetName:request.targetName,targetArn:request.targetArn,group:dbJson(request.group),role:dbJson(request.role),members:dbJson(request.members),scope:dbJson(request.scope)!,duration:request.duration,startDate:new Date(request.startDate),expiryDate:date(request.expiryDate),priority:request.priority,justification:request.justification,notes:request.notes,requiredApprovalStages:dbJson(request.requiredApprovalStages),completedApprovalStages:dbJson(request.completedApprovalStages),status:statusToDb[request.status],approvalComment:request.approvalComment??null,provisioningResult:dbJson(request.provisioningResult),simulationResult:dbJson(request.simulationResult),timeline:dbJson(request.timeline)!,submittedAt:date(request.submittedAt)}});
     await tx.requestItem.deleteMany({where:{requestId:request.id}});
     await persistTimeline(tx,request,review?.actorId);
+    const acknowledgement=acknowledgementAudit(request,review);
+    if(acknowledgement)await tx.auditEvent.upsert({where:{id:acknowledgement.id},update:{},create:{...acknowledgement,timestamp:new Date(acknowledgement.timestamp),newState:dbJson(acknowledgement.newState)}});
     if(review){
      await tx.approval.create({data:{...(review.key?{id:reviewRecordId(request.id,review.actorId,review.key)}:{}),requestId:request.id,approverUserId:review.actorId,approver:review.actorId,stage:review.stage,decision:review.action,comment:request.approvalComment??''}});
      if(review.job)await tx.provisioningJob.create({data:{id:review.job.id,requestId:request.id,mode:'LIVE',operation:'PROVISION',status:'QUEUED',response:dbJson(review.job.context)}});

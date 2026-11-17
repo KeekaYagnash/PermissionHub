@@ -20,6 +20,16 @@ beforeEach(()=>{
 afterEach(()=>{vi.unstubAllEnvs();grants.splice(0,grants.length,...grants.filter(grant=>grant.id!=='owned-test-grant'))});
 
 describe('PostgreSQL repository boundary (mocked Prisma)',()=>{
+ it('does not record acknowledgement evidence when the approval state claim fails',async()=>{
+  db.update.mockRejectedValue({code:'P2025'});
+  await expect(requestRepository.save(request(),[],{actorId:'reviewer',action:'APPROVE_AND_PROVISION',stage:'ACCOUNT_APPROVER',key:'stale-ack',acknowledgement:{permissionsReviewed:true,liveChangesAcknowledged:true,acknowledgedAt:new Date().toISOString(),awsAccountNumber:'123456789012',accountName:'Production'}})).rejects.toMatchObject({code:'REVIEW_CONFLICT'});
+  expect(db.audit).not.toHaveBeenCalled();expect(db.review).not.toHaveBeenCalled();expect(db.job).not.toHaveBeenCalled();
+ });
+ it('saves acknowledgement evidence atomically with approval and queued work',async()=>{
+  const value=request(),acknowledgement={permissionsReviewed:true as const,liveChangesAcknowledged:true as const,acknowledgedAt:'2026-11-17T12:00:00.000Z',awsAccountNumber:'123456789012',accountName:'Production'};
+  await requestRepository.save(value,[],{actorId:'reviewer',action:'APPROVE_AND_PROVISION',key:'ack-operation',stage:'ACCOUNT_APPROVER',acknowledgement,job:{id:'job',context:{actorUserId:'reviewer',tenantId:'tenant-a',accountRecordId:'account-a'}}});
+  expect(db.transaction).toHaveBeenCalledOnce();expect(db.audit).toHaveBeenCalledWith(expect.objectContaining({create:expect.objectContaining({action:'LIVE_PROVISIONING_ACKNOWLEDGED',actorUserId:'reviewer',tenantId:'tenant-a',awsAccountId:'account-a',requestId:value.id,timestamp:new Date(acknowledgement.acknowledgedAt),newState:acknowledgement})}));expect(db.review).toHaveBeenCalledOnce();expect(db.job).toHaveBeenCalledOnce();
+ });
  it('persists approval, timeline and queued work in the same database transaction',async()=>{
   const value=request();value.timeline=[{label:'Approved',timestamp:new Date().toISOString()}];
   await requestRepository.save(value,[],{actorId:'reviewer',action:'APPROVE_AND_PROVISION',key:'stable-operation',stage:'ACCOUNT_APPROVER',job:{id:'job',context:{actorUserId:'reviewer',tenantId:'tenant-a',accountRecordId:'account-a'}}});

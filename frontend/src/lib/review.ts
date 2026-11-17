@@ -1,7 +1,7 @@
 export type ReviewAction='APPROVE'|'APPROVE_AND_PROVISION'|'REJECT'|'REQUEST_INFORMATION';
 export type ProvisioningMode='disabled'|'dry-run'|'live'|'local';
 
-export interface LiveConfirmation{phrase:string;safeTargetConfirmed:true;awsMutationConfirmed:true;manualCleanupAccepted?:boolean}
+export interface LiveConfirmation{permissionsReviewed:true;liveChangesAcknowledged:true}
 export function buildReviewPayload(action:ReviewAction,comment:string,idempotencyKey?:string,confirmation?:LiveConfirmation){const trimmed=comment.trim();return {action,...(trimmed?{comment:trimmed}:{}),...(idempotencyKey?{idempotencyKey}:{}),...(confirmation?{confirmation}:{})}}
 export function approvalProvisionLabel(mode:ProvisioningMode){return mode==='dry-run'?'Approve and validate change':mode==='live'?'Approve and provision':mode==='local'?'Approve and Provision':'Approve — provisioning disabled'}
 export function reviewProvisionButtonDisabled(mode:ProvisioningMode,busy:boolean,pending:boolean,allowed:boolean){return busy||(mode==='local'?false:!pending||!allowed)}

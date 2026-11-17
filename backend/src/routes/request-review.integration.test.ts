@@ -2,7 +2,7 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import request from 'supertest';
 import {app} from '../app.js';
 import {env} from '../config/env.js';
-import {requests} from '../services/mock.service.js';
+import {requests,auditEvents} from '../services/mock.service.js';
 import {awsAccountRepository} from '../services/aws-account.repository.js';
 import {developmentUsers,identityDomain} from '../services/identity-domain.service.js';
 import {IamIdentityService,IamPolicyValidationService,IamProvisioningService} from '../services/aws/aws-services.js';
@@ -75,7 +75,7 @@ describe('safe request review HTTP workflow',()=>{
   const item=pending('PR-AUDITOR-READ-ONLY');requests.unshift(item);
   const {agent,csrf}=await authenticatedAgent('user_security_dev');
   await agent.get(`/api/requests/${item.id}`).expect(200).expect(result=>expect(result.body.data.reviewCapabilities).toMatchObject({approvalAllowed:false,canApprove:false}));
-  await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(403);
+  await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION',confirmation:{permissionsReviewed:true,liveChangesAcknowledged:true}}).expect(403);
   expect(item.status).toBe('Pending approval');
  });
  it('lets the assigned Account Approver approve without a security stage or manual Provisioner access',async()=>{
@@ -99,13 +99,24 @@ describe('safe request review HTTP workflow',()=>{
    vi.spyOn(requestRepository,'reviewedOperation').mockResolvedValueOnce(false).mockResolvedValue(true);
    const approver=developmentUsers.find(user=>user.id==='user_approver_dev')!;approver.memberships[0]!.scopes.push({scopeType:'AWS_ACCOUNT',scopeId:temporaryScopeId,includeDescendants:false,canView:true,canRequest:false,canApprove:true,canProvision:false,canRevoke:false,canManageConfiguration:false});
    const item={...pending(`PR-FINAL-QUEUE-${fails}`),approverUserId:approver.id,expiryDate:undefined};requests.unshift(item);
-   const attach=vi.spyOn(IamProvisioningService.prototype,'attach'),{agent,csrf}=await authenticatedAgent(approver.id),body={action:'APPROVE_AND_PROVISION',confirmation:{phrase:`PROVISION ${item.id}`,safeTargetConfirmed:true,awsMutationConfirmed:true}};
+   const attach=vi.spyOn(IamProvisioningService.prototype,'attach'),{agent,csrf}=await authenticatedAgent(approver.id),body={action:'APPROVE_AND_PROVISION',confirmation:{permissionsReviewed:true,liveChangesAcknowledged:true}};
    await agent.get(`/api/requests/${item.id}`).expect(200).expect(result=>expect(result.body.data.reviewCapabilities.approvalAction).toMatchObject({isFinalStage:true,allowed:true,label:'Approve & provision'}));
    await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','final-queue').send(body).expect(fails?503:202);
    expect(item.status).toBe('Approved');expect(save).toHaveBeenCalledWith(item,[],expect.objectContaining({actorId:approver.id,job:expect.objectContaining({context:expect.objectContaining({accountRecordId:account.id,approvalId:expect.any(String)})})}));
    await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','final-queue').send(body).expect(200).expect(result=>expect(result.body.idempotent).toBe(true));
    expect(save).toHaveBeenCalledOnce();expect(dispatch).toHaveBeenCalledOnce();expect(redeliver).toHaveBeenCalledOnce();expect(attach).not.toHaveBeenCalled();
+   const acknowledgements=auditEvents.filter(event=>event.requestId===item.id&&event.action==='LIVE_PROVISIONING_ACKNOWLEDGED');expect(acknowledgements).toHaveLength(1);expect(acknowledgements[0]).toMatchObject({actorUserId:approver.id,tenantId:account.tenantId,awsAccountId:account.id,newState:{permissionsReviewed:true,liveChangesAcknowledged:true,awsAccountNumber:account.accountId}});expect(Number.isNaN(Date.parse(acknowledgements[0]!.timestamp))).toBe(false);
   }finally{account.connectionType=originalType;account.provisioningEnabled=false;}
+ });
+ it.each(['missing acknowledgements','production expiry'])('does not let %s pass the live approval gate',async scenario=>{
+  env.AWS_PROVISIONING_MODE='live';const originalType=account.connectionType,originalExpiry=env.EXPIRY_REVOCATION_MODE;account.connectionType='ACCESS_KEYS';account.provisioningEnabled=true;env.EXPIRY_REVOCATION_MODE='disabled';
+  try{
+   vi.spyOn(queue,'useProvisioningQueue').mockReturnValue(true);const save=vi.spyOn(requestRepository,'save'),dispatch=vi.spyOn(queue,'dispatchProvisioningJob');
+   const item=pending(`PR-ACK-GATE-${scenario.replaceAll(' ','-')}`);if(scenario==='missing acknowledgements')item.expiryDate=undefined;requests.unshift(item);const {agent,csrf}=await authenticatedAgent();
+   const response=await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION',...(scenario==='production expiry'?{confirmation:{permissionsReviewed:true,liveChangesAcknowledged:true}}:{})}).expect(scenario==='production expiry'?409:422);
+   if(scenario==='production expiry')expect(response.body.error.blockingReasons).toContain('EXPIRY_REVOCATION_NOT_CONFIGURED');else expect(response.body.error.code).toBe('LIVE_CONFIRMATION_REQUIRED');
+   expect(item.status).toBe('Pending approval');expect(save).not.toHaveBeenCalled();expect(dispatch).not.toHaveBeenCalled();
+  }finally{account.connectionType=originalType;account.provisioningEnabled=false;env.EXPIRY_REVOCATION_MODE=originalExpiry;}
  });
  it('accepts acknowledged production permanent role requests into the normal approval path, not provisioning',async()=>{
   const item=pending('PR-PRODUCTION-ROLE');item.targetType='ROLE';item.targetName='ScopedRole';item.targetArn='arn:aws:iam::143671530412:role/permissionhub/ScopedRole';item.duration='Permanent';item.expiryDate=undefined;item.role={mode:'CREATE',name:'ScopedRole',trustedPrincipalType:'AWS',trustedPrincipal:'*',trustPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'sts:AssumeRole',Principal:{AWS:'*'},Condition:{StringEquals:{'aws:PrincipalAccount':account.accountId}}}]}};

@@ -2,7 +2,7 @@ import {useRef,useState} from 'react';
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query';
 import {Link,useParams} from 'react-router-dom';
 import {api} from '../lib/api';
-import {approvalProvisionLabel,reviewCommentError,reviewProvisionButtonDisabled,provisionCredentialsReady,type ReviewAction} from '../lib/review';
+import {approvalProvisionLabel,reviewCommentError,reviewProvisionButtonDisabled,provisionCredentialsReady,type ReviewAction,type LiveConfirmation} from '../lib/review';
 import {Button,ErrorState,LoadingSkeleton,Modal,RiskBadge,StatusBadge} from '../components/ui';
 import {ProvisioningExperience,type ProvisioningEnvelope} from '../components/ProvisioningExperience';
 import {ApprovalTimeline} from '../components/requestJourney';
@@ -28,9 +28,9 @@ function RequestDetailContent(){
  const connection=useQuery({queryKey:['connection'],queryFn:api.connection,enabled:Boolean(data?.provisioningResult)});
  const activity=useQuery({queryKey:['activity'],queryFn:api.activity,enabled:Boolean(data?.provisioningResult)});
  const approvers=useQuery({queryKey:['approvers',id],queryFn:()=>api.approvers(id),enabled:Boolean(id)&&canReassign});
- const [comment,setComment]=useState(''),[commentError,setCommentError]=useState<string>(),[result,setResult]=useState<ReviewResult>(),[liveConfirmOpen,setLiveConfirmOpen]=useState(false),[safeTargetConfirmed,setSafeTargetConfirmed]=useState(false),[awsMutationConfirmed,setAwsMutationConfirmed]=useState(false),[confirmationPhrase,setConfirmationPhrase]=useState(''),[selectedApprover,setSelectedApprover]=useState('');
+ const [comment,setComment]=useState(''),[commentError,setCommentError]=useState<string>(),[result,setResult]=useState<ReviewResult>(),[liveConfirmOpen,setLiveConfirmOpen]=useState(false),[permissionsReviewed,setPermissionsReviewed]=useState(false),[liveChangesAcknowledged,setLiveChangesAcknowledged]=useState(false),[selectedApprover,setSelectedApprover]=useState('');
  const reload=async()=>{await Promise.all([qc.invalidateQueries({queryKey:['request',id]}),qc.invalidateQueries({queryKey:['requests']}),qc.invalidateQueries({queryKey:['activity']})])};
- const review=useMutation({mutationFn:({action,key,confirmation}:{action:ReviewAction;key:string;confirmation?:{phrase:string;safeTargetConfirmed:true;awsMutationConfirmed:true}})=>api.review(id,action,comment,key,confirmation),onSuccess:async value=>{setResult(value);setCommentError(undefined);setLiveConfirmOpen(false);setSafeTargetConfirmed(false);setAwsMutationConfirmed(false);setConfirmationPhrase('');await reload()},onError:reload,onSettled:()=>{reviewInFlight.current=false}});
+ const review=useMutation({mutationFn:({action,key,confirmation}:{action:ReviewAction;key:string;confirmation?:LiveConfirmation})=>api.review(id,action,comment,key,confirmation),onSuccess:async value=>{setResult(value);setCommentError(undefined);setLiveConfirmOpen(false);setPermissionsReviewed(false);setLiveChangesAcknowledged(false);await reload()},onError:reload,onSettled:()=>{reviewInFlight.current=false}});
  const reassign=useMutation({mutationFn:()=>api.reassignApprover(id,selectedApprover),onSuccess:reload});
  const simulate=useMutation({mutationFn:()=>api.simulate(id),onSuccess:reload}),provision=useMutation({mutationFn:()=>api.provision(id),onSuccess:async value=>{setResult(value);await reload()}}),revoke=useMutation({mutationFn:()=>api.revoke(id),onSuccess:reload});
  const response=useMutation({mutationFn:()=>api.respondToRequest(id,comment.trim()),onSuccess:async()=>{setComment('');await reload()}});
@@ -43,9 +43,10 @@ function RequestDetailContent(){
   if(reviewInFlight.current||review.isPending)return;
   const validationError=reviewCommentError(action,comment);if(validationError){setCommentError(validationError);return}setCommentError(undefined);
   if(action==='REJECT'&&!window.confirm('Reject this request? The requester will receive the reason you entered.'))return;
-  if(action==='APPROVE_AND_PROVISION'&&capabilities?.approvalAction?.isFinalStage!==false&&mode==='live'&&!liveConfirmOpen){setLiveConfirmOpen(true);return}startReview({action,key:keyFor(action)});
+  if(action==='APPROVE_AND_PROVISION'&&capabilities?.approvalAction?.isFinalStage!==false&&mode==='live'&&!liveConfirmOpen){setPermissionsReviewed(false);setLiveChangesAcknowledged(false);setLiveConfirmOpen(true);return}startReview({action,key:keyFor(action)});
  }
  const startReview=(input:Parameters<typeof review.mutate>[0])=>{if(reviewInFlight.current)return;reviewInFlight.current=true;review.mutate(input)};
+ const closeLiveConfirmation=()=>{if(reviewInFlight.current)return;setLiveConfirmOpen(false);setPermissionsReviewed(false);setLiveChangesAcknowledged(false)};
  const accountName=data.reviewContext?.accountName??accountLabel(data),targetKind=iamTargetKind(data.targetType),targetConsoleUrl=iamTargetConsoleUrl(data.targetType,data.targetName);
  const risk=requestRisk(data);
  const summary=requestSummary(data,accountName,targetKind,risk);
@@ -95,13 +96,33 @@ function RequestDetailContent(){
    </aside>
   </section>
   <details className="panel activity-accordion"><summary>Activity</summary><ol className="timeline">{data.timeline.map((event,index)=><li key={`${event.label}${index}`}><i/><div><strong>{event.label}</strong><span>{fmt(event.timestamp)}{event.result?` · ${event.result}`:''}</span></div></li>)}</ol></details>
-  <Modal open={liveConfirmOpen} onClose={()=>setLiveConfirmOpen(false)} title={mode==='local'?'Confirm local development IAM change':'Confirm live IAM change'} wide><div className="live-provision-confirmation"><p className="warning">{mode==='local'?'DEVELOPMENT-ONLY local provisioning will use the currently connected backend AWS credentials and change IAM permissions.':'LIVE provisioning will change IAM permissions in AWS.'}</p><dl><div><dt>Account</dt><dd>{data.reviewContext?.accountName} · {data.reviewContext?.awsAccountNumber}</dd></div><div><dt>Environment</dt><dd>{data.reviewContext?.accountType}</dd></div><div><dt>Target</dt><dd>{data.targetType} · {data.targetArn}</dd></div><div><dt>Scope</dt><dd>{data.scope.type==='ALL'?'All applicable resources':data.scope.resources.join(', ')||data.scope.arn}</dd></div><div><dt>Duration / expiry</dt><dd>{data.duration} · {data.expiryDate?fmt(data.expiryDate):'Permanent'}</dd></div><div><dt>Provisioning mode</dt><dd>{mode==='local'?'LOCAL DEVELOPMENT':'LIVE'}</dd></div></dl><h3>Intended AWS operations</h3><pre>{JSON.stringify(capabilities?.plannedOperations??[],null,2)}</pre><label className="field"><span>Type PROVISION {data.id}</span><input value={confirmationPhrase} onChange={event=>setConfirmationPhrase(event.target.value)}/></label><label className="ack"><input type="checkbox" checked={safeTargetConfirmed} onChange={event=>setSafeTargetConfirmed(event.target.checked)}/><span>I confirm this target is safe for testing.</span></label><label className="ack"><input type="checkbox" checked={awsMutationConfirmed} onChange={event=>setAwsMutationConfirmed(event.target.checked)}/><span>I understand this will change IAM permissions in AWS.</span></label><div className="button-row"><Button variant="secondary" onClick={()=>setLiveConfirmOpen(false)}>Cancel</Button><Button disabled={confirmationPhrase!==`PROVISION ${data.id}`||!safeTargetConfirmed||!awsMutationConfirmed||review.isPending} onClick={()=>startReview({action:'APPROVE_AND_PROVISION',key:keyFor('APPROVE_AND_PROVISION'),confirmation:{phrase:confirmationPhrase,safeTargetConfirmed:true,awsMutationConfirmed:true}})}>Confirm and provision</Button></div></div></Modal>
+  <Modal open={liveConfirmOpen} onClose={closeLiveConfirmation} title="Confirm live AWS changes" wide>
+   <div className="live-provision-confirmation">
+    <p className="warning" id="live-change-context">Review this request before making changes in the selected AWS account.</p>
+    <dl aria-label="Live change summary">
+     <div><dt>Account</dt><dd>{accountName} ({data.reviewContext?.awsAccountNumber??'Account ID unavailable'})</dd></div>
+     <div><dt>Environment</dt><dd>{(data.reviewContext?.accountType??data.accountType??'Not available').replaceAll('_',' ').toLowerCase().replace(/^./,letter=>letter.toUpperCase())}</dd></div>
+     <div><dt>Target identity</dt><dd>{targetKind} · {data.targetName}<small>{data.targetArn}</small></dd></div>
+     <div><dt>Requested permissions</dt><dd>{change.permissions}</dd></div>
+     <div><dt>Resource scope</dt><dd>{change.scope}</dd></div>
+     <div><dt>Duration / expiry</dt><dd>{data.duration} · {data.expiryDate?fmt(data.expiryDate):'Permanent'}</dd></div>
+    </dl>
+    <details><summary>View intended AWS operations</summary><pre>{JSON.stringify(capabilities?.plannedOperations??[],null,2)}</pre></details>
+    <fieldset className="live-change-acknowledgements" aria-describedby="live-change-context">
+     <legend>Required acknowledgements</legend>
+     <label className="ack"><input type="checkbox" required checked={permissionsReviewed} disabled={busy} onChange={event=>setPermissionsReviewed(event.target.checked)}/><span>I have reviewed the requested permissions and target IAM identity.</span></label>
+     <label className="ack"><input type="checkbox" required checked={liveChangesAcknowledged} disabled={busy} onChange={event=>setLiveChangesAcknowledged(event.target.checked)}/><span>I understand this will make live AWS changes in <strong>{accountName} ({data.reviewContext?.awsAccountNumber??'Account ID unavailable'})</strong>.</span></label>
+    </fieldset>
+    {!provisionReviewAllowed&&<p role="status" className="warning">{actionReason}</p>}
+    <div className="button-row"><Button variant="secondary" disabled={busy} onClick={closeLiveConfirmation}>Cancel</Button><Button disabled={!isLiveConfirmationReady(permissionsReviewed,liveChangesAcknowledged)||busy||!pending||!provisionReviewAllowed} onClick={()=>{if(!isLiveConfirmationReady(permissionsReviewed,liveChangesAcknowledged)||busy||!pending||!provisionReviewAllowed)return;startReview({action:'APPROVE_AND_PROVISION',key:keyFor('APPROVE_AND_PROVISION'),confirmation:{permissionsReviewed:true,liveChangesAcknowledged:true}})}}>Approve & provision</Button></div>
+   </div>
+  </Modal>
  </div>;
 }
 
 function IssuePanel({issue}:{issue:ApiIssue}){return <div className="review-error" role="alert"><strong>{issue.message}</strong>{issue.awsError&&<p>AWS response: {issue.awsError}</p>}{issue.recommendedAction&&<p>{issue.recommendedAction}</p>}{issue.blockingFields?.map(item=><p key={item.field}><code>{item.field}</code>: {item.message}</p>)}<details><summary>Technical details</summary><p>Error code: <code>{issue.code}</code></p><p>Correlation ID: <code>{issue.correlationId??'not supplied'}</code></p>{issue.plannedOperations&&<pre>{JSON.stringify(issue.plannedOperations,null,2)}</pre>}</details></div>}
 export function CapabilityChecklist({capabilities}:{capabilities:ReviewCapabilities}){return <div className="capability-checklist"><h3>Provisioning capability</h3>{capabilities.checklist.map(item=><div key={item.key} className={item.passed?'capability-pass':'capability-fail'}><strong>{item.passed?'✓':'✕'} {item.label}</strong>{item.reason&&<small>{item.reason}</small>}</div>)}{capabilities.blockingReasons.length>0&&<details><summary>Blocking reasons</summary><ul>{capabilities.blockingReasons.map(reason=><li key={reason}><code>{reason}</code></li>)}</ul></details>}<p className="muted">Required roles: {capabilities.requiredApproverRoles.join(', ')||'None'}<br/>Your roles: {capabilities.currentUserRoles.join(', ')||'None'}</p></div>}
-export function isLiveConfirmationReady(requestId:string,phrase:string,safeTargetConfirmed:boolean,awsMutationConfirmed:boolean){return phrase===`PROVISION ${requestId}`&&safeTargetConfirmed&&awsMutationConfirmed}
+export function isLiveConfirmationReady(permissionsReviewed:boolean,liveChangesAcknowledged:boolean){return permissionsReviewed&&liveChangesAcknowledged}
 function SummaryBlock({label,value,detail}:{label:string;value:string;detail?:string}){return <div className="summary-block"><span>{label}</span><strong>{value||'Unavailable'}</strong>{detail&&<small>{detail}</small>}</div>}
 function ClampText({text}:{text:string}){const [open,setOpen]=useState(false),long=text.length>360;return <div className="clamped-text"><p className={!open&&long?'clamped':''}>{text}</p>{long&&<button type="button" onClick={()=>setOpen(value=>!value)}>{open?'Show less':'Show more'}</button>}</div>}
 function fmt(value?:string){return value?new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)):'Not submitted'}
