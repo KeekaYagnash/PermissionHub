@@ -2,12 +2,10 @@ import { bootstrapLambdaEnvironment } from './bootstrap.js';
 
 export async function handler(event: unknown) {
   await bootstrapLambdaEnvironment();
-  return {
-    statusCode: 200,
-    body: JSON.stringify({
-      ok: true,
-      message: 'Provisioning queue handler is deployed. Existing demo provisioning remains API-driven.',
-      records: Array.isArray((event as any)?.Records) ? (event as any).Records.length : 0
-    })
-  };
+  const {processProvisioningJob}=await import('../services/provisioning-worker.service.js');
+  const records=(event as {Records?:{messageId:string;body:string}[]})?.Records;
+  if(!Array.isArray(records))throw new Error('SQS_EVENT_REQUIRED');
+  const batchItemFailures:{itemIdentifier:string}[]=[];
+  for(const record of records){try{const payload=JSON.parse(record.body) as {jobId?:string};if(!payload.jobId||typeof payload.jobId!=='string')throw new Error('INVALID_PROVISIONING_MESSAGE');await processProvisioningJob(payload.jobId);}catch{batchItemFailures.push({itemIdentifier:record.messageId});}}
+  return {batchItemFailures};
 }

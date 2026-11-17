@@ -5,6 +5,10 @@ import { approvalRouting } from './approval-routing.service.js';
 
 const session=(id:string)=>identityDomain.sessionUser(developmentUsers.find(user=>user.id===id)!,'development');
 describe('tenant and account authorisation',()=>{
+ it('retains an account approver history after the workflow moves to another stage without permitting another approval',()=>{
+  const user=session('user_approver_dev'),item={tenantId:developmentAccounts[0]!.tenantId,awsAccountId:developmentAccounts[0]!.id,requesterUserId:'someone-else',reviewedByUserIds:[user.id],requiredApprovalStages:['ACCOUNT_APPROVER','SECURITY_REVIEWER'],completedApprovalStages:['ACCOUNT_APPROVER'],status:'Pending approval'};
+  expect(authorization.canViewRequest(user,item)).toBe(true);expect(authorization.canApproveRequest(user,item)).toBe(false);expect(authorization.canViewRequest(user,{...item,tenantId:'other'})).toBe(false);
+ });
  it('does not expose other requests to requesters when stages are empty',()=>{
   const user=session('user_requester_dev');
   const request={tenantId:developmentAccounts[0]!.tenantId,awsAccountId:developmentAccounts[0]!.id,requesterUserId:'someone-else',requiredApprovalStages:[]};

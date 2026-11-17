@@ -22,6 +22,13 @@ function renderDetail(value:PermissionRequest=request){const client=new QueryCli
 beforeEach(()=>{useAuthStore.setState({session,loading:false});vi.mocked(api.request).mockResolvedValue(request);vi.mocked(api.approvers).mockResolvedValue([]);vi.mocked(api.activity).mockResolvedValue({data:[],pagination:{page:1,pageSize:10,total:0,totalPages:1}} as any);vi.mocked(api.connection).mockResolvedValue({} as any)});
 afterEach(()=>{cleanup();vi.clearAllMocks();useAuthStore.getState().clear()});
 describe('request provisioning capability UI',()=>{
+ it('renders an approver label containing capital T without treating it as a date',async()=>{
+  const value={...request,id:'TES-PR-1001',approver:'ACCOUNT_APPROVER'};vi.mocked(api.request).mockResolvedValue(value);renderDetail(value);
+  expect(await screen.findByRole('heading',{name:/TES-PR-1001/})).toBeTruthy();expect(screen.queryByText('Unable to display this request')).toBeNull();expect(screen.queryByRole('button',{name:'Approve request'})).toBeNull();
+ });
+ it('renders a recoverable detail error instead of an endless skeleton for an empty response',async()=>{
+  vi.mocked(api.request).mockResolvedValue(null as unknown as PermissionRequest);renderDetail();expect(await screen.findByText('Request not available')).toBeTruthy();expect(screen.getByRole('link',{name:'Back to Requests'})).toBeTruthy();
+ });
  it('allows approved IAM role provisioning when the server validates stored credentials without a provision-role ARN',async()=>{
   useAuthStore.setState({session:{...session,user:{...session.user!,permissions:[...session.user!.permissions,'PROVISION_EXECUTE']}}});
   const value:PermissionRequest={...request,targetType:'ROLE',targetName:'FinanceReader',status:'Approved',reviewCapabilities:{...capabilities,provisioningMode:'live',canProvision:true,planValid:true,checklist:[{key:'provisionRole',label:'Connected credentials',passed:true}]}};

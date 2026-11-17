@@ -46,6 +46,39 @@ async function authenticatedAgent(userId='user_org_admin_dev'){
 }
 
 describe('safe request review HTTP workflow',()=>{
+ it('persists an information request and requires an owner response before review resumes',async()=>{
+  const item=pending('PR-INFORMATION-RESPONSE');requests.unshift(item);const admin=await authenticatedAgent();
+  await admin.agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',admin.csrf).send({action:'REQUEST_INFORMATION',comment:'Explain the required resource access.'}).expect(200);
+  expect(item.status).toBe('More information required');
+  await admin.agent.post(`/api/requests/${item.id}/respond`).set('x-csrf-token',admin.csrf).send({message:'Unauthorized response'}).expect(403);
+  const owner=await authenticatedAgent('user_requester_dev');
+  await owner.agent.post(`/api/requests/${item.id}/submit`).set('x-csrf-token',owner.csrf).send({}).expect(409);
+  await owner.agent.post(`/api/requests/${item.id}/respond`).set('x-csrf-token',owner.csrf).send({message:'Read the monthly finance report only.'}).expect(200);
+  expect(item.status).toBe('Pending approval');expect(item.notes).toContain('monthly finance report');
+ });
+ it.each(['CREATE_ROLE','UPDATE_ROLE_TRUST','CREATE_USER_ONLY'] as const)('completes %s through HTTP using mocked AWS only',async scenario=>{
+  (env as {NODE_ENV:'development'}).NODE_ENV='development';(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=true;
+  const item=pending(`PR-MOCK-${scenario}`,scenario==='CREATE_ROLE'?undefined:[]);
+  const trust={Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'sts:AssumeRole',Principal:{Service:'lambda.amazonaws.com'}}]};
+  if(scenario==='CREATE_USER_ONLY'){item.targetName='new.person';item.targetArn=`arn:aws:iam::143671530412:user/permissionhub/new.person`;item.members=[{userName:'new.person',userArn:item.targetArn,createUser:true}];}
+  else{item.targetType='ROLE';item.targetName='TestRole';item.targetArn='arn:aws:iam::143671530412:role/permissionhub/TestRole';item.role={mode:scenario==='CREATE_ROLE'?'CREATE':'UPDATE',updateAction:scenario==='UPDATE_ROLE_TRUST'?'UPDATE_TRUST':undefined,name:'TestRole',trustPolicyDocument:trust};item.expiryDate=undefined;}
+  requests.unshift(item);
+  vi.spyOn(awsConnectionBroker,'validateAccountConnection').mockResolvedValue({accountId:account.accountId,principalArn:'mock-caller',userId:'mock',region:account.region,connected:true,mode:'READ',connectionStatus:'CONNECTED',lastValidatedAt:new Date().toISOString()});
+  vi.spyOn(IamIdentityService.prototype,'getUser').mockResolvedValue(undefined);
+  vi.spyOn(IamIdentityService.prototype,'getRole').mockResolvedValue({id:'role',type:'ROLE',name:'TestRole',arn:item.targetArn,path:'/permissionhub/',createdAt:new Date().toISOString(),attachedPolicies:[],inlinePolicies:[]});
+  vi.spyOn(IamPolicyValidationService.prototype,'validate').mockResolvedValue({mode:'LIVE',findings:[]});
+  const createRole=vi.spyOn(IamProvisioningService.prototype,'createRole').mockResolvedValue({mode:'local',operation:'CreateRole',changed:true,roleName:'TestRole',roleArn:item.targetArn,awsRequestId:'mock-role'});
+  const updateRole=vi.spyOn(IamProvisioningService.prototype,'updateRoleTrustPolicy').mockResolvedValue({mode:'local',operation:'UpdateAssumeRolePolicy',changed:true,roleName:'TestRole',awsRequestId:'mock-trust'});
+  const createUser=vi.spyOn(IamProvisioningService.prototype,'createUser').mockResolvedValue({mode:'local',operation:'CreateUser',changed:true,userName:'new.person',userArn:item.targetArn,awsRequestId:'mock-user'});
+  vi.spyOn(IamProvisioningService.prototype,'createCustomerPolicy').mockResolvedValue({mode:'local',changed:true,policyArn:'arn:aws:iam::143671530412:policy/permissionhub/TestPolicy',awsRequestId:'mock-policy'});
+  const attach=vi.spyOn(IamProvisioningService.prototype,'attach').mockResolvedValue({mode:'local',operation:'AttachRolePolicy',changed:true,awsRequestId:'mock-attach'});
+  const {agent,csrf}=await authenticatedAgent('user_security_dev');
+  const response=await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(200);
+  expect(response.body.data.request.status).toBe('Provisioned');await agent.get(`/api/requests/${item.id}`).expect(200);const list=await agent.get('/api/requests?pageSize=100').expect(200);expect(list.body.data.some((row:{id:string})=>row.id===item.id)).toBe(true);
+  if(scenario==='CREATE_ROLE'){expect(createRole).toHaveBeenCalledOnce();expect(attach).toHaveBeenCalledWith(expect.objectContaining({targetType:'ROLE'}));}
+  if(scenario==='UPDATE_ROLE_TRUST'){expect(updateRole).toHaveBeenCalledOnce();expect(attach).not.toHaveBeenCalled();}
+  if(scenario==='CREATE_USER_ONLY'){expect(createUser).toHaveBeenCalledOnce();expect(attach).not.toHaveBeenCalled();expect(createRole).not.toHaveBeenCalled();}
+ });
  it('never applies an approval from an email GET and rejects unauthenticated review POSTs',async()=>{
   const item=pending('PR-EMAIL-GET-SAFE');requests.unshift(item);const {agent}=await authenticatedAgent();
   await agent.get(`/api/requests/${item.id}/approve`).expect(404);expect(item.status).toBe('Pending approval');
@@ -119,6 +152,18 @@ describe('safe request review HTTP workflow',()=>{
   const {agent}=await authenticatedAgent('user_requester_dev'),response=await agent.get(`/api/requests/${item.id}`).expect(200);
   expect(response.body.data.reviewCapabilities).toMatchObject({provisioningMode:'local',approvalAllowed:false,provisioningAllowed:false});
   expect(item.status).toBe('Pending approval');expect(attach).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
+ });
+
+ it('persists STS account mismatch as failed provisioning without performing IAM mutations',async()=>{
+  (env as {NODE_ENV:'development'}).NODE_ENV='development';(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=true;
+  const item=pending('PR-TEST-STS-MISMATCH');requests.unshift(item);
+  vi.spyOn(awsConnectionBroker,'validateAccountConnection').mockResolvedValue({accountId:'999999999999',principalArn:'arn:aws:iam::999999999999:user/mock',userId:'mock',region:account.region,connected:true,mode:'READ',connectionStatus:'CONNECTED',lastValidatedAt:new Date().toISOString()});
+  vi.spyOn(IamIdentityService.prototype,'getUser').mockResolvedValue({id:'mock',type:'USER',name:item.targetName,arn:item.targetArn,path:'/',createdAt:new Date().toISOString(),attachedPolicies:[],inlinePolicies:[]});
+  vi.spyOn(IamPolicyValidationService.prototype,'validate').mockResolvedValue({mode:'LIVE',findings:[]});
+  const create=vi.spyOn(IamProvisioningService.prototype,'createCustomerPolicy'),attach=vi.spyOn(IamProvisioningService.prototype,'attach');
+  const {agent,csrf}=await authenticatedAgent('user_security_dev');
+  await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(422).expect(response=>expect(response.body.error.code).toBe('PROVISIONING_PREFLIGHT_FAILED'));
+  expect(item.status).toBe('Provisioning failed');expect(create).not.toHaveBeenCalled();expect(attach).not.toHaveBeenCalled();await agent.get(`/api/requests/${item.id}`).expect(200);
  });
 
  it('runs the local provisioning workflow only through mocked AWS services',async()=>{

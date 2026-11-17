@@ -99,8 +99,9 @@ resource "aws_lambda_function" "this" {
 }
 
 resource "aws_lambda_event_source_mapping" "queue" {
-  event_source_arn = var.queue_arn
-  function_name    = aws_lambda_function.this.arn
-  batch_size       = 1
-  enabled          = true
+  event_source_arn        = var.queue_arn
+  function_name           = aws_lambda_function.this.arn
+  batch_size              = 1
+  function_response_types = ["ReportBatchItemFailures"]
+  enabled                 = true
 }

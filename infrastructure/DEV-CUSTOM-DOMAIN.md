@@ -24,6 +24,34 @@ existing same-origin callback/logout fallback on both origins to preserve PKCE s
 
 ## Resources and configuration
 
+If the GitHub `Load dev Cloudflare credentials` step fails with `AWS_ACCESS_DENIED`,
+the application deployment cannot bootstrap its own IAM permissions. Read-only inspection
+confirmed that the six older Terraform deployment policies were attached, but
+`permissionhub-github-terraform-domain-dev` did not yet exist. Use the **independent**
+bootstrap root below with an authorized operator identity, review its plan, apply only after
+review, then rerun the failed deployment. Do not broaden runtime roles or store the token in GitHub.
+The helper reports specific sanitized AWS error codes without printing the AWS response.
+
+### Narrow recovery for the missing policy
+
+The latest full bootstrap review also detected unrelated runtime-boundary drift. Do **not** apply
+that broad plan just to fix Cloudflare access. The following exceptional, targeted plan was verified
+to contain exactly two additions and no changes/deletions; it preserves the current boundary:
+
+```powershell
+# Use an authorized operator identity, not the restricted GitHub deployment role.
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev init -reconfigure
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev plan `
+  '-target=aws_iam_policy.deploy["terraform-domain"]' `
+  '-target=aws_iam_role_policy_attachment.deploy["terraform-domain"]' `
+  '-out=cloudflare-access-only.tfplan'
+# AWS-changing: only after reviewing the two additions:
+terraform -chdir=infrastructure/terraform/bootstrap/github-dev apply cloudflare-access-only.tfplan
+```
+
+Then rerun the failed dev deployment. Review the remaining boundary drift separately;
+resource targeting is for this bounded permission recovery, not routine deployments.
+
 Dev root owns `aws_acm_certificate.frontend` (DNS validation, no wildcard, us-east-1),
 `cloudflare_dns_record.frontend_validation["dev.iamops.disraptor.co.za"]`,
 `aws_acm_certificate_validation.frontend`, and `cloudflare_dns_record.frontend` (CNAME to
