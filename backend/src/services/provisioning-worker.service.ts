@@ -1,4 +1,5 @@
 import {prisma} from '../config/database.js';
+import {approvalWorkflow} from './approval-stages.js';
 import {requestRepository} from './request.repository.js';
 import {identityDomain} from './identity-domain.service.js';
 import {awsAccountRepository} from './aws-account.repository.js';
@@ -29,13 +30,18 @@ export async function processProvisioningJob(jobId:string){
   await awsAccountRepository.refreshManualAccounts(context.tenantId);
   const account=identityDomain.account(actor,context.accountRecordId);
   if(!account||account.tenantId!==request.tenantId||![account.id,account.accountId].includes(request.awsAccountId??''))throw new Error('PROVISIONING_ACCOUNT_MISMATCH');
-  if(!authorization.canProvisionRequest(actor,{...request,awsAccountId:account.id}))throw new Error('PROVISIONING_FORBIDDEN');
-  if(!effectiveApprovalStages(request).every((stage,index)=>request!.completedApprovalStages?.[index]===stage))throw new Error('REQUIRED_APPROVALS_INCOMPLETE');
+  let approvalWorkflowAuthorized=false;
+  if(context.approvalId){
+   const approval=await prisma.approval.findUnique({where:{id:context.approvalId}}),stages=effectiveApprovalStages(request);
+   if(!approval||approval.requestId!==request.id||approval.approverUserId!==actor.id||approval.decision!=='APPROVE_AND_PROVISION'||approval.stage!==stages.at(-1)||!authorization.canExecuteApprovedWorkflow(actor,{...request,awsAccountId:account.id}))throw new Error('APPROVED_WORKFLOW_NOT_AUTHORIZED');
+   approvalWorkflowAuthorized=true;
+  }else if(!authorization.canProvisionRequest(actor,{...request,awsAccountId:account.id}))throw new Error('PROVISIONING_FORBIDDEN');
+  if(!effectiveApprovalStages(request).every((stage,index)=>approvalWorkflow(request!).completed[index]===stage))throw new Error('REQUIRED_APPROVALS_INCOMPLETE');
   if(provisioningMode()!=='live')throw new Error('LIVE_PROVISIONING_DISABLED');
   if(request.expiryDate&&Date.parse(request.expiryDate)<=Date.now())throw new Error('REQUEST_EXPIRED');
   if(request.status==='Provisioning failed')preparePolicyNameRetry(request);
   const plan=buildProvisioningPlan(request,account);if(!plan.valid)throw new Error('INCOMPLETE_PROVISIONING_PLAN');
-  const req:ProvisioningRequestContext={sessionUser:actor,tenantId:context.tenantId,awsAccountContext:account,correlationId:context.correlationId,params:{id:request.id}};
+  const req:ProvisioningRequestContext={sessionUser:actor,tenantId:context.tenantId,awsAccountContext:account,correlationId:context.correlationId,params:{id:request.id},approvalWorkflowAuthorized};
   const result=await runProvisioning(req,request,plan);
   if(result.request.status!=='Provisioned')throw new Error('PROVISIONING_PREREQUISITES_FAILED');
   await requestRepository.save(request,undefined,undefined,'Provisioning');

@@ -162,9 +162,9 @@ describe('safe provisioning plan',()=>{
   const accessKeyAccount={...account,connectionType:'ACCESS_KEYS' as const,provisioningEnabled:true};
   expect(reviewCapabilities({request:request(),account:accessKeyAccount,approvalAllowed:true,provisionPermission:true}).blockingReasons).not.toContain('PROVISION_ROLE_NOT_CONFIGURED');
  });
- it('bypasses only enterprise authorization blockers in development local mode',()=>{
+ it('never grants approval to a requester through development provisioning mode',()=>{
   (env as {NODE_ENV:'development'}).NODE_ENV='development';(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=true;
-  expect(reviewCapabilities({request:request(),account,approvalAllowed:false,provisionPermission:false,canReview:true,currentUserRoles:['REQUESTER'],selfApprovalBlocked:true,assignedApproverMatch:false})).toMatchObject({provisioningMode:'local',localProvisioningEnabled:true,approvalAllowed:true,provisioningAllowed:true,canApprove:true,canProvision:true,requiredApproverRoles:['SECURITY_REVIEWER'],blockingReasons:expect.not.arrayContaining(['CURRENT_USER_NOT_ELIGIBLE_APPROVER','CURRENT_USER_NOT_ASSIGNED_APPROVER','ACCOUNT_SCOPED_PROVISIONER_REQUIRED','PROVISIONING_MODE_DRY_RUN','PROVISION_ROLE_NOT_CONFIGURED','EXPIRY_REVOCATION_NOT_CONFIGURED','SELF_APPROVAL_BLOCKED'])});
+  expect(reviewCapabilities({request:request(),account,approvalAllowed:false,provisionPermission:false,canReview:true,currentUserRoles:['REQUESTER'],selfApprovalBlocked:true,assignedApproverMatch:false})).toMatchObject({provisioningMode:'local',localProvisioningEnabled:true,approvalAllowed:false,provisioningAllowed:false,canApprove:false,canProvision:true,requiredApproverRoles:['ACCOUNT_APPROVER'],blockingReasons:expect.not.arrayContaining(['CURRENT_USER_NOT_ELIGIBLE_APPROVER','CURRENT_USER_NOT_ASSIGNED_APPROVER','ACCOUNT_SCOPED_PROVISIONER_REQUIRED','PROVISIONING_MODE_DRY_RUN','PROVISION_ROLE_NOT_CONFIGURED','EXPIRY_REVOCATION_NOT_CONFIGURED','SELF_APPROVAL_BLOCKED'])});
  });
  it('never enables local provisioning in production',()=>{
   (env as {NODE_ENV:'production'}).NODE_ENV='production';(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=true;

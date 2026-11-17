@@ -14,7 +14,7 @@ export const tokenHash=(token:string)=>createHash('sha256').update(token).digest
 export const newProof=()=>randomBytes(32).toString('base64url');
 export function verifiedEmail(user:SessionUser){if(!user.emailVerified)throw new ApiError(403,'Verify your email address before continuing.','EMAIL_VERIFICATION_REQUIRED');return user.email.trim().toLowerCase()}
 function requireProfile(user:SessionUser){if(user.displayName.trim().length<2||user.displayName===user.email||user.displayName==='Cognito user')throw new ApiError(422,'Complete your profile with your full name before continuing.','PROFILE_REQUIRED')}
-export function scopeForRole(role:ApplicationRole,tenantId:string){return {scopeType:'TENANT' as const,scopeId:tenantId,includeDescendants:true,canView:true,canRequest:true,canApprove:['ACCOUNT_APPROVER','OU_ADMIN','SECURITY_REVIEWER','ORGANISATION_ADMIN'].includes(role),canProvision:['PROVISIONER','ORGANISATION_ADMIN'].includes(role),canRevoke:['PROVISIONER','ORGANISATION_ADMIN'].includes(role),canManageConfiguration:role==='ORGANISATION_ADMIN'}}
+export function scopeForRole(role:ApplicationRole,tenantId:string){return {scopeType:'TENANT' as const,scopeId:tenantId,includeDescendants:true,canView:true,canRequest:true,canApprove:['ACCOUNT_APPROVER','OU_ADMIN','ORGANISATION_ADMIN'].includes(role),canProvision:['PROVISIONER','ORGANISATION_ADMIN'].includes(role),canRevoke:['PROVISIONER','ORGANISATION_ADMIN'].includes(role),canManageConfiguration:role==='ORGANISATION_ADMIN'}}
 export interface InvitationMailer {send(to:string,subject:string,body:string,html?:string):Promise<void>}
 type Tx=Prisma.TransactionClient;
 export class OrganizationService {

@@ -47,6 +47,7 @@ describe('PostgreSQL repository boundary (mocked Prisma)',()=>{
   db.update.mockRejectedValue({code:'P2025'});
   await expect(requestRepository.save(request(),[])).rejects.toMatchObject({code:'REVIEW_CONFLICT'});
  });
+ it('clears the previous named approver with SQL NULL when advancing to another stage',async()=>{const value=request();value.approverUserId=undefined;value.approver='SECURITY REVIEWER';await requestRepository.save(value,[],{actorId:'reviewer',action:'APPROVE_AND_PROVISION',key:'stage-one',stage:'ACCOUNT_APPROVER'});expect(db.update).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({approverUserId:null,approver:'SECURITY REVIEWER'})}))});
  it('persists owned grant and membership cleanup metadata with request state',async()=>{
   grants.push({id:'owned-test-grant',requestId:'ORG-PR-1001',targetType:'GROUP',targetName:'Finance',targetArn:'arn:aws:iam::123456789012:group/Finance',policyArn:'GROUP_MEMBERSHIP:Finance',attachedAt:new Date().toISOString(),groupMembersAdded:['alex'],provisioningResponse:{changed:true}});
   await requestRepository.save(request());
