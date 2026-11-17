@@ -9,9 +9,9 @@ export const requestStatusPresentation:Record<RequestStatus,{label:string;tone:S
  'More information required':{label:'More information needed',tone:'warning',description:'The requester needs to respond before review continues.'},
  Approved:{label:'Approved',tone:'success',description:'The request is approved and waiting for provisioning where required.'},
  Rejected:{label:'Rejected',tone:'danger',description:'The request was declined.'},
- Provisioning:{label:'Provisioning access',tone:'info',description:'PermissionHub is applying the approved AWS change.'},
+ Provisioning:{label:'Provisioning access',tone:'info',description:'IAMOps is applying the approved AWS change.'},
  Provisioned:{label:'Access granted',tone:'success',description:'The requested access has been granted.'},
- 'Provisioning failed':{label:'Provisioning failed',tone:'danger',description:'PermissionHub could not complete the AWS change.'},
+ 'Provisioning failed':{label:'Provisioning failed',tone:'danger',description:'IAMOps could not complete the AWS change.'},
  Expired:{label:'Expired',tone:'neutral',description:'Temporary access has reached its expiry time.'},
  Revoked:{label:'Revoked',tone:'neutral',description:'The access grant was removed.'}
 };

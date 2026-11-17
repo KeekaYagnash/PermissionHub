@@ -55,7 +55,7 @@ jobs:
       - run: npm run lint
       - run: npm test --workspace backend
       - run: npm test --workspace frontend
-      - run: node --test infrastructure/scripts/ci-lib.test.mjs infrastructure/scripts/workflows.test.mjs infrastructure/scripts/prepare-check.test.mjs infrastructure/scripts/cognito-recovery.test.mjs infrastructure/scripts/log-group-recovery.test.mjs
+      - run: node --test infrastructure/scripts/ci-lib.test.mjs infrastructure/scripts/workflows.test.mjs infrastructure/scripts/prepare-check.test.mjs infrastructure/scripts/cognito-recovery.test.mjs infrastructure/scripts/log-group-recovery.test.mjs infrastructure/scripts/dev-domain.test.mjs
       - name: Validate GitHub workflow syntax and expression types
         run: |
           set -euo pipefail
@@ -162,6 +162,13 @@ jobs:
         run: |
           node "$GITHUB_WORKSPACE/infrastructure/scripts/ci.mjs" backend-config
           terraform -chdir=infrastructure/terraform/environments/$DEPLOY_ENV init -reconfigure -backend-config="bucket=$STATE_BUCKET" -backend-config="key=$STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="dynamodb_table=$LOCK_TABLE" -backend-config="encrypt=true"
+      - name: Load dev DNS credentials for the optional protected PR plan
+        if: github.base_ref == 'dev'
+        run: node infrastructure/scripts/dev-domain.mjs --github-env
+      - name: Inspect dev domain ownership before the optional PR plan
+        if: github.base_ref == 'dev'
+        working-directory: infrastructure/terraform/environments/dev
+        run: node ../../../scripts/dev-domain.mjs --check-ownership
       - name: Plan against deployed artifacts (no PR artifact uploads)
         working-directory: infrastructure/terraform/environments/${{ github.base_ref == 'dev' && 'dev' || 'prod' }}
         run: |

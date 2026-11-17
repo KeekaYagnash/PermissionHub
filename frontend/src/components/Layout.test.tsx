@@ -41,7 +41,7 @@ it('traps drawer focus, supports Escape, restores the menu button and unlocks th
  expect(document.getElementById('main-content')?.hasAttribute('inert')).toBe(true);
  expect(document.body.style.overflow).toBe('hidden');
  const last=within(dialog).getByRole('button',{name:'Switch to dark theme'});last.focus();fireEvent.keyDown(last,{key:'Tab'});
- const first=within(dialog).getByRole('link',{name:'PermissionHub overview'});
+ const first=within(dialog).getByRole('link',{name:'IAMOps overview'});
  expect(document.activeElement).toBe(first);
  fireEvent.keyDown(first,{key:'Tab',shiftKey:true});expect(document.activeElement).toBe(last);
  fireEvent.keyDown(close,{key:'Escape'});

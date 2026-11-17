@@ -7,6 +7,14 @@ mock_provider "aws" {
 run "exact_trust_and_three_roles" {
   command = plan
   assert {
+    condition     = local.role_policies["terraform-domain"].Statement[0].Action == "secretsmanager:GetSecretValue" && local.role_policies["terraform-domain"].Statement[0].Resource == "arn:aws:secretsmanager:af-south-1:143671530412:secret:Cloudflare/IAMOps-OHd0cA" && aws_iam_role_policy_attachment.deploy["terraform-domain"].role == "permissionhub-github-terraform-dev"
+    error_message = "Only the dev Terraform role receives the exact existing Cloudflare-secret read grant."
+  }
+  assert {
+    condition     = local.role_policies["terraform-domain"].Statement[2].Condition["ForAllValues:StringEquals"]["acm:DomainNames"] == ["dev.iamops.disraptor.co.za"] && local.role_policies["terraform-domain"].Statement[2].Resource == "arn:aws:acm:us-east-1:143671530412:certificate/*"
+    error_message = "Certificate requests must be confined to the dev hostname and CloudFront certificate region."
+  }
+  assert {
     condition = jsonencode([for statement in local.runtime_boundary.Statement : statement if statement.Sid == "TransactionalEmailFromExistingIdentities"]) == jsonencode([{
       Sid       = "TransactionalEmailFromExistingIdentities"
       Effect    = "Allow"

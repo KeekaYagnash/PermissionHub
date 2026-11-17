@@ -11,6 +11,11 @@ vi.mock('../lib/api',()=>({setCsrfToken:vi.fn(),api:{session:vi.fn(),setOrganiza
 beforeEach(()=>{sessionStorage.clear();vi.clearAllMocks();useAuthStore.getState().clear()});
 afterEach(cleanup);
 const open=async()=>{render(<MemoryRouter><Login/></MemoryRouter>);await screen.findByRole('button',{name:'Forgot password?'})};
+it('keeps the supplied IAMOps branding on both sign-in and registration screens',async()=>{
+ await open();expect(screen.getAllByAltText('IAMOps').map(image=>image.getAttribute('src'))).toEqual(['/iamops_black.png','/iamops_white.png']);
+ fireEvent.click(screen.getByRole('button',{name:'Create account'}));
+ expect(screen.getByRole('heading',{name:'Create your account'})).toBeTruthy();expect(screen.getAllByAltText('IAMOps')).toHaveLength(2);
+});
 it('email signup verifies email before sign-in and does not silently create an organization',async()=>{
  await open();fireEvent.click(screen.getByRole('button',{name:'Create account'}));fireEvent.change(screen.getByLabelText('Full name'),{target:{value:'New Person'}});fireEvent.change(screen.getByLabelText('Email'),{target:{value:'new@example.com'}});fireEvent.change(screen.getByLabelText('Password'),{target:{value:'Fake-password-for-tests-123!'}});fireEvent.submit(screen.getByLabelText('Full name').closest('form')!);
  expect(await screen.findByRole('heading',{name:'Verify your email'})).toBeTruthy();expect(cognito.signUpWithCognito).toHaveBeenCalledWith({email:'new@example.com',password:'Fake-password-for-tests-123!',displayName:'New Person'});fireEvent.change(screen.getByLabelText('Verification code'),{target:{value:'123456'}});fireEvent.click(screen.getByRole('button',{name:'Verify email'}));await waitFor(()=>expect(cognito.confirmCognitoSignUp).toHaveBeenCalledWith('new@example.com','123456'));expect(api.setOrganization).not.toHaveBeenCalled();

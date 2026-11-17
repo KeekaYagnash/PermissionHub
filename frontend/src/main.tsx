@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
 import './styles/refresh.css';
+import './styles/branding.css';
 import {applyThemePreference,readThemePreference} from './lib/theme';
 import {createMutationFeedback} from './lib/mutationFeedback';
 
