@@ -7,6 +7,17 @@ import {awsAccountRepository} from '../services/aws-account.repository.js';
 import {developmentUsers,identityDomain} from '../services/identity-domain.service.js';
 import {IamIdentityService,IamPolicyValidationService,IamProvisioningService} from '../services/aws/aws-services.js';
 import {awsConnectionBroker} from '../services/aws/connection-broker.service.js';
+import * as queue from '../services/provisioning-queue.service.js';
+import {requestRepository} from '../services/request.repository.js';
+import {ApiError} from '../utils/http.js';
+const rateLimitStores=vi.hoisted(()=>[] as {resetAll:()=>Promise<void>|void}[]);
+// Keep real rate limiting, but isolate its counters between HTTP workflow cases.
+vi.mock('express-rate-limit',async original=>{
+ const actual=await original<typeof import('express-rate-limit')>();
+ return {...actual,default:(options:Parameters<typeof actual.default>[0])=>{const store=new actual.MemoryStore();rateLimitStores.push(store);return actual.default({...options,store})}};
+});
+// Live mode is exercised only with a mocked dispatcher; no AWS operation is invoked.
+vi.mock('../config/env.js',async original=>({...await original<typeof import('../config/env.js')>(),liveProvisioningEnabled:true}));
 import type {AwsAccountContext,PermissionRequest} from '../types.js';
 
 const accountRecordId='00000000-0000-4000-8000-000000000008';
@@ -16,6 +27,7 @@ const addedIds:string[]=[];
 const temporaryScopeId=accountRecordId;
 
 afterEach(()=>{
+ for(const store of rateLimitStores)void store.resetAll();
  (env as {AWS_PROVISIONING_MODE:'disabled'|'dry-run'|'live'}).AWS_PROVISIONING_MODE=originalMode;
  (env as {NODE_ENV:'development'|'test'|'production'}).NODE_ENV=originalNodeEnv;
  (env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=originalLocal;
@@ -46,13 +58,62 @@ async function authenticatedAgent(userId='user_org_admin_dev'){
 }
 
 describe('safe request review HTTP workflow',()=>{
+ it('returns a legacy security-stage request to account approval and requires an explicit fresh review',async()=>{
+  (env as {AWS_PROVISIONING_MODE:'dry-run'}).AWS_PROVISIONING_MODE='dry-run';
+  const approver=developmentUsers.find(user=>user.id==='user_approver_dev')!;
+  approver.memberships[0]!.scopes.push({scopeType:'AWS_ACCOUNT',scopeId:temporaryScopeId,includeDescendants:false,canView:true,canRequest:false,canApprove:true,canProvision:false,canRevoke:false,canManageConfiguration:false});
+  const item={...pending('PR-LEGACY-SECURITY'),approver:'Security Reviewer',approverUserId:'user_security_dev',requiredApprovalStages:['ACCOUNT_APPROVER','SECURITY_REVIEWER','PROVISIONER'],completedApprovalStages:['ACCOUNT_APPROVER']};requests.unshift(item);
+  const attach=vi.spyOn(IamProvisioningService.prototype,'attach'),{agent,csrf}=await authenticatedAgent(approver.id);
+  const viewed=await agent.get(`/api/requests/${item.id}`).expect(200);
+  expect(viewed.body.data).toMatchObject({status:'Pending approval',requiredApprovalStages:['ACCOUNT_APPROVER','PROVISIONER'],completedApprovalStages:[],reviewCapabilities:{approvalAllowed:true,approvalAction:{isFinalStage:true,allowed:true}}});
+  expect(item.status).toBe('Pending approval');expect(item.approverUserId).toBe('user_security_dev');
+  const result=await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(200);
+  expect(result.body.data.request).toMatchObject({status:'Approved',requiredApprovalStages:['ACCOUNT_APPROVER','PROVISIONER'],completedApprovalStages:['ACCOUNT_APPROVER']});
+  expect(item.approverUserId).toBeUndefined();expect(attach).not.toHaveBeenCalled();
+ });
+ it('keeps Security Reviewers read-only even when old stored scopes allow approval',async()=>{
+  const item=pending('PR-AUDITOR-READ-ONLY');requests.unshift(item);
+  const {agent,csrf}=await authenticatedAgent('user_security_dev');
+  await agent.get(`/api/requests/${item.id}`).expect(200).expect(result=>expect(result.body.data.reviewCapabilities).toMatchObject({approvalAllowed:false,canApprove:false}));
+  await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(403);
+  expect(item.status).toBe('Pending approval');
+ });
+ it('lets the assigned Account Approver approve without a security stage or manual Provisioner access',async()=>{
+  (env as {AWS_PROVISIONING_MODE:'dry-run'}).AWS_PROVISIONING_MODE='dry-run';
+  const approver=developmentUsers.find(user=>user.id==='user_approver_dev')!;
+  approver.memberships[0]!.scopes.push({scopeType:'AWS_ACCOUNT',scopeId:temporaryScopeId,includeDescendants:false,canView:true,canRequest:false,canApprove:true,canProvision:false,canRevoke:false,canManageConfiguration:false});
+  const item={...pending('PR-ACCOUNT-STAGE'),approverUserId:approver.id,requiredApprovalStages:['ACCOUNT_APPROVER','SECURITY_REVIEWER','PROVISIONER']};requests.unshift(item);
+  const attach=vi.spyOn(IamProvisioningService.prototype,'attach'),{agent,csrf}=await authenticatedAgent(approver.id);
+  await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','account-stage').send({action:'APPROVE_AND_PROVISION'}).expect(200);
+  expect(item.status).toBe('Approved');expect(item.completedApprovalStages).toEqual(['ACCOUNT_APPROVER']);expect(item.requiredApprovalStages).toEqual(['ACCOUNT_APPROVER','PROVISIONER']);expect(attach).not.toHaveBeenCalled();
+  await agent.get(`/api/requests/${item.id}`).expect(200).expect(result=>expect(result.body.data.reviewCapabilities.approvalAction).toMatchObject({allowed:false}));
+  await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','account-stage').send({action:'APPROVE_AND_PROVISION'}).expect(200).expect(result=>expect(result.body.idempotent).toBe(true));
+  expect(item.completedApprovalStages).toEqual(['ACCOUNT_APPROVER']);
+ });
+ it.each([false,true])('queues only the fully approved workflow and safely replays delivery (initial failure: %s)',async fails=>{
+  (env as {AWS_PROVISIONING_MODE:'live'}).AWS_PROVISIONING_MODE='live';
+  const originalType=account.connectionType;account.connectionType='ACCESS_KEYS';account.provisioningEnabled=true;
+  try{
+   vi.spyOn(queue,'useProvisioningQueue').mockReturnValue(true);const dispatch=vi.spyOn(queue,'dispatchProvisioningJob').mockResolvedValue(undefined),redeliver=vi.spyOn(queue,'redeliverReviewJob').mockResolvedValue(undefined),save=vi.spyOn(requestRepository,'save');
+   if(fails)dispatch.mockRejectedValueOnce(new ApiError(503,'Approval saved; queue unavailable. Retry delivery.','PROVISIONING_ENQUEUE_FAILED'));
+   vi.spyOn(requestRepository,'reviewedOperation').mockResolvedValueOnce(false).mockResolvedValue(true);
+   const approver=developmentUsers.find(user=>user.id==='user_approver_dev')!;approver.memberships[0]!.scopes.push({scopeType:'AWS_ACCOUNT',scopeId:temporaryScopeId,includeDescendants:false,canView:true,canRequest:false,canApprove:true,canProvision:false,canRevoke:false,canManageConfiguration:false});
+   const item={...pending(`PR-FINAL-QUEUE-${fails}`),approverUserId:approver.id,expiryDate:undefined};requests.unshift(item);
+   const attach=vi.spyOn(IamProvisioningService.prototype,'attach'),{agent,csrf}=await authenticatedAgent(approver.id),body={action:'APPROVE_AND_PROVISION',confirmation:{phrase:`PROVISION ${item.id}`,safeTargetConfirmed:true,awsMutationConfirmed:true}};
+   await agent.get(`/api/requests/${item.id}`).expect(200).expect(result=>expect(result.body.data.reviewCapabilities.approvalAction).toMatchObject({isFinalStage:true,allowed:true,label:'Approve & provision'}));
+   await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','final-queue').send(body).expect(fails?503:202);
+   expect(item.status).toBe('Approved');expect(save).toHaveBeenCalledWith(item,[],expect.objectContaining({actorId:approver.id,job:expect.objectContaining({context:expect.objectContaining({accountRecordId:account.id,approvalId:expect.any(String)})})}));
+   await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','final-queue').send(body).expect(200).expect(result=>expect(result.body.idempotent).toBe(true));
+   expect(save).toHaveBeenCalledOnce();expect(dispatch).toHaveBeenCalledOnce();expect(redeliver).toHaveBeenCalledOnce();expect(attach).not.toHaveBeenCalled();
+  }finally{account.connectionType=originalType;account.provisioningEnabled=false;}
+ });
  it('accepts acknowledged production permanent role requests into the normal approval path, not provisioning',async()=>{
   const item=pending('PR-PRODUCTION-ROLE');item.targetType='ROLE';item.targetName='ScopedRole';item.targetArn='arn:aws:iam::143671530412:role/permissionhub/ScopedRole';item.duration='Permanent';item.expiryDate=undefined;item.role={mode:'CREATE',name:'ScopedRole',trustedPrincipalType:'AWS',trustedPrincipal:'*',trustPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'sts:AssumeRole',Principal:{AWS:'*'},Condition:{StringEquals:{'aws:PrincipalAccount':account.accountId}}}]}};
   vi.spyOn(IamIdentityService.prototype,'getRole').mockResolvedValue(undefined);
   const mutate=vi.spyOn(IamProvisioningService.prototype,'createRole'),{agent,csrf}=await authenticatedAgent();
   await agent.post('/api/requests').set('x-csrf-token',csrf).send(item).expect(422).expect(response=>expect(response.body.error.code).toBe('PERMANENT_ACKNOWLEDGEMENT_REQUIRED'));
   const response=await agent.post('/api/requests').set('x-csrf-token',csrf).send({...item,permanentAccessAcknowledged:true}).expect(201);
-  addedIds.push(response.body.data.id);expect(response.body.data).toMatchObject({status:'Draft',requiredApprovalStages:['ACCOUNT_APPROVER','SECURITY_REVIEWER','PROVISIONER']});expect(response.body.data.notes).toContain('acknowledged permanent production');expect(mutate).not.toHaveBeenCalled();
+  addedIds.push(response.body.data.id);expect(response.body.data).toMatchObject({status:'Draft',requiredApprovalStages:['ACCOUNT_APPROVER','PROVISIONER']});expect(response.body.data.notes).toContain('acknowledged permanent production');expect(mutate).not.toHaveBeenCalled();
   const unsafe={...item,permanentAccessAcknowledged:true,role:{...item.role,trustPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'sts:AssumeRole',Principal:'*'}]}}};
   await agent.post('/api/requests').set('x-csrf-token',csrf).send(unsafe).expect(422).expect(result=>expect(result.body.error.code).toBe('ROLE_TRUST_INVALID'));
  });
@@ -82,7 +143,7 @@ describe('safe request review HTTP workflow',()=>{
   const createUser=vi.spyOn(IamProvisioningService.prototype,'createUser').mockResolvedValue({mode:'local',operation:'CreateUser',changed:true,userName:'new.person',userArn:item.targetArn,awsRequestId:'mock-user'});
   vi.spyOn(IamProvisioningService.prototype,'createCustomerPolicy').mockResolvedValue({mode:'local',changed:true,policyArn:'arn:aws:iam::143671530412:policy/permissionhub/TestPolicy',awsRequestId:'mock-policy'});
   const attach=vi.spyOn(IamProvisioningService.prototype,'attach').mockResolvedValue({mode:'local',operation:'AttachRolePolicy',changed:true,awsRequestId:'mock-attach'});
-  const {agent,csrf}=await authenticatedAgent('user_security_dev');
+  const {agent,csrf}=await authenticatedAgent('user_org_admin_dev');
   const response=await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(200);
   expect(response.body.data.request.status).toBe('Provisioned');await agent.get(`/api/requests/${item.id}`).expect(200);const list=await agent.get('/api/requests?pageSize=100').expect(200);expect(list.body.data.some((row:{id:string})=>row.id===item.id)).toBe(true);
   if(scenario==='CREATE_ROLE'){expect(createRole).toHaveBeenCalledOnce();expect(attach).toHaveBeenCalledWith(expect.objectContaining({targetType:'ROLE'}));}
@@ -123,13 +184,13 @@ describe('safe request review HTTP workflow',()=>{
   expect(attach).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
  });
 
- it('requires separate provisioning permission for the combined action',async()=>{
+ it('lets a final scoped approver run a non-mutating dry-run without granting direct provisioning permission',async()=>{
   (env as {AWS_PROVISIONING_MODE:'dry-run'}).AWS_PROVISIONING_MODE='dry-run';
   const approver=developmentUsers.find(item=>item.id==='user_approver_dev')!;approver.memberships[0]!.scopes.push({scopeType:'AWS_ACCOUNT',scopeId:temporaryScopeId,includeDescendants:false,canView:true,canRequest:false,canApprove:true,canProvision:false,canRevoke:false,canManageConfiguration:false});
   const item=pending('PR-TEST-NO-PROVISION');requests.unshift(item);
   const {agent,csrf}=await authenticatedAgent('user_approver_dev');
-  await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(403).expect(response=>expect(response.body.error).toMatchObject({code:'PROVISIONING_FORBIDDEN'}));
-  expect(item.status).toBe('Pending approval');
+  await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(200).expect(response=>expect(response.body.data.provisioning).toMatchObject({mode:'dry-run',executed:false}));
+  expect(item.status).toBe('Approved');await agent.post(`/api/requests/${item.id}/provision`).set('x-csrf-token',csrf).send({}).expect(403);
  });
 
  it('approves and produces a non-mutating dry-run plan idempotently',async()=>{
@@ -171,7 +232,7 @@ describe('safe request review HTTP workflow',()=>{
   vi.spyOn(IamIdentityService.prototype,'getUser').mockResolvedValue({id:'mock',type:'USER',name:item.targetName,arn:item.targetArn,path:'/',createdAt:new Date().toISOString(),attachedPolicies:[],inlinePolicies:[]});
   vi.spyOn(IamPolicyValidationService.prototype,'validate').mockResolvedValue({mode:'LIVE',findings:[]});
   const create=vi.spyOn(IamProvisioningService.prototype,'createCustomerPolicy'),attach=vi.spyOn(IamProvisioningService.prototype,'attach');
-  const {agent,csrf}=await authenticatedAgent('user_security_dev');
+  const {agent,csrf}=await authenticatedAgent('user_org_admin_dev');
   await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).send({action:'APPROVE_AND_PROVISION'}).expect(422).expect(response=>expect(response.body.error.code).toBe('PROVISIONING_PREFLIGHT_FAILED'));
   expect(item.status).toBe('Provisioning failed');expect(create).not.toHaveBeenCalled();expect(attach).not.toHaveBeenCalled();await agent.get(`/api/requests/${item.id}`).expect(200);
  });
@@ -184,8 +245,8 @@ describe('safe request review HTTP workflow',()=>{
   const policyValidation=vi.spyOn(IamPolicyValidationService.prototype,'validate').mockResolvedValue({mode:'LIVE',findings:[]});
   const create=vi.spyOn(IamProvisioningService.prototype,'createCustomerPolicy').mockResolvedValue({mode:'local',changed:true,policyArn,awsRequestId:'mock-create-request'});
   const attach=vi.spyOn(IamProvisioningService.prototype,'attach').mockResolvedValue({mode:'local',operation:'AttachUserPolicy',changed:true,awsRequestId:'mock-attach-request'});
-  const {agent,csrf}=await authenticatedAgent('user_security_dev');
+  const {agent,csrf}=await authenticatedAgent('user_org_admin_dev');
   const response=await agent.post(`/api/requests/${item.id}/review`).set('x-csrf-token',csrf).set('idempotency-key','local-provision-operation').send({action:'APPROVE_AND_PROVISION'}).expect(200);
-   expect(response.body.data).toMatchObject({request:{status:'Provisioned',completedApprovalStages:['SECURITY_REVIEWER']},provisioning:{mode:'local',executed:true}});expect(validate).toHaveBeenCalledWith(expect.anything(),account.id,'READ',true);expect(identity).toHaveBeenCalledWith(item.targetName);expect(policyValidation).toHaveBeenCalledTimes(1);expect(create).toHaveBeenCalledTimes(1);expect(attach).toHaveBeenCalledTimes(1);
+   expect(response.body.data).toMatchObject({request:{status:'Provisioned',completedApprovalStages:['ACCOUNT_APPROVER']},provisioning:{mode:'local',executed:true}});expect(validate).toHaveBeenCalledWith(expect.anything(),account.id,'READ',true);expect(identity).toHaveBeenCalledWith(item.targetName);expect(policyValidation).toHaveBeenCalledTimes(1);expect(create).toHaveBeenCalledTimes(1);expect(attach).toHaveBeenCalledTimes(1);
  });
 });

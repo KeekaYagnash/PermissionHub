@@ -23,7 +23,8 @@ describe('transactional request email',()=>{
   const pending=request(),approver=user('approver'),otherTenant=user('unrelated','ORGANISATION_ADMIN','another-tenant'),self=user('requester','ORGANISATION_ADMIN'),wrongScope=user('wrong');wrongScope.memberships[0]!.scopes[0]!.scopeId='another-account';
   expect(notificationRecipients(pending,'REVIEW_REQUIRED',[approver,otherTenant,self,wrongScope]).map(item=>item.id)).toEqual(['approver']);
   expect(notificationRecipients({...pending,approverUserId:'another'},'REVIEW_REQUIRED',[approver])).toEqual([]);
-  expect(notificationRecipients({...pending,requiredApprovalStages:['SECURITY_REVIEWER']},'REVIEW_REQUIRED',[approver])).toEqual([]);
+  expect(notificationRecipients({...pending,requiredApprovalStages:['SECURITY_REVIEWER']},'REVIEW_REQUIRED',[approver]).map(item=>item.id)).toEqual(['approver']);
+  expect(notificationRecipients(pending,'REVIEW_REQUIRED',[user('auditor','SECURITY_REVIEWER')])).toEqual([]);
  });
  it('notifies only the current active requester membership about decisions',()=>{
   const value=request('Approved'),requester=user('requester','REQUESTER'),admin=user('admin','ORGANISATION_ADMIN');

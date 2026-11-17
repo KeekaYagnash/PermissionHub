@@ -5,7 +5,7 @@ import {ApiError} from '../utils/http.js';
 import {logger} from '../config/logger.js';
 import {randomUUID} from 'node:crypto';
 import type {PermissionRequest} from '../types.js';
-export interface QueuedProvisioningContext {actorUserId:string;tenantId:string;accountRecordId:string;correlationId?:string}
+export interface QueuedProvisioningContext {actorUserId:string;tenantId:string;accountRecordId:string;correlationId?:string;approvalId?:string}
 export const useProvisioningQueue=()=>Boolean(process.env.PROVISIONING_QUEUE_URL)&&process.env.NODE_ENV!=='test'&&process.env.VITEST!=='true';
 export const jobContext=(req:AuthenticatedRequest):QueuedProvisioningContext=>({actorUserId:req.sessionUser!.id,tenantId:req.tenantId!,accountRecordId:req.awsAccountContext!.id,correlationId:req.correlationId});
 export async function dispatchProvisioningJob(jobId:string){

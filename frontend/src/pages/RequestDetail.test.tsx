@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import {renderToStaticMarkup} from 'react-dom/server';
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
-import {cleanup,render,screen,within} from '@testing-library/react';
+import {cleanup,fireEvent,render,screen,within,waitFor} from '@testing-library/react';
 import {MemoryRouter,Route,Routes} from 'react-router-dom';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import RequestDetail,{CapabilityChecklist,isLiveConfirmationReady} from './RequestDetail';
@@ -21,6 +21,25 @@ function renderDetail(value:PermissionRequest=request){const client=new QueryCli
 
 beforeEach(()=>{useAuthStore.setState({session,loading:false});vi.mocked(api.request).mockResolvedValue(request);vi.mocked(api.approvers).mockResolvedValue([]);vi.mocked(api.activity).mockResolvedValue({data:[],pagination:{page:1,pageSize:10,total:0,totalPages:1}} as any);vi.mocked(api.connection).mockResolvedValue({} as any)});
 afterEach(()=>{cleanup();vi.clearAllMocks();useAuthStore.getState().clear()});
+
+it('uses the server stage action for an Account Approver without Provisioner access, prevents double clicks and refreshes the next stage',async()=>{
+ const action={action:'APPROVE_AND_PROVISION' as const,currentStage:'ACCOUNT_APPROVER',nextStage:'ORGANISATION_ADMIN',isFinalStage:false,allowed:true,label:'Approve & send to organisation admin',reason:'Approval advances this request to organisation admin. No AWS changes will be made.',willProvision:false};
+ const value={...request,reviewCapabilities:{...capabilities,canApprove:true,approvalAllowed:true,canProvision:false,provisioningAllowed:false,provisioningMode:'live' as const,approvalAction:action}};
+ vi.mocked(api.request).mockResolvedValue(value);let complete!:(value:{request:PermissionRequest})=>void;vi.mocked(api.review).mockImplementation(()=>new Promise(resolve=>{complete=resolve}));renderDetail(value);
+ const button=await screen.findByRole('button',{name:action.label});expect((button as HTMLButtonElement).disabled).toBe(false);expect(screen.getByRole('button',{name:'Request more information'})).toBeTruthy();
+ fireEvent.click(button);fireEvent.click(button);await waitFor(()=>expect(api.review).toHaveBeenCalledOnce());expect((button as HTMLButtonElement).disabled).toBe(true);expect(screen.getByText('This request is being processed. Please wait.')).toBeTruthy();expect(screen.queryByRole('dialog')).toBeNull();
+ const updated={...value,approver:'Organisation Admin',completedApprovalStages:['ACCOUNT_APPROVER'],reviewCapabilities:{...value.reviewCapabilities,approvalAllowed:false,approvalAction:{...action,currentStage:'ORGANISATION_ADMIN',nextStage:undefined,isFinalStage:true,allowed:false,label:'Approve & provision',reason:'This stage requires organisation admin; your account role is not eligible.'}}};vi.mocked(api.request).mockResolvedValue(updated);complete({request:updated});
+ await waitFor(()=>expect((screen.getByRole('button',{name:'Approve & provision'}) as HTMLButtonElement).disabled).toBe(true));expect(screen.getAllByText(/This stage requires organisation admin/).length).toBeGreaterThan(0);expect(api.provision).not.toHaveBeenCalled();
+});
+it('explains account-scope denial and enables a final approval from server capability rather than a cached Provisioner role',async()=>{
+ const action={action:'APPROVE_AND_PROVISION' as const,currentStage:'ACCOUNT_APPROVER',isFinalStage:true,allowed:false,label:'Approve & provision',reason:'You are not assigned approval access for this AWS account.',willProvision:true};const value={...request,reviewCapabilities:{...capabilities,approvalAction:action}};vi.mocked(api.request).mockResolvedValue(value);const view=renderDetail(value);
+ expect((await screen.findByRole('button',{name:action.label}) as HTMLButtonElement).disabled).toBe(true);expect(screen.getAllByText(action.reason).length).toBeGreaterThan(0);view.unmount();
+ vi.mocked(api.request).mockResolvedValue({...value,reviewCapabilities:{...value.reviewCapabilities,approvalAllowed:true,approvalAction:{...action,allowed:true,reason:'Final approval queues the approved change.'}}});renderDetail(value);expect((await screen.findByRole('button',{name:action.label}) as HTMLButtonElement).disabled).toBe(false);
+});
+it('keeps a failed queue delivery actionable and retries the same persisted review operation',async()=>{
+ const action={action:'APPROVE_AND_PROVISION' as const,currentStage:'ACCOUNT_APPROVER',isFinalStage:true,allowed:true,label:'Approve and validate change',reason:'Final approval.',willProvision:false};const value={...request,reviewCapabilities:{...capabilities,approvalAllowed:true,approvalAction:action}};vi.mocked(api.request).mockResolvedValue(value);vi.mocked(api.review).mockImplementationOnce(async()=>{vi.mocked(api.request).mockResolvedValue({...value,status:'Approved'});throw Object.assign(new Error('Approval was saved, but delivery failed. Retry queue delivery.'),{response:{data:{error:{code:'PROVISIONING_ENQUEUE_FAILED',message:'Approval was saved, but delivery failed. Retry queue delivery.'}}}})}).mockResolvedValueOnce({request:{...value,status:'Approved'}});
+ renderDetail(value);fireEvent.click(await screen.findByRole('button',{name:action.label}));const retry=await screen.findByRole('button',{name:'Retry queue delivery'});await waitFor(()=>expect((retry as HTMLButtonElement).disabled).toBe(false));fireEvent.click(retry);await waitFor(()=>expect(api.review).toHaveBeenCalledTimes(2));expect(vi.mocked(api.review).mock.calls[1]?.[3]).toBe(vi.mocked(api.review).mock.calls[0]?.[3]);expect(api.provision).not.toHaveBeenCalled();
+});
 describe('request provisioning capability UI',()=>{
  it('renders an approver label containing capital T without treating it as a date',async()=>{
   const value={...request,id:'TES-PR-1001',approver:'ACCOUNT_APPROVER'};vi.mocked(api.request).mockResolvedValue(value);renderDetail(value);
