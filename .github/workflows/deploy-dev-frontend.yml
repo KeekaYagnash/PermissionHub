@@ -80,8 +80,11 @@ jobs:
           VITE_COGNITO_DOMAIN: ${{ steps.config.outputs.DOMAIN }}
           VITE_COGNITO_CLIENT_ID: ${{ steps.config.outputs.CLIENT }}
           VITE_COGNITO_PROVIDERS: ${{ steps.config.outputs.PROVIDERS }}
-          VITE_COGNITO_REDIRECT_URI: ${{ steps.config.outputs.URL }}/auth/callback
-          VITE_COGNITO_LOGOUT_URI: ${{ steps.config.outputs.URL }}/login
+          # Dev registers both exact origins in Cognito. Use the existing origin-based
+          # fallback so PKCE/sessionStorage also works when visiting the AWS hostname.
+          # Production retains its fixed, configured redirect URLs.
+          VITE_COGNITO_REDIRECT_URI: ${{ inputs.environment != 'dev' && format('{0}/auth/callback', steps.config.outputs.URL) || '' }}
+          VITE_COGNITO_LOGOUT_URI: ${{ inputs.environment != 'dev' && format('{0}/login', steps.config.outputs.URL) || '' }}
       - name: Deploy assets first; publish HTML last
         env:
           BUCKET: ${{ steps.config.outputs.BUCKET }}

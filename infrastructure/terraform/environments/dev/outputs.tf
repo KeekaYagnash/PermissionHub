@@ -25,4 +25,5 @@ output "interface_vpc_endpoint_ids" { value = { for service, endpoint in aws_vpc
 output "frontend_bucket_name" { value = module.frontend_hosting.bucket_name }
 output "frontend_cloudfront_distribution_id" { value = module.frontend_hosting.cloudfront_distribution_id }
 output "frontend_cloudfront_domain_name" { value = module.frontend_hosting.cloudfront_domain_name }
-output "frontend_url" { value = module.frontend_hosting.frontend_url }
+output "frontend_url" { value = local.canonical_frontend_url }
+output "frontend_certificate_arn" { value = aws_acm_certificate.frontend.arn }

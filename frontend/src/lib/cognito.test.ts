@@ -7,6 +7,15 @@ const jwt=(payload:Record<string,unknown>)=>`header.${btoa(JSON.stringify(payloa
 beforeEach(()=>{vi.resetModules();sessionStorage.clear();vi.stubEnv('VITE_AUTH_MODE','cognito');vi.stubEnv('VITE_COGNITO_CLIENT_ID','test-client');vi.stubEnv('VITE_COGNITO_DOMAIN','test.auth.af-south-1.amazoncognito.com');vi.stubEnv('VITE_COGNITO_REGION','af-south-1');vi.stubEnv('VITE_COGNITO_PROVIDERS','[]');vi.stubGlobal('crypto',webcrypto)});
 afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs()});
 describe('Cognito registration, recovery and federation contract',()=>{
+ it('keeps PKCE callbacks on the current dev custom or CloudFront origin when deployment overrides are empty',async()=>{
+  vi.stubEnv('VITE_COGNITO_REDIRECT_URI','');vi.stubEnv('VITE_COGNITO_LOGOUT_URI','');
+  for(const origin of ['https://dev.iamops.disraptor.co.za','https://d2xbbgyohbpz8s.cloudfront.net']){
+   vi.resetModules();vi.stubGlobal('location',{origin});
+   const auth=await import('./cognito'),url=new URL(await auth.buildCognitoAuthorizationUrl());
+   expect(url.searchParams.get('redirect_uri')).toBe(`${origin}/auth/callback`);
+   expect(sessionStorage.getItem('permissionhub.pkce.verifier')).toBeTruthy();
+  }
+ });
  it('registers, confirms and resends verification without creating organisation membership',async()=>{
   const fetch=vi.fn().mockResolvedValue(response({}));vi.stubGlobal('fetch',fetch);const auth=await import('./cognito');
   await auth.signUpWithCognito({email:' NEW@Example.com ',password:'Never-a-real-password-123!',displayName:'New Person'});await auth.confirmCognitoSignUp('NEW@example.com',' 123456 ');await auth.resendCognitoConfirmation('NEW@example.com');

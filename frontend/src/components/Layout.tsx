@@ -10,6 +10,7 @@ import { useAuthStore } from '../store/auth';
 import { shouldAutoSelectAccount } from '../lib/auth';
 import {OrganizationPicker} from './OrganizationPicker';
 import {applicationVersion} from '../lib/version';
+import {ProductLogo} from './ProductLogo';
 
 const icons:Record<NavKey,ComponentType<{size?:number}>>={
  overview:Home,
@@ -76,7 +77,7 @@ function AppHeader({connection,context,contextError,drawerOpen}:{connection:any;
  </>;
 }
 
-function Brand(){return <Link to="/" className="brand" aria-label="PermissionHub overview"><img className="product-icon" src="/DR_Icon_Colour.png" alt=""/><div><strong>PermissionHub</strong><span>AWS permission requests</span></div></Link>}
+function Brand(){return <Link to="/" className="brand" aria-label="IAMOps overview"><div className="product-brand"><ProductLogo/><span>AWS permission requests</span></div></Link>}
 
 
 function DesktopNavigation(){

@@ -1,5 +1,20 @@
 mock_provider "aws" {}
 mock_provider "random" {}
+mock_provider "aws" { alias = "cloudfront_certificate" }
+mock_provider "cloudflare" {}
+
+override_resource {
+  target = aws_acm_certificate.frontend
+  values = {
+    arn = "arn:aws:acm:us-east-1:143671530412:certificate/00000000-0000-0000-0000-000000000000"
+    domain_validation_options = [{
+      domain_name           = "dev.iamops.disraptor.co.za"
+      resource_record_name  = "_validation.dev.iamops.disraptor.co.za."
+      resource_record_type  = "CNAME"
+      resource_record_value = "_validation.acm-validations.aws."
+    }]
+  }
+}
 
 run "foundation_plan_does_not_need_lambda_packages" {
   command = plan
@@ -27,6 +42,14 @@ run "reviewed_dev_ci_configuration_plans_without_aws" {
   assert {
     condition     = var.environment == "dev" && var.aws_region == "af-south-1" && var.lambda_artifact_bucket == "permissionhub-dev-lambda-artifacts"
     error_message = "CI configuration must target the expected development environment."
+  }
+  assert {
+    condition     = local.lambda_common_environment.FRONTEND_URL == "https://dev.iamops.disraptor.co.za"
+    error_message = "Dev must use the canonical URL while retaining the CloudFront hostname."
+  }
+  assert {
+    condition     = cloudflare_dns_record.frontend.proxied == false && cloudflare_dns_record.frontend.type == "CNAME" && aws_acm_certificate.frontend.domain_name == "dev.iamops.disraptor.co.za"
+    error_message = "Only the dev hostname should use a DNS-only CNAME and a dedicated certificate."
   }
   assert {
     condition     = var.runtime_permissions_boundary_arn == "arn:aws:iam::143671530412:policy/permissionhub-github-runtime-boundary-dev"

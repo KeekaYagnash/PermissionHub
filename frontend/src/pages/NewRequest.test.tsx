@@ -219,7 +219,7 @@ describe('New Request IAM user creation flow',()=>{
   await waitFor(()=>expect((screen.getByLabelText(/request title/i) as HTMLInputElement).value).toBe('Create demo users'));
   await userEvent.selectOptions(screen.getByLabelText(/approver/i),'Security Reviewer');
   await waitFor(()=>expect((screen.getByLabelText(/approver/i) as HTMLSelectElement).value).toBe('Security Reviewer'));
-  fireEvent.change(screen.getByLabelText(/business justification/i),{target:{value:'Create temporary demo IAM users for the PermissionHub onboarding validation.'}});
+  fireEvent.change(screen.getByLabelText(/business justification/i),{target:{value:'Create temporary demo IAM users for the IAMOps onboarding validation.'}});
   await waitFor(()=>expect((screen.getByRole('button',{name:/continue/i}) as HTMLButtonElement).disabled).toBe(false));
   await userEvent.click(screen.getByRole('button',{name:/continue/i}));
   expect(await screen.findByText(/Create 2 IAM users in Disraptor Production without assigning permissions or group membership/i)).toBeTruthy();
@@ -228,7 +228,7 @@ describe('New Request IAM user creation flow',()=>{
  it('shows a structured backend error and allows retry after request persistence fails',async()=>{
   const created={id:'DIS-PR-1001',targetType:'USER',targetName:'demo.one',items:[],submittedAt:'2026-09-11T12:00:00.000Z',requiredApprovalStages:['ACCOUNT_APPROVER']};
   vi.mocked(api.createRequest)
-   .mockRejectedValueOnce(new ClientApiError({message:'PermissionHub could not persist the permission request. No request was created.',status:500,code:'REQUEST_PERSISTENCE_FAILED',correlationId:'corr-123'}))
+   .mockRejectedValueOnce(new ClientApiError({message:'IAMOps could not persist the permission request. No request was created.',status:500,code:'REQUEST_PERSISTENCE_FAILED',correlationId:'corr-123'}))
    .mockResolvedValueOnce(created as any);
   vi.mocked(api.submitRequest).mockResolvedValue(created as any);
   renderNewRequest();

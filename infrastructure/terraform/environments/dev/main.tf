@@ -15,7 +15,7 @@ locals {
     SES_REGION                             = "us-east-1"
     NODE_ENV                               = "production"
     APP_AWS_REGION                         = var.aws_region
-    FRONTEND_URL                           = module.frontend_hosting.frontend_url
+    FRONTEND_URL                           = local.canonical_frontend_url
     AWS_CONNECTION_MODE                    = "manual"
     ENABLE_AWS_DEMO_DATA                   = "false"
     AUTH_ENABLED                           = "true"
@@ -114,8 +114,8 @@ module "cognito" {
   source                   = "../../modules/cognito"
   name                     = local.name
   environment              = var.environment
-  callback_urls            = distinct(concat(var.callback_urls, ["${module.frontend_hosting.frontend_url}/auth/callback"]))
-  logout_urls              = distinct(concat(var.logout_urls, ["${module.frontend_hosting.frontend_url}/login"]))
+  callback_urls            = distinct(concat(var.callback_urls, [for origin in local.frontend_origins : "${origin}/auth/callback"]))
+  logout_urls              = distinct(concat(var.logout_urls, [for origin in local.frontend_origins : "${origin}/login"]))
   enable_cognito_domain    = var.enable_cognito_domain
   cognito_domain_prefix    = var.cognito_domain_prefix
   deletion_protection      = "INACTIVE"
@@ -232,7 +232,7 @@ module "api_gateway" {
   lambda_function_name  = module.api_lambda.function_name
   cognito_issuer_url    = module.cognito.issuer_url
   cognito_app_client_id = module.cognito.app_client_id
-  allowed_origins       = distinct(concat(var.allowed_origins, [module.frontend_hosting.frontend_url]))
+  allowed_origins       = distinct(concat(var.allowed_origins, local.frontend_origins))
   allowed_methods       = var.allowed_methods
   allowed_headers       = var.allowed_headers
   log_retention_days    = var.log_retention_days
@@ -240,9 +240,11 @@ module "api_gateway" {
 }
 
 module "frontend_hosting" {
-  source = "../../modules/frontend_hosting"
-  name   = local.name
-  tags   = local.tags
+  aliases             = [local.frontend_domain]
+  acm_certificate_arn = aws_acm_certificate_validation.frontend.certificate_arn
+  source              = "../../modules/frontend_hosting"
+  name                = local.name
+  tags                = local.tags
 }
 
 module "monitoring" {

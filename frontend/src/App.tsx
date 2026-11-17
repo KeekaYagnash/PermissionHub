@@ -26,7 +26,7 @@ const CompleteProfile=lazy(()=>import('./pages/CompleteProfile'));
 const Organizations=lazy(()=>import('./pages/Organizations'));
 
 export default function App(){
- return <><FeedbackCenter/><PublicThemeControl/><Suspense fallback={<div className="loading-screen">Loading PermissionHub</div>}>
+ return <><FeedbackCenter/><PublicThemeControl/><Suspense fallback={<div className="loading-screen">Loading IAMOps</div>}>
   <Routes>
    <Route path="login" element={<Login/>}/>
    <Route path="auth/callback" element={<Login/>}/>

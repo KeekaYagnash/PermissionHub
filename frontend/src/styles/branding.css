@@ -1,0 +1,36 @@
+/* Supplied 3000px-square logos have transparent canvas around the same artwork.
+   This view frame removes that empty space without editing or distorting either PNG. */
+.product-brand { min-width: 0; max-width: 100%; }
+.product-logo {
+  display: block;
+  position: relative;
+  width: 180px;
+  max-width: 100%;
+  aspect-ratio: 2340 / 800;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.product-logo img {
+  position: absolute;
+  width: 128.205128%;
+  height: auto;
+  max-width: none;
+  left: -18.376068%;
+  top: -137.5%;
+  object-fit: contain;
+}
+.product-logo .product-logo-light { display: block; }
+.product-logo .product-logo-dark { display: none; }
+:root[data-theme="dark"] .product-logo .product-logo-light { display: none; }
+:root[data-theme="dark"] .product-logo .product-logo-dark { display: block; }
+.brand .product-brand > span:last-child { display: block; font-size: 11px; line-height: 1.4; }
+.desktop-sidebar .brand .product-logo { display: block; }
+.auth-brand .product-logo { width: 230px; }
+.auth-brand .product-brand > small { display: block; margin-top: 6px; color: var(--ph-text-secondary); }
+@media (min-width: 1024px) and (max-height: 650px) {
+  .desktop-sidebar .brand .product-brand > span:last-child { display: none; }
+}
+@media (max-width: 1023px) {
+  .mobile-header .brand .product-logo { width: clamp(80px, 23vw, 140px); }
+  .mobile-header .brand .product-brand > span:last-child { display: none; }
+}

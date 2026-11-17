@@ -51,6 +51,8 @@ jobs:
         with:
           terraform_version: 1.9.8
           terraform_wrapper: false
+      - name: Load dev Cloudflare credentials securely and verify DNS access
+        run: node infrastructure/scripts/dev-domain.mjs --github-env
       - name: Initialize and verify the application backend
         working-directory: infrastructure/terraform/environments/dev
         run: |
@@ -59,11 +61,14 @@ jobs:
           node ../../../scripts/ci.mjs identity
           node ../../../scripts/ci.mjs config "$RUNNER_TEMP/config.tfvars.json"
           terraform validate
+      - name: Reject unmanaged custom-domain resources before planning
+        working-directory: infrastructure/terraform/environments/dev
+        run: node ../../../scripts/dev-domain.mjs --check-ownership
       - name: Plan infrastructure without Lambda artifact dependencies
         working-directory: infrastructure/terraform/environments/dev
         run: |
           umask 077
-          terraform plan -input=false -lock-timeout=5m -var-file="$RUNNER_TEMP/config.tfvars.json" -target=module.networking -target=module.security -target=module.rds -target=module.rds_proxy -target=module.secrets -target=module.cognito -target=module.queues -target=module.frontend_hosting -target=aws_vpc_endpoint.interface -out="$RUNNER_TEMP/foundation.tfplan"
+          terraform plan -input=false -lock-timeout=5m -var-file="$RUNNER_TEMP/config.tfvars.json" -target=module.networking -target=module.security -target=module.rds -target=module.rds_proxy -target=module.secrets -target=module.cognito -target=module.queues -target=module.frontend_hosting -target=aws_vpc_endpoint.interface -target=cloudflare_dns_record.frontend -out="$RUNNER_TEMP/foundation.tfplan"
           terraform show -json "$RUNNER_TEMP/foundation.tfplan" > "$RUNNER_TEMP/foundation-plan.json"
           node ../../../scripts/ci.mjs foundation-guard "$RUNNER_TEMP/foundation-plan.json"
       - name: Apply the exact runner-local infrastructure plan
@@ -117,6 +122,8 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN || 'arn:aws:iam::143671530412:role/permissionhub-github-terraform-dev' }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Load dev DNS provider credentials for remaining Terraform plans
+        run: node infrastructure/scripts/dev-domain.mjs --github-env
       - name: Create or update migration Lambda before updating the API
         working-directory: infrastructure/terraform/environments/dev
         run: |

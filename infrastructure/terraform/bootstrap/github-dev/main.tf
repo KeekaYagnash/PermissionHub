@@ -71,7 +71,7 @@ locals {
       } }
     }]
   }
-  terraform_policies = { for name in ["state", "network", "identity", "platform", "discovery", "logging"] :
+  terraform_policies = { for name in ["state", "network", "identity", "platform", "discovery", "logging", "domain"] :
     name => jsondecode(templatefile("${path.module}/policies/terraform-${name}.json.tftpl", local.template_variables))
   }
   role_policies = merge(
