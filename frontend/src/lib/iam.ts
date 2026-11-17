@@ -72,12 +72,16 @@ export function validateApprovalDeadline(value:string,nowDate=new Date()){
 export function validatePolicyJson(text:string){
  const errors:string[]=[];let document:any;
  try{document=JSON.parse(text)}catch(error:any){return {valid:false,document:undefined,errors:[`JSON syntax error: ${error.message}`],warnings:[]}}
+ if(!document||typeof document!=='object'||Array.isArray(document))return {valid:false,document:undefined,errors:['Policy JSON must be an object.'],warnings:[]};
  if(document.Version!=='2012-10-17')errors.push('Policy Version must be 2012-10-17.');
  const statements=Array.isArray(document.Statement)?document.Statement:[document.Statement].filter(Boolean);
  if(!statements.length)errors.push('Policy must contain at least one Statement.');
  const warnings:string[]=[];
  statements.forEach((statement:any,index:number)=>{
   const label=`Statement ${index+1}`;
+  if(!statement||typeof statement!=='object'||Array.isArray(statement)){errors.push(`${label}: must be an object.`);return}
+  if(statement.Action!==undefined&&statement.NotAction!==undefined)errors.push(`${label}: cannot contain both Action and NotAction.`);
+  if(statement.Resource!==undefined&&statement.NotResource!==undefined)errors.push(`${label}: cannot contain both Resource and NotResource.`);
   if(!['Allow','Deny'].includes(statement.Effect))errors.push(`${label}: Effect must be Allow or Deny.`);
   if(!statement.Action&&!statement.NotAction)errors.push(`${label}: Action or NotAction is required.`);
   if(!statement.Resource&&!statement.NotResource)errors.push(`${label}: Resource or NotResource is required.`);

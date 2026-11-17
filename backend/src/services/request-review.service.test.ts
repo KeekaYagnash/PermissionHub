@@ -1,13 +1,18 @@
 import {afterEach,describe,expect,it} from 'vitest';
 import {env} from '../config/env.js';
 import type {AwsAccountContext,PermissionRequest} from '../types.js';
-import {buildProvisioningPlan,parseReviewInput,provisioningMode,reviewCapabilities} from './request-review.service.js';
+import {buildProvisioningPlan,parseReviewInput,provisioningMode,reviewCapabilities,validateGeneratedPolicyDocument} from './request-review.service.js';
 
 const originalMode=env.AWS_PROVISIONING_MODE,originalNodeEnv=env.NODE_ENV,originalLocal=env.ALLOW_LOCAL_PROVISIONING,originalDemoBypass=env.DEMO_PROVISIONING_BYPASS_ENABLED,originalGlobal=env.GLOBAL_PROVISIONING_ENABLED;
 afterEach(()=>{(env as {AWS_PROVISIONING_MODE:'disabled'|'dry-run'|'live'}).AWS_PROVISIONING_MODE=originalMode;(env as {NODE_ENV:'development'|'test'|'production'}).NODE_ENV=originalNodeEnv;(env as {ALLOW_LOCAL_PROVISIONING:boolean}).ALLOW_LOCAL_PROVISIONING=originalLocal;(env as {DEMO_PROVISIONING_BYPASS_ENABLED:boolean}).DEMO_PROVISIONING_BYPASS_ENABLED=originalDemoBypass;(env as {GLOBAL_PROVISIONING_ENABLED:boolean}).GLOBAL_PROVISIONING_ENABLED=originalGlobal});
 
 const account:AwsAccountContext={id:'00000000-0000-4000-8000-000000000008',tenantId:'tenant_disraptor_dev',accountId:'143671530412',accountName:'Disraptor',accountType:'PRODUCTION',environment:'production',riskTier:'HIGH',region:'af-south-1',connectionType:'LOCAL_DEFAULT_CREDENTIALS',connectionStatus:'CONNECTED',provisioningStatus:'DISABLED',provisioningEnabled:false};
 const request=(overrides:Partial<PermissionRequest>={}):PermissionRequest=>({id:'PR-1008',tenantId:account.tenantId,awsAccountId:account.id,requesterUserId:'user_requester_dev',requester:'Permission Requester',approver:'Organisation Admin',title:'List finance bucket',targetType:'USER',targetName:'maya.chen',targetArn:'arn:aws:iam::143671530412:user/maya.chen',items:[{mode:'SPECIFIC_ACTIONS',generatedPolicyName:'PH-PR-1008-1',actions:['s3:ListBucket'],generatedPolicyDocument:{Version:'2012-10-17',Statement:[{Effect:'Allow',Action:['s3:ListBucket'],Resource:'*'}]}}],scope:{type:'ALL',resources:[]},duration:'8 hours',startDate:new Date().toISOString(),expiryDate:new Date(Date.now()+28_800_000).toISOString(),priority:'Normal',justification:'Inspect finance bucket contents for the approved support task.',status:'Pending approval',createdAt:new Date().toISOString(),timeline:[],...overrides});
+
+it('accepts valid single-statement custom JSON but blocks structural conflicts, not wildcard-resource warnings',()=>{
+ expect(validateGeneratedPolicyDocument({Version:'2012-10-17',Statement:{Effect:'Allow',Action:'s3:ListBucket',Resource:'*'}})).toEqual([]);
+ expect(validateGeneratedPolicyDocument({Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'s3:ListBucket',NotAction:'iam:*',Resource:'*'}]})).toContain('Statement 1 cannot define both Action and NotAction.');
+});
 
 describe('review action comment validation',()=>{
  it.each(['APPROVE','APPROVE_AND_PROVISION'] as const)('%s accepts an omitted or blank comment',action=>{

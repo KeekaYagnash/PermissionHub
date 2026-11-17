@@ -2,6 +2,13 @@ import { describe,expect,it } from 'vitest';
 import { calculateExpiry,fuzzyPolicies,validateApprovalDeadline,validateArnList,validatePolicyJson } from './iam';
 import type { IamPolicySummary } from '../types';
 
+it('keeps structural policy errors distinct from non-blocking wildcard warnings',()=>{
+ expect(validatePolicyJson('null')).toMatchObject({valid:false});
+ expect(validatePolicyJson('{"Version":"2012-10-17","Statement":[null]}')).toMatchObject({valid:false});
+ expect(validatePolicyJson(JSON.stringify({Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'s3:ListBucket',Resource:'*'}]}))).toMatchObject({valid:true,errors:[],warnings:['Statement 1: wildcard resource detected.']});
+ expect(validatePolicyJson(JSON.stringify({Version:'2012-10-17',Statement:[{Effect:'Allow',Action:'s3:ListBucket',NotAction:'iam:*',Resource:'*'}]})).valid).toBe(false);
+});
+
 const policies:IamPolicySummary[]=[
  {policyName:'AmazonS3ReadOnlyAccess',arn:'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess',description:'Read only access to S3',type:'AWS_MANAGED',currentVersion:'v1',createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z',attachmentCount:0,services:['s3'],accessLevels:['Read'],risk:{level:'Moderate',flags:[],services:['s3'],accessLevels:['Read']},deprecated:false},
  {policyName:'CloudWatchReadOnlyAccess',arn:'arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess',description:'View CloudWatch metrics',type:'AWS_MANAGED',currentVersion:'v1',createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z',attachmentCount:0,services:['cloudwatch'],accessLevels:['Read'],risk:{level:'Low',flags:[],services:['cloudwatch'],accessLevels:['Read']},deprecated:false}
