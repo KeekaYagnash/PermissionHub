@@ -77,7 +77,7 @@ function AppHeader({connection,context,contextError,drawerOpen}:{connection:any;
  </>;
 }
 
-function Brand(){return <Link to="/" className="brand" aria-label="IAMOps overview"><div className="product-brand"><ProductLogo/><span>AWS permission requests</span></div></Link>}
+function Brand(){return <Link to="/" className="brand" aria-label="IAMOps overview"><div className="product-brand"><ProductLogo/></div></Link>}
 
 
 function DesktopNavigation(){

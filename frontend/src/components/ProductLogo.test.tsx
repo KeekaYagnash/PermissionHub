@@ -31,3 +31,10 @@ it('rebrands public metadata while retaining the exact Disraptor favicon link an
  const favicon=readFileSync(resolve('public/DR_Icon_Colour.png'));
  expect(createHash('sha256').update(favicon).digest('hex')).toBe('b0b772f93541d1f9590302933a467288b7685daaf98de4a1a8e3bdcf86cf4784');
 });
+it('keeps logos visible after removing the shell subtitle and shares blue action-button states',()=>{
+ const branding=readFileSync(resolve('src/styles/branding.css'),'utf8');expect(branding).not.toContain('.product-brand > span:last-child');
+ const css=readFileSync(resolve('src/styles/workflow-minimal.css'),'utf8');
+ expect(css).toContain(':is(.btn,.primary-action,.submit-button,.wizard-actions button,.button-stack button)');
+ expect(css).toContain('background:var(--brand-blue)!important');expect(css).toContain('color:#fff!important');
+ expect(css).toContain(':hover:not(:disabled):not([aria-disabled="true"])');expect(css).toContain('outline:3px solid var(--brand-blue)');expect(css).toContain('color:var(--ph-text-disabled)!important');
+});

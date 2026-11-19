@@ -28,6 +28,9 @@ it('preserves capability-filtered desktop navigation and existing request routes
  expect(await screen.findByRole('heading',{name:'Requests content'})).toBeTruthy();
  expect(screen.getByRole('link',{name:'Skip to main content'}).getAttribute('href')).toBe('#main-content');
 });
+it('keeps IAMOps artwork without the redundant shell subtitle',()=>{
+ open();expect(screen.queryByText('AWS permission requests')).toBeNull();expect(screen.getAllByAltText('IAMOps').length).toBeGreaterThan(0);
+});
 it('shows package-derived version and separately destructive sign-out controls with stacked profile details',()=>{
  open();expect(screen.queryByRole('img',{name:'Disraptor'})).toBeNull();expect(screen.getByText(`Version ${applicationVersion}`)).toBeTruthy();for(const button of screen.getAllByRole('button',{name:'Sign out'}))expect(button.classList.contains('sign-out-btn')).toBe(true);const profile=document.querySelector('.desktop-account-header .user-menu a')!;expect(profile.querySelector('strong')?.textContent).toBe('Test Reviewer');expect(profile.querySelector('small')?.textContent).toBe('test@example.invalid');
 });

@@ -61,3 +61,27 @@
   .request-workflow :is(pre,textarea,.json-editor){max-width:100%;overflow-x:auto}
   .linked-invitation>.btn{flex:1 1 180px}
 }
+
+/* Shared action colours only; leave navigation, tabs, sizing and layout intact.
+   Important colours override legacy page-specific gradients and variant rules. */
+:is(.btn,.primary-action,.submit-button,.wizard-actions button,.button-stack button):not(:disabled):not([aria-disabled="true"]) {
+  background:var(--brand-blue)!important;
+  border-color:var(--brand-blue)!important;
+  color:#fff!important;
+}
+:is(.btn,.primary-action,.submit-button,.wizard-actions button,.button-stack button):hover:not(:disabled):not([aria-disabled="true"]) {
+  background:color-mix(in srgb,var(--brand-blue) 82%,#000)!important;
+  border-color:color-mix(in srgb,var(--brand-blue) 82%,#000)!important;
+  filter:none;
+}
+:is(.btn,.primary-action,.submit-button,.wizard-actions button,.button-stack button):focus-visible {
+  outline:3px solid var(--brand-blue);
+  outline-offset:3px;
+}
+:is(.btn,.primary-action,.submit-button,.wizard-actions button,.button-stack button):disabled,
+:is(.btn,.primary-action,.submit-button)[aria-disabled="true"] {
+  background:var(--ph-bg-muted)!important;
+  border-color:var(--ph-border)!important;
+  color:var(--ph-text-disabled)!important;
+  cursor:not-allowed;
+}
